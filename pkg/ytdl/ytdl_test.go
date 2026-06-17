@@ -19,6 +19,7 @@ func TestBuildArgs(t *testing.T) {
 		output       string
 		videoURL     string
 		ytdlArgs     []string
+		bilibili     feed.BilibiliConfig
 		expect       []string
 	}{
 		{
@@ -55,6 +56,36 @@ func TestBuildArgs(t *testing.T) {
 				"--add-header", "Origin:https://www.bilibili.com",
 				"--add-header", "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
 				"--output", "/tmp/1", "https://www.bilibili.com/video/BV1e3JK6ZEjF",
+			},
+		},
+		{
+			name:     "Audio Bilibili with browser cookies",
+			format:   model.FormatAudio,
+			output:   "/tmp/1",
+			videoURL: "https://www.bilibili.com/video/BV1tGjV68E7h",
+			ytdlArgs: []string{"--cookies-from-browser", "chrome"},
+			expect: []string{
+				"--extract-audio", "--audio-format", "mp3", "--format", "bestaudio",
+				"--add-header", "Referer:https://www.bilibili.com/",
+				"--add-header", "Origin:https://www.bilibili.com",
+				"--add-header", "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
+				"--cookies-from-browser", "chrome",
+				"--output", "/tmp/1", "https://www.bilibili.com/video/BV1tGjV68E7h",
+			},
+		},
+		{
+			name:     "Audio Bilibili with cookies file",
+			format:   model.FormatAudio,
+			output:   "/tmp/1",
+			videoURL: "https://www.bilibili.com/video/BV1tGjV68E7h",
+			bilibili: feed.BilibiliConfig{CookiesFile: "/app/config/bilibili-cookies.txt"},
+			expect: []string{
+				"--extract-audio", "--audio-format", "mp3", "--format", "bestaudio",
+				"--add-header", "Referer:https://www.bilibili.com/",
+				"--add-header", "Origin:https://www.bilibili.com",
+				"--add-header", "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
+				"--cookies", "/app/config/bilibili-cookies.txt",
+				"--output", "/tmp/1", "https://www.bilibili.com/video/BV1tGjV68E7h",
 			},
 		},
 		{
@@ -134,6 +165,7 @@ func TestBuildArgs(t *testing.T) {
 				CustomFormat:  tst.customFormat,
 				MaxHeight:     tst.maxHeight,
 				YouTubeDLArgs: tst.ytdlArgs,
+				Bilibili:      tst.bilibili,
 			}, &model.Episode{
 				VideoURL: tst.videoURL,
 			}, tst.output)

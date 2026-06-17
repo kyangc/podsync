@@ -1,11 +1,16 @@
 package builder
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -33,6 +38,25 @@ func newBilibiliAPIClient(client *http.Client, baseURL string) *bilibiliAPIClien
 		client:  client,
 		baseURL: baseURL,
 	}
+}
+
+func (c *bilibiliAPIClient) withCookiesFile(path string) (*bilibiliAPIClient, error) {
+	if path == "" {
+		return c, nil
+	}
+
+	jar, err := newBilibiliCookieJar(path)
+	if err != nil {
+		return nil, err
+	}
+
+	client := *c.client
+	client.Jar = jar
+
+	return &bilibiliAPIClient{
+		client:  &client,
+		baseURL: c.baseURL,
+	}, nil
 }
 
 func (c *bilibiliAPIClient) get(path string, query url.Values, result any) error {
@@ -67,6 +91,96 @@ func (c *bilibiliAPIClient) get(path string, query url.Values, result any) error
 	}
 
 	return nil
+}
+
+func newBilibiliCookieJar(path string) (*cookiejar.Jar, error) {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create bilibili cookie jar")
+	}
+	if err := loadNetscapeCookies(jar, path); err != nil {
+		return nil, err
+	}
+
+	return jar, nil
+}
+
+func loadNetscapeCookies(jar *cookiejar.Jar, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return errors.Wrap(err, "failed to open bilibili cookies file")
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		httpOnly := false
+		if strings.HasPrefix(line, "#HttpOnly_") {
+			line = strings.TrimPrefix(line, "#HttpOnly_")
+			httpOnly = true
+		} else if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		parts := strings.Split(line, "\t")
+		if len(parts) != 7 {
+			continue
+		}
+
+		cookieURL, cookie, err := netscapeCookie(parts, httpOnly)
+		if err != nil {
+			continue
+		}
+		jar.SetCookies(cookieURL, []*http.Cookie{cookie})
+	}
+	if err := scanner.Err(); err != nil {
+		return errors.Wrap(err, "failed to read bilibili cookies file")
+	}
+
+	return nil
+}
+
+func netscapeCookie(parts []string, httpOnly bool) (*url.URL, *http.Cookie, error) {
+	domain := strings.TrimSpace(parts[0])
+	if domain == "" {
+		return nil, nil, errors.New("empty cookie domain")
+	}
+
+	includeSubdomains := strings.EqualFold(parts[1], "TRUE")
+	cookiePath := parts[2]
+	secure := strings.EqualFold(parts[3], "TRUE")
+	expiresUnix, err := strconv.ParseInt(parts[4], 10, 64)
+	if err != nil {
+		return nil, nil, err
+	}
+	name := parts[5]
+	value := parts[6]
+	if name == "" {
+		return nil, nil, errors.New("empty cookie name")
+	}
+
+	scheme := "http"
+	if secure {
+		scheme = "https"
+	}
+	host := strings.TrimPrefix(domain, ".")
+	cookieURL := &url.URL{Scheme: scheme, Host: host, Path: cookiePath}
+	cookie := &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     cookiePath,
+		Secure:   secure,
+		HttpOnly: httpOnly,
+	}
+	if includeSubdomains || strings.HasPrefix(domain, ".") {
+		cookie.Domain = domain
+	}
+	if expiresUnix > 0 {
+		cookie.Expires = time.Unix(expiresUnix, 0)
+	}
+
+	return cookieURL, cookie, nil
 }
 
 func setBilibiliRequestHeaders(req *http.Request) {

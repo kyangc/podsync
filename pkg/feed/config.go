@@ -38,6 +38,8 @@ type Config struct {
 	Custom Custom `toml:"custom"`
 	// List of additional youtube-dl arguments passed at download time
 	YouTubeDLArgs []string `toml:"youtube_dl_args"`
+	// Bilibili-specific feed options
+	Bilibili BilibiliConfig `toml:"bilibili"`
 	// Post episode download hooks - executed after each episode is successfully downloaded
 	// Multiple hooks can be configured and will execute in sequence
 	// Example:
@@ -67,6 +69,11 @@ type Config struct {
 type CustomFormat struct {
 	YouTubeDLFormat string `toml:"youtube_dl_format"`
 	Extension       string `toml:"extension"`
+}
+
+type BilibiliConfig struct {
+	IncludeUpowerExclusive bool   `toml:"include_upower_exclusive"`
+	CookiesFile            string `toml:"cookies_file"`
 }
 
 type Filters struct {

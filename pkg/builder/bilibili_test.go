@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -50,6 +54,74 @@ func TestBilibiliBuildUserFeedSkipsUpowerVideos(t *testing.T) {
 	require.Equal(t, model.EpisodeNew, got.Episodes[0].Status)
 }
 
+func TestBilibiliBuildUserFeedIncludesUpowerVideosWhenEnabled(t *testing.T) {
+	server := newBilibiliTestServer(t)
+	builder := &BilibiliBuilder{
+		client: newBilibiliAPIClient(server.Client(), server.URL),
+	}
+
+	got, err := builder.Build(context.Background(), &feed.Config{
+		URL:      "https://space.bilibili.com/123",
+		PageSize: 1,
+		Bilibili: feed.BilibiliConfig{
+			IncludeUpowerExclusive: true,
+		},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, got.Episodes, 1)
+	require.Equal(t, "BVUSER1", got.Episodes[0].ID)
+	require.Equal(t, "Exclusive video", got.Episodes[0].Title)
+}
+
+func TestBilibiliAPIClientUsesCookiesFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Contains(t, r.Header.Get("Cookie"), "SESSDATA=secret")
+		writeJSON(t, w, map[string]any{
+			"code": 0,
+			"data": map[string]any{
+				"card": map[string]any{
+					"name": "Bili Creator",
+				},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	parsedURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	cookiesFile := writeNetscapeCookieFile(t, parsedURL.Hostname(), "SESSDATA", "secret")
+	client, err := newBilibiliAPIClient(server.Client(), server.URL).withCookiesFile(cookiesFile)
+	require.NoError(t, err)
+
+	_, err = client.user("123")
+	require.NoError(t, err)
+}
+
+func TestBilibiliCookiesFileMatchesAPISubdomain(t *testing.T) {
+	cookiesFile := writeRawCookieFile(t, strings.Join([]string{
+		"# Netscape HTTP Cookie File",
+		strings.Join([]string{
+			"#HttpOnly_.bilibili.com",
+			"TRUE",
+			"/",
+			"TRUE",
+			strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10),
+			"SESSDATA",
+			"secret",
+		}, "\t"),
+	}, "\n"))
+
+	jar, err := newBilibiliCookieJar(cookiesFile)
+	require.NoError(t, err)
+
+	cookies := jar.Cookies(&url.URL{Scheme: "https", Host: "api.bilibili.com"})
+	require.Len(t, cookies, 1)
+	require.Equal(t, "SESSDATA", cookies[0].Name)
+	require.Equal(t, "secret", cookies[0].Value)
+}
+
 func TestBilibiliBuildSeasonAndSeriesFeeds(t *testing.T) {
 	server := newBilibiliTestServer(t)
 	builder := &BilibiliBuilder{
@@ -79,6 +151,33 @@ func TestBilibiliBuildSeasonAndSeriesFeeds(t *testing.T) {
 	require.Equal(t, "https://cdn.example.com/face.jpg", series.CoverArt)
 	require.Len(t, series.Episodes, 1)
 	require.Equal(t, "BVSERIES1", series.Episodes[0].ID)
+}
+
+func writeNetscapeCookieFile(t *testing.T, domain, name, value string) string {
+	t.Helper()
+
+	expires := time.Now().Add(time.Hour).Unix()
+	return writeRawCookieFile(t, strings.Join([]string{
+		"# Netscape HTTP Cookie File",
+		strings.Join([]string{
+			domain,
+			"FALSE",
+			"/",
+			"FALSE",
+			strconv.FormatInt(expires, 10),
+			name,
+			value,
+		}, "\t"),
+	}, "\n"))
+}
+
+func writeRawCookieFile(t *testing.T, content string) string {
+	t.Helper()
+
+	path := t.TempDir() + "/cookies.txt"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+
+	return path
 }
 
 func TestBilibiliLiveSmoke(t *testing.T) {

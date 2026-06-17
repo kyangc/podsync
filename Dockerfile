@@ -1,13 +1,20 @@
-FROM golang:1.25 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25 AS builder
 
-ENV TAG="nightly"
-ENV COMMIT=""
+ARG TAG="nightly"
+ARG COMMIT=""
+ARG TARGETOS=linux
+ARG TARGETARCH
+
+ENV TAG="${TAG}"
+ENV COMMIT="${COMMIT}"
 
 WORKDIR /build
 
 COPY . .
 
-RUN make build
+RUN targetarch="${TARGETARCH:-$(go env GOARCH)}" && \
+    CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${targetarch}" make build && \
+    test -s bin/podsync
 
 # Download yt-dlp
 RUN wget -O /usr/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp && \

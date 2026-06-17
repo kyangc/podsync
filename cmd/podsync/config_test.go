@@ -209,6 +209,29 @@ func TestNewKeyProvidersRejectsEmptyNonBilibiliTokens(t *testing.T) {
 	assert.Contains(t, err.Error(), "youtube")
 }
 
+func TestLoadBilibiliFeedOptions(t *testing.T) {
+	const file = `
+[server]
+data_dir = "/data"
+
+[feeds]
+  [feeds.bili]
+  url = "https://space.bilibili.com/10835521"
+  [feeds.bili.bilibili]
+  include_upower_exclusive = true
+  cookies_file = "/app/config/bilibili-cookies.txt"
+`
+	path := setup(t, file)
+	defer os.Remove(path)
+
+	config, err := LoadConfig(path)
+	require.NoError(t, err)
+
+	bili := config.Feeds["bili"].Bilibili
+	assert.True(t, bili.IncludeUpowerExclusive)
+	assert.Equal(t, "/app/config/bilibili-cookies.txt", bili.CookiesFile)
+}
+
 func TestApplyDefaults(t *testing.T) {
 	const file = `
 [server]

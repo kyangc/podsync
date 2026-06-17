@@ -6,7 +6,7 @@ all: build test
 #
 # Build Podsync CLI binary
 # Example:
-# 	$ GOOS=amd64 make build
+# 	$ GOOS=linux GOARCH=amd64 make build
 #
 
 GOARCH ?= $(shell go env GOARCH)
@@ -27,7 +27,7 @@ LDFLAGS := "-s -w -X 'main.version=${TAG}' -X 'main.commit=${COMMIT}' -X 'main.d
 
 .PHONY: build
 build:
-	go build -trimpath -tags netgo -ldflags ${LDFLAGS} -o bin/podsync ./cmd/podsync
+	GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -tags netgo -ldflags ${LDFLAGS} -o bin/podsync ./cmd/podsync
 
 #
 # Build a local Docker image

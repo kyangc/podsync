@@ -297,7 +297,7 @@ func buildArgs(feedConfig *feed.Config, episode *model.Episode, outputFilePath s
 		args = append(args, "--audio-format", feedConfig.CustomFormat.Extension, "--format", feedConfig.CustomFormat.YouTubeDLFormat)
 	}
 
-	args = append(args, defaultDownloadArgs(episode)...)
+	args = append(args, defaultDownloadArgs(feedConfig, episode)...)
 
 	// Insert additional per-feed youtube-dl arguments
 	args = append(args, feedConfig.YouTubeDLArgs...)
@@ -306,16 +306,22 @@ func buildArgs(feedConfig *feed.Config, episode *model.Episode, outputFilePath s
 	return args
 }
 
-func defaultDownloadArgs(episode *model.Episode) []string {
+func defaultDownloadArgs(feedConfig *feed.Config, episode *model.Episode) []string {
 	if !isBilibiliURL(episode.VideoURL) {
 		return nil
 	}
 
-	return []string{
+	args := []string{
 		"--add-header", "Referer:https://www.bilibili.com/",
 		"--add-header", "Origin:https://www.bilibili.com",
 		"--add-header", "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
 	}
+
+	if feedConfig.Bilibili.CookiesFile != "" {
+		args = append(args, "--cookies", feedConfig.Bilibili.CookiesFile)
+	}
+
+	return args
 }
 
 func isBilibiliURL(rawURL string) bool {

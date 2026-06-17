@@ -2,9 +2,9 @@
 
 ![Podsync](docs/img/logo.png)
 
-[![](https://github.com/mxpv/podsync/workflows/CI/badge.svg)](https://github.com/mxpv/podsync/actions?query=workflow%3ACI)
-[![Nightly](https://github.com/mxpv/podsync/actions/workflows/nightly.yml/badge.svg)](https://github.com/mxpv/podsync/actions/workflows/nightly.yml)
-[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/mxpv/podsync)](https://github.com/mxpv/podsync/releases)
+[![](https://github.com/kyangc/podsync/workflows/CI/badge.svg)](https://github.com/kyangc/podsync/actions?query=workflow%3ACI)
+[![Nightly](https://github.com/kyangc/podsync/actions/workflows/nightly.yml/badge.svg)](https://github.com/kyangc/podsync/actions/workflows/nightly.yml)
+[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/kyangc/podsync)](https://github.com/kyangc/podsync/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/mxpv/podsync)](https://goreportcard.com/report/github.com/mxpv/podsync)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/mxpv)](https://github.com/sponsors/mxpv)
 [![Patreon](https://img.shields.io/badge/support-patreon-E6461A.svg)](https://www.patreon.com/podsync)
@@ -56,7 +56,7 @@ brew install yt-dlp ffmpeg go
 Nightly builds uploaded every midnight from the `main` branch and available for testing:
 
 ```bash
-$ docker run -it --rm ghcr.io/mxpv/podsync:nightly
+$ docker run -it --rm ghcr.io/kyangc/podsync:nightly
 ```
 
 ### 🔑 Access tokens
@@ -96,6 +96,10 @@ Bilibili user spaces and space lists are also supported:
 ```toml
 [feeds.bilibili_user]
 url = "https://space.bilibili.com/291222529"
+
+[feeds.bilibili_upower]
+url = "https://space.bilibili.com/10835521"
+bilibili = { include_upower_exclusive = true, cookies_file = "/app/config/bilibili-cookies.txt" }
 
 [feeds.bilibili_season]
 url = "https://space.bilibili.com/7380321/lists/678635?type=season"
@@ -142,6 +146,9 @@ url = "https://space.bilibili.com/291222529"
 youtube_dl_args = ["--cookies", "/app/config/cookies.txt"]
 ```
 
+For Bilibili feeds, setting `bilibili.cookies_file` uses the same cookies file for both Bilibili API requests and
+`yt-dlp` downloads.
+
 ## 🚀 How to run
 
 
@@ -150,7 +157,7 @@ youtube_dl_args = ["--cookies", "/app/config/cookies.txt"]
 Make sure you have created the file `config.toml`. Also note the location of the `data_dir`. Depending on the operating system, you may have to choose a different location since `/app/data` might be not writable.
 
 ```
-$ git clone https://github.com/mxpv/podsync
+$ git clone https://github.com/kyangc/podsync
 $ cd podsync
 $ make
 $ ./bin/podsync --config config.toml
@@ -180,13 +187,13 @@ Use the editor [Visual Studio Code](https://code.visualstudio.com/) and install 
 ### 🐳 Run via Docker:
 
 ```
-$ docker pull ghcr.io/mxpv/podsync:latest
+$ docker pull ghcr.io/kyangc/podsync:latest
 $ docker run \
     -p 8080:8080 \
     -v $(pwd)/data:/app/data/ \
     -v $(pwd)/db:/app/db/ \
     -v $(pwd)/config.toml:/app/config.toml \
-    ghcr.io/mxpv/podsync:latest
+    ghcr.io/kyangc/podsync:latest
 ```
 
 ### 🐳 Run via Docker Compose:
@@ -195,7 +202,7 @@ $ docker run \
 $ cat docker-compose.yml
 services:
   podsync:
-    image: ghcr.io/mxpv/podsync
+    image: ghcr.io/kyangc/podsync
     container_name: podsync
     volumes:
       - ./data:/app/data/

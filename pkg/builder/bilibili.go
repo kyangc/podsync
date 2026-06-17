@@ -39,18 +39,22 @@ func (b *BilibiliBuilder) Build(_ context.Context, cfg *feed.Config) (*model.Fee
 		ItemURL:         cfg.URL,
 	}
 
-	archives, err := b.populateFeedInfo(result, info)
+	client, err := b.client.withCookiesFile(cfg.Bilibili.CookiesFile)
 	if err != nil {
 		return nil, err
 	}
-	if err := b.populateEpisodes(result, archives); err != nil {
+	archives, err := b.populateFeedInfo(client, result, info)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.populateEpisodes(client, result, archives, cfg.Bilibili.IncludeUpowerExclusive); err != nil {
 		return nil, err
 	}
 
 	return result, nil
 }
 
-func (b *BilibiliBuilder) populateFeedInfo(result *model.Feed, info model.Info) ([]bilibiliArchive, error) {
+func (b *BilibiliBuilder) populateFeedInfo(client *bilibiliAPIClient, result *model.Feed, info model.Info) ([]bilibiliArchive, error) {
 	switch info.LinkType {
 	case model.TypeSeason:
 		mid, seasonID, err := splitBilibiliListID(info.ItemID)
@@ -58,11 +62,11 @@ func (b *BilibiliBuilder) populateFeedInfo(result *model.Feed, info model.Info) 
 			return nil, err
 		}
 
-		user, err := b.client.user(mid)
+		user, err := client.user(mid)
 		if err != nil {
 			return nil, err
 		}
-		season, err := b.client.seasonArchives(mid, seasonID, 1, maxBilibiliPageSize)
+		season, err := client.seasonArchives(mid, seasonID, 1, maxBilibiliPageSize)
 		if err != nil {
 			return nil, err
 		}
@@ -81,15 +85,15 @@ func (b *BilibiliBuilder) populateFeedInfo(result *model.Feed, info model.Info) 
 			return nil, err
 		}
 
-		user, err := b.client.user(mid)
+		user, err := client.user(mid)
 		if err != nil {
 			return nil, err
 		}
-		series, err := b.client.series(seriesID)
+		series, err := client.series(seriesID)
 		if err != nil {
 			return nil, err
 		}
-		archives, err := b.client.seriesArchives(mid, seriesID, 1, maxBilibiliPageSize)
+		archives, err := client.seriesArchives(mid, seriesID, 1, maxBilibiliPageSize)
 		if err != nil {
 			return nil, err
 		}
@@ -103,11 +107,11 @@ func (b *BilibiliBuilder) populateFeedInfo(result *model.Feed, info model.Info) 
 		return archives.Data.Archives, nil
 
 	case model.TypeUser:
-		user, err := b.client.user(info.ItemID)
+		user, err := client.user(info.ItemID)
 		if err != nil {
 			return nil, err
 		}
-		archives, err := b.client.userArchives(info.ItemID, 1, maxBilibiliPageSize)
+		archives, err := client.userArchives(info.ItemID, 1, maxBilibiliPageSize)
 		if err != nil {
 			return nil, err
 		}
@@ -125,17 +129,17 @@ func (b *BilibiliBuilder) populateFeedInfo(result *model.Feed, info model.Info) 
 	}
 }
 
-func (b *BilibiliBuilder) populateEpisodes(result *model.Feed, archives []bilibiliArchive) error {
+func (b *BilibiliBuilder) populateEpisodes(client *bilibiliAPIClient, result *model.Feed, archives []bilibiliArchive, includeUpowerExclusive bool) error {
 	for _, archive := range archives {
 		if len(result.Episodes) >= result.PageSize {
 			return nil
 		}
 
-		episode, err := b.client.episode(archive.Bvid)
+		episode, err := client.episode(archive.Bvid)
 		if err != nil {
 			return err
 		}
-		if episode.Data.IsUpowerExclusive {
+		if episode.Data.IsUpowerExclusive && !includeUpowerExclusive {
 			continue
 		}
 
