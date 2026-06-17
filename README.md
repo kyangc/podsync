@@ -9,17 +9,17 @@
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/mxpv)](https://github.com/sponsors/mxpv)
 [![Patreon](https://img.shields.io/badge/support-patreon-E6461A.svg)](https://www.patreon.com/podsync)
 
-Podsync - is a simple, free service that lets you listen to any YouTube / Vimeo channels, playlists or user videos in
-podcast format.
+Podsync - is a simple, free service that lets you listen to online video channels, playlists or user videos in podcast
+format.
 
 Podcast applications have a rich functionality for content delivery - automatic download of new episodes,
 remembering last played position, sync between devices and offline listening. This functionality is not available
-on YouTube and Vimeo. So the aim of Podsync is to make your life easier and enable you to view/listen to content on
-any device in podcast client.
+on video platforms. So the aim of Podsync is to make your life easier and enable you to view/listen to content on any
+device in podcast client.
 
 ## ✨ Features
 
-- Works with YouTube and Vimeo.
+- Works with YouTube, Vimeo, SoundCloud, Twitch, and Bilibili.
 - Supports feeds configuration: video/audio, high/low quality, max video height, etc.
 - mp3 encoding
 - Update scheduler supports cron expressions
@@ -61,7 +61,8 @@ $ docker run -it --rm ghcr.io/mxpv/podsync:nightly
 
 ### 🔑 Access tokens
 
-In order to query YouTube or Vimeo API you have to obtain an API token first.
+In order to query YouTube or Vimeo API you have to obtain an API token first. Bilibili feeds do not require an official
+API token, but they are still subject to platform rate limits.
 
 - [How to get YouTube API key](https://elfsight.com/blog/2016/12/how-to-get-youtube-api-key-tutorial/)
 - [Generate an access token for Vimeo](https://developer.vimeo.com/api/guides/start#generate-access-token)
@@ -90,6 +91,19 @@ youtube = "PASTE YOUR API KEY HERE" # See config.toml.example for environment va
     url = "https://www.youtube.com/channel/UCxC5Ls6DwqV0e-CYcAKkExQ"
 ```
 
+Bilibili user spaces and space lists are also supported:
+
+```toml
+[feeds.bilibili_user]
+url = "https://space.bilibili.com/291222529"
+
+[feeds.bilibili_season]
+url = "https://space.bilibili.com/7380321/lists/678635?type=season"
+
+[feeds.bilibili_series]
+url = "https://space.bilibili.com/7458285/lists/1067956?type=series"
+```
+
 If you want to hide Podsync behind reverse proxy like nginx, you can use `hostname` field:
 
 ```toml
@@ -115,6 +129,18 @@ Podsync supports the following environment variables for configuration and API k
 | `PODSYNC_VIMEO_API_KEY`      | Vimeo API key(s), space-separated for rotation                                            | `key1` or `key1 key2`        |
 | `PODSYNC_SOUNDCLOUD_API_KEY` | SoundCloud API key(s), space-separated for rotation                                       | `soundcloud_key1 soundcloud_key2`             |
 | `PODSYNC_TWITCH_API_KEY`     | Twitch API credentials in the format `CLIENT_ID:CLIENT_SECRET`, space-separated for multi | `id1:secret1 id2:secret2`                     |
+
+### Passing Cookies To yt-dlp
+
+Some sources, including Bilibili videos behind login or platform challenges, only work when `yt-dlp` can reuse a signed-in
+browser session. Podsync forwards `feeds.<ID>.youtube_dl_args` directly to `yt-dlp`, so you can pass cookies with a
+Netscape-format cookies file:
+
+```toml
+[feeds.members]
+url = "https://space.bilibili.com/291222529"
+youtube_dl_args = ["--cookies", "/app/config/cookies.txt"]
+```
 
 ## 🚀 How to run
 

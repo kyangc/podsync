@@ -45,6 +45,19 @@ func TestBuildArgs(t *testing.T) {
 			expect:   []string{"--extract-audio", "--audio-format", "mp3", "--format", "bestaudio", "--output", "/tmp/1", "http://url"},
 		},
 		{
+			name:     "Audio Bilibili with default headers",
+			format:   model.FormatAudio,
+			output:   "/tmp/1",
+			videoURL: "https://www.bilibili.com/video/BV1e3JK6ZEjF",
+			expect: []string{
+				"--extract-audio", "--audio-format", "mp3", "--format", "bestaudio",
+				"--add-header", "Referer:https://www.bilibili.com/",
+				"--add-header", "Origin:https://www.bilibili.com",
+				"--add-header", "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
+				"--output", "/tmp/1", "https://www.bilibili.com/video/BV1e3JK6ZEjF",
+			},
+		},
+		{
 			name:     "Video unknown quality",
 			format:   model.FormatVideo,
 			output:   "/tmp/1",

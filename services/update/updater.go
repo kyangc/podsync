@@ -102,13 +102,13 @@ func (u *Manager) updateFeed(ctx context.Context, feedConfig *feed.Config) error
 		return errors.Wrapf(err, "failed to parse URL: %s", feedConfig.URL)
 	}
 
-	keyProvider, ok := u.keys[info.Provider]
-	if !ok {
-		return errors.Errorf("key provider %q not loaded", info.Provider)
+	key, err := u.providerKey(info.Provider)
+	if err != nil {
+		return err
 	}
 
 	// Create an updater for this feed type
-	provider, err := builder.New(ctx, info.Provider, keyProvider.Get(), u.downloader)
+	provider, err := builder.New(ctx, info.Provider, key, u.downloader)
 	if err != nil {
 		return err
 	}
@@ -151,6 +151,19 @@ func (u *Manager) updateFeed(ctx context.Context, feedConfig *feed.Config) error
 
 	log.Debug("successfully saved updates to storage")
 	return nil
+}
+
+func (u *Manager) providerKey(provider model.Provider) (string, error) {
+	if provider == model.ProviderBilibili {
+		return "", nil
+	}
+
+	keyProvider, ok := u.keys[provider]
+	if !ok {
+		return "", errors.Errorf("key provider %q not loaded", provider)
+	}
+
+	return keyProvider.Get(), nil
 }
 
 func (u *Manager) fetchEpisodes(ctx context.Context, feedConfig *feed.Config) ([]*model.Episode, error) {

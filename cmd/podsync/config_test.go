@@ -188,6 +188,27 @@ data_dir = "/data"
 	require.Len(t, config.Tokens["vimeo"], 0)
 }
 
+func TestNewKeyProvidersSkipsBilibiliTokens(t *testing.T) {
+	keys, err := newKeyProviders(map[model.Provider]StringSlice{
+		model.ProviderBilibili: {""},
+		model.ProviderYoutube:  {"youtube-key"},
+	})
+
+	require.NoError(t, err)
+	require.NotContains(t, keys, model.ProviderBilibili)
+	require.Contains(t, keys, model.ProviderYoutube)
+	assert.Equal(t, "youtube-key", keys[model.ProviderYoutube].Get())
+}
+
+func TestNewKeyProvidersRejectsEmptyNonBilibiliTokens(t *testing.T) {
+	_, err := newKeyProviders(map[model.Provider]StringSlice{
+		model.ProviderYoutube: {""},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "youtube")
+}
+
 func TestApplyDefaults(t *testing.T) {
 	const file = `
 [server]

@@ -9,6 +9,34 @@ import (
 	"github.com/mxpv/podsync/pkg/model"
 )
 
+func TestParseBilibiliURL(t *testing.T) {
+	link, _ := url.ParseRequestURI("https://space.bilibili.com/291222529")
+	kind, id, err := parseBilibiliURL(link)
+	require.NoError(t, err)
+	require.Equal(t, model.TypeUser, kind)
+	require.Equal(t, "291222529", id)
+
+	link, _ = url.ParseRequestURI("https://space.bilibili.com/7380321/lists/678635?type=season")
+	kind, id, err = parseBilibiliURL(link)
+	require.NoError(t, err)
+	require.Equal(t, model.TypeSeason, kind)
+	require.Equal(t, "7380321:678635", id)
+
+	link, _ = url.ParseRequestURI("https://space.bilibili.com/7458285/lists/1067956?type=series")
+	kind, id, err = parseBilibiliURL(link)
+	require.NoError(t, err)
+	require.Equal(t, model.TypeSeries, kind)
+	require.Equal(t, "7458285:1067956", id)
+}
+
+func TestParseURLWithBilibili(t *testing.T) {
+	info, err := ParseURL("https://space.bilibili.com/291222529")
+	require.NoError(t, err)
+	require.Equal(t, model.ProviderBilibili, info.Provider)
+	require.Equal(t, model.TypeUser, info.LinkType)
+	require.Equal(t, "291222529", info.ItemID)
+}
+
 func TestParseYoutubeURL_Playlist(t *testing.T) {
 	link, _ := url.ParseRequestURI("https://www.youtube.com/playlist?list=PLCB9F975ECF01953C")
 	kind, id, err := parseYoutubeURL(link)

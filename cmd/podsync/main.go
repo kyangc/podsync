@@ -165,13 +165,9 @@ func main() {
 
 	// Run updater thread
 	log.Debug("creating key providers")
-	keys := map[model.Provider]feed.KeyProvider{}
-	for name, list := range cfg.Tokens {
-		provider, err := feed.NewKeyProvider(list)
-		if err != nil {
-			log.WithError(err).Fatalf("failed to create key provider for %q", name)
-		}
-		keys[name] = provider
+	keys, err := newKeyProviders(cfg.Tokens)
+	if err != nil {
+		log.WithError(err).Fatal("failed to create key providers")
 	}
 
 	log.Debug("creating update manager")
@@ -302,4 +298,21 @@ func main() {
 			}
 		}
 	})
+}
+
+func newKeyProviders(tokens map[model.Provider]StringSlice) (map[model.Provider]feed.KeyProvider, error) {
+	keys := map[model.Provider]feed.KeyProvider{}
+	for name, list := range tokens {
+		if name == model.ProviderBilibili {
+			continue
+		}
+
+		provider, err := feed.NewKeyProvider(list)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create key provider for %q: %w", name, err)
+		}
+		keys[name] = provider
+	}
+
+	return keys, nil
 }

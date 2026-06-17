@@ -49,7 +49,8 @@ no_listing = false
   # e.g. https://example-bucket-name.s3.us-west-2.amazonaws.com/example/prefix/
   prefix = "example/prefix"
 
-# API keys to be used to access Youtube and Vimeo.
+# API keys to be used to access providers that require API credentials.
+# Bilibili feeds do not require an official API token.
 # These can be either specified as string parameter or array of string (so those will be rotated).
 # Alternatively, you can set the following environment variables:
 #   PODSYNC_YOUTUBE_API_KEY for YouTube
@@ -72,6 +73,10 @@ vimeo = [ # Multiple keys will be rotated.
   [feeds.ID1]
   # URL address of a channel, group, user, or playlist.
   url = "https://www.youtube.com/channel/CHANNEL_NAME_TO_HOST"
+  # Bilibili examples:
+  # url = "https://space.bilibili.com/291222529"
+  # url = "https://space.bilibili.com/7380321/lists/678635?type=season"
+  # url = "https://space.bilibili.com/7458285/lists/1067956?type=series"
 
   # The number of episodes to query each update (keep in mind, that this might drain API token)
   page_size = 50
