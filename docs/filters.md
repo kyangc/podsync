@@ -1,135 +1,131 @@
-# Episode Filters
+# 节目过滤器
 
-Podsync supports filtering episodes by title, description, duration, and age. Filters are configured per feed under `[feeds.<id>.filters]`.
+Podsync 支持按标题、描述、时长和发布时间过滤节目。过滤器按 feed 配置，位置是 `[feeds.<id>.filters]`。
 
-All filters use **AND logic** — an episode must satisfy every configured filter to be downloaded.
+所有过滤条件都使用 **AND 逻辑**：一期节目必须同时满足所有已配置条件，才会被下载。需要 OR 逻辑时，在单个正则里使用 `|`。
 
-## Available Filters
+## 可用过滤项
 
-| Field             | Type   | Description                                          |
-| ----------------- | ------ | ---------------------------------------------------- |
-| `title`           | string | Include only episodes whose title matches the regex  |
-| `not_title`       | string | Exclude episodes whose title matches the regex       |
-| `description`     | string | Include only episodes whose description matches      |
-| `not_description` | string | Exclude episodes whose description matches           |
-| `min_duration`    | int    | Exclude episodes shorter than N seconds              |
-| `max_duration`    | int    | Exclude episodes longer than N seconds               |
-| `min_age`         | int    | Skip episodes newer than N days                      |
-| `max_age`         | int    | Skip episodes older than N days                      |
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `title` | string | 只包含标题匹配正则的节目 |
+| `not_title` | string | 排除标题匹配正则的节目 |
+| `description` | string | 只包含描述匹配正则的节目 |
+| `not_description` | string | 排除描述匹配正则的节目 |
+| `min_duration` | int | 排除短于 N 秒的节目 |
+| `max_duration` | int | 排除长于 N 秒的节目 |
+| `min_age` | int | 跳过发布不到 N 天的新节目 |
+| `max_age` | int | 跳过发布超过 N 天的旧节目 |
 
-Regex patterns use [Go regular expression syntax](https://pkg.go.dev/regexp/syntax).
+正则表达式使用 [Go regular expression syntax](https://pkg.go.dev/regexp/syntax)。
 
----
+## 常见示例
 
-## Common Examples
+### 按关键词排除节目
 
-### Exclude episodes by keyword
-
-Use `not_title` with regex alternation (`|`) to skip episodes matching any of several keywords:
+使用 `not_title` 和正则 alternation `|`，可以跳过包含任意关键词的节目：
 
 ```toml
 [feeds.my_feed.filters]
-# Skip live streams, Q&A sessions, and shorts (case-insensitive)
+# 跳过直播、问答和 Shorts，忽略大小写
 not_title = "(?i)(live|q&a|#shorts)"
 ```
 
-### Include only episodes matching a keyword
+### 只下载匹配关键词的节目
 
-Use `title` to download only episodes that match a pattern:
+使用 `title` 可以只下载标题匹配某类模式的节目：
 
 ```toml
 [feeds.my_feed.filters]
-# Download only tutorials and guides
+# 只下载 tutorial 和 guide 类节目
 title = "(?i)(tutorial|how.to|guide)"
 ```
 
-### Filter by duration
+### 按时长过滤
 
-Use `min_duration` and `max_duration` (in seconds) to skip episodes that are too short or too long:
+`min_duration` 和 `max_duration` 的单位是秒：
 
 ```toml
 [feeds.my_feed.filters]
-# Only download full episodes (between 10 minutes and 3 hours)
+# 只下载 10 分钟到 3 小时之间的完整节目
 min_duration = 600
 max_duration = 10800
 ```
 
-### Skip short clips and trailers
+### 跳过短片、预告和片段
 
-Combine a title filter with a minimum duration to exclude both by name and by length:
+标题过滤可以和最小时长一起使用：
 
 ```toml
 [feeds.my_feed.filters]
-# Exclude anything labelled as a clip/preview AND skip anything under 5 minutes
+# 排除标题里的 clip/preview/trailer/teaser，同时跳过 5 分钟以下节目
 not_title = "(?i)(clip|preview|trailer|teaser)"
 min_duration = 300
 ```
 
-### Only recent episodes
+### 只保留近期节目
 
-Use `max_age` to skip episodes older than a given number of days:
+使用 `max_age` 可以跳过太旧的节目：
 
 ```toml
 [feeds.my_feed.filters]
-# Only keep episodes from the last 90 days
+# 只保留最近 90 天内发布的节目
 max_age = 90
 ```
 
-### Skip very new episodes (wait for edits/corrections)
+### 延迟下载新节目
 
-Use `min_age` to delay downloading until an episode is at least N days old:
+使用 `min_age` 可以等节目发布一段时间后再下载，适合创作者可能会补剪、修正标题或替换视频的场景：
 
 ```toml
 [feeds.my_feed.filters]
-# Wait at least 2 days before downloading (lets the creator fix mistakes)
+# 发布至少 2 天后再下载
 min_age = 2
 ```
 
-### Filter by description keyword
+### 按描述关键词过滤
 
-Use `description` to include only episodes whose description mentions a topic:
+使用 `description` 可以只下载描述中提到某个主题的节目：
 
 ```toml
 [feeds.my_feed.filters]
-# Only download episodes that mention "interview" in the description
+# 只下载描述中提到 interview 的节目
 description = "(?i)interview"
 ```
 
-### Combine title and description filters
+### 组合标题和描述过滤
 
-All filters apply together — the episode must match every one:
+多个过滤项会同时生效，节目必须全部满足：
 
 ```toml
 [feeds.my_feed.filters]
-# Include episodes about Python that are not beginner content
-title       = "(?i)python"
-not_title   = "(?i)(beginner|intro|101)"
+# 下载 Python 相关节目，但排除 beginner/intro/101 这类入门内容
+title        = "(?i)python"
+not_title    = "(?i)(beginner|intro|101)"
 min_duration = 600
 ```
 
-### Match an exact phrase
+### 匹配精确短语
 
-Use `\b` word boundaries or anchors to be more precise:
+可以用 `\b` 单词边界或 `^` / `$` 锚点让匹配更精确：
 
 ```toml
 [feeds.my_feed.filters]
-# Only episodes containing the exact phrase "full episode"
+# 只下载包含完整短语 "full episode" 的节目
 title = "(?i)\\bfull episode\\b"
 ```
 
-### Exclude several channels or series by title prefix
+### 按标题前缀排除多个栏目
 
 ```toml
 [feeds.my_feed.filters]
-# Skip "Shorts:" and "Clip:" prefixed titles
+# 跳过以 "Shorts:" 或 "Clip:" 开头的标题
 not_title = "(?i)^(shorts?:|clip:)"
 ```
 
----
+## 注意事项
 
-## Notes
-
-- `title` and `description` are **include** filters: the episode is downloaded only if it matches.
-- `not_title` and `not_description` are **exclude** filters: the episode is skipped if it matches.
-- Duration and age filters always exclude episodes outside the specified range.
-- When multiple filters are set, **all** must be satisfied (AND logic). Use regex alternation (`a|b`) for OR logic within a single filter field.
+- `title` 和 `description` 是包含过滤：只有匹配的节目才会下载。
+- `not_title` 和 `not_description` 是排除过滤：匹配的节目会被跳过。
+- 时长和发布时间过滤总是排除范围之外的节目。
+- 多个过滤项之间是 AND 逻辑；如果需要 OR 逻辑，在同一个字段里使用正则 `a|b`。

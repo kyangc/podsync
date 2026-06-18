@@ -1,18 +1,16 @@
-# Podsync on Synology NAS Guide
+# 在 Synology NAS 上运行 Podsync
 
-*Written by [@lucasjanin](https://github.com/lucasjanin)*
+原文作者：[@lucasjanin](https://github.com/lucasjanin)
 
-This installs `podsync` on a Synology NAS with SSL and port 443
-It requires to have a domain with ddns and an SSL Certificate
-I'm using a ddns from Synolgy with a SSL Certificate. By chance, my provider doesn't block ports 80 and 443.
+以下示例演示如何在 Synology NAS 上运行 Podsync，并通过 443/HTTPS 访问。它假设你已经有一个域名、DDNS 和 SSL 证书。如果只在局域网使用，可以简化 HTTPS 和反向代理部分。
 
+示例使用本 fork 的镜像 `ghcr.io/kyangc/podsync`。如果只想测试最新 `main` 构建，可以把 `:latest` 换成 `:nightly`。
 
-1. Open "Package Center" and install "Apache HTTP Server 2.4"
-2. In the "Web Station", select the default server, click edit and active "Enable personal website"
-3. Create a folder "podsync" in web share using "File Station", the path will be like "/volume1/web/podsync" (where the files will be saved)
-4. Create a folder "podsync" in another share using "File Station", the path will be like "/volume1/docker/podsync" (where the config will be saved)
-5. Create a `config.toml` file in Notepad (or any other editor) and copy it into the above folder.
-Here you will configure your specific settings. Here's mine as an example:
+1. 打开“套件中心”，安装 “Apache HTTP Server 2.4”。
+2. 在 “Web Station” 中选择默认服务器，点击编辑，并启用个人网站。
+3. 用 “File Station” 在 web 共享目录下创建 `podsync` 文件夹，例如 `/volume1/web/podsync`。这里用于保存下载的节目文件。
+4. 用 “File Station” 在 docker 共享目录下创建 `podsync` 文件夹，例如 `/volume1/docker/podsync`。这里用于保存配置文件。
+5. 用记事本或其他编辑器创建 `config.toml`，复制到 `/volume1/docker/podsync`。下面是一个示例：
 
 ```toml
 [server]
@@ -21,7 +19,7 @@ hostname = "https://xxxxxxxx.xxx"
 
 [storage]
   [storage.local]
-  data_dir = "/app/data" 
+  data_dir = "/app/data"
 
 [tokens]
 youtube = "xxxxxxx"
@@ -30,8 +28,8 @@ youtube = "xxxxxxx"
     [feeds.ID1]
     url = "https://www.youtube.com/channel/UCJldRgT_D7Am-ErRHQZ90uw"
     update_period = "1h"
-    quality = "high" # "high" or "low"
-    format = "audio" # "audio", "video" or "custom"
+    quality = "high" # "high" 或 "low"
+    format = "audio" # "audio"、"video" 或 "custom"
     filters = { title = "Yann Marguet" }
     opml = true
     clean = { keep_last = 20 }
@@ -49,37 +47,28 @@ youtube = "xxxxxxx"
     ownerEmail = "xx@xxxx.xx"
 ```
 
-Note that I'm not using port `8080` because I already have another app on my Synology using that port.
-Also, I'm using my own hostname so I can download the podcasts to my podcast app from outside my network,
-but you don't need to do this.
+这里没有使用 `8080`，是因为 Synology 上可能已经有其他服务占用该端口。`hostname` 用于生成 RSS 里的外部访问链接；如果只在局域网使用，可以不配置公网域名。
 
-6. Now you need to SSH into Synology using an app like Putty (on Windows - just google for an app).
-
-5. Copy and paste the following command:
+6. 通过 SSH 登录 Synology。
+7. 拉取镜像：
 
 ```bash
-docker pull mxpv/podsync:latest
+docker pull ghcr.io/kyangc/podsync:latest
 ```
 
-Docker will download the latest version of Podsync.
-
-6. Copy and paste the following command:
+8. 启动容器：
 
 ```bash
 docker run \
     -p 9090:9090 \
     -v /volume1/web/podsync:/app/data/ \
-    -v /volume1/docker/podsync/podsync-config.toml:/app/config.toml \
-    mxpv/podsync:latest
+    -v /volume1/docker/podsync/config.toml:/app/config.toml \
+    ghcr.io/kyangc/podsync:latest
 ```
 
-This will install a container in Docker and run it. Podsync will load and read your config.toml file and start downloading episodes.
+Podsync 会读取 `config.toml`，开始拉取 feed 并下载节目。
 
-7. I recommend you go into the container's settings in Container Station and set it to Auto Start.
+9. 建议在 Container Manager / Docker 的容器设置中开启自动启动。
+10. 下载完成后，每个 feed 都会生成 XML。示例 feed 地址类似 `https://xxxxxxxx.xxx/podsync/ID1.xml`，把它复制到 podcast 客户端即可订阅。
 
-8. Once the downloads have finished for each of your feeds, you will then have an XML feed for each feed
-that you should be able to access at `https://xxxxxxxx.xxx/podsync/ID1.xml`. Paste them into your podcast app of choice,
-and you're good to go!
-
-Note: you can validate your XML using this website:
-https://www.castfeedvalidator.com/validate.php
+可以用这个网站验证 XML 是否有效：https://www.castfeedvalidator.com/validate.php

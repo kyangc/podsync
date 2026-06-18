@@ -1,37 +1,36 @@
-# Schedule via cron expression
+# 使用 cron 表达式调度更新
 
-You can use `cron_schedule` field to build more precise update checks schedule.
-A cron expression represents a set of times, using 5 space-separated fields.
+可以通过 `cron_schedule` 字段设置更精确的 feed 更新计划。cron 表达式由 5 个用空格分隔的字段组成。
 
-| Field name   | Mandatory? | Allowed values  | Allowed special characters |
-| ------------ | ---------- | --------------- | -------------------------- |
-| Minutes      | Yes        | 0-59            | * / , -                    |
-| Hours        | Yes        | 0-23            | * / , -                    |
-| Day of month | Yes        | 1-31            | * / , - ?                  |
-| Month        | Yes        | 1-12 or JAN-DEC | * / , -                    |
-| Day of week  | Yes        | 0-6 or SUN-SAT  | * / , - ?                  |
+| 字段 | 必填 | 允许值 | 允许的特殊字符 |
+| --- | --- | --- | --- |
+| 分钟 | 是 | 0-59 | `* / , -` |
+| 小时 | 是 | 0-23 | `* / , -` |
+| 日期 | 是 | 1-31 | `* / , - ?` |
+| 月份 | 是 | 1-12 或 JAN-DEC | `* / , -` |
+| 星期 | 是 | 0-6 或 SUN-SAT | `* / , - ?` |
 
-Month and Day-of-week field values are case insensitive. `SUN`, `Sun`, and `sun` are equally accepted.
-The specific interpretation of the format is based on the Cron Wikipedia page: https://en.wikipedia.org/wiki/Cron
+月份和星期不区分大小写，`SUN`、`Sun` 和 `sun` 等价。具体格式解释参考 Cron Wikipedia 页面：https://en.wikipedia.org/wiki/Cron
 
-#### Predefined schedules
+## 预定义计划
 
-You may use one of several pre-defined schedules in place of a cron expression.
+可以直接使用以下预定义计划，代替完整 cron 表达式。
 
-| Entry                   | Description                                | Equivalent to |
-| ----------------------- | -------------------------------------------| ------------- |
-| `@monthly`              | Run once a month, midnight, first of month | `0 0 1 * *`   |
-| `@weekly`               | Run once a week, midnight between Sat/Sun  | `0 0 * * 0`   |
-| `@daily (or @midnight)` | Run once a day, midnight                   | `0 0 * * *`   |
-| `@hourly`               | Run once an hour, beginning of hour        | `0 * * * *`   |
+| 写法 | 说明 | 等价表达式 |
+| --- | --- | --- |
+| `@monthly` | 每月运行一次，月初午夜 | `0 0 1 * *` |
+| `@weekly` | 每周运行一次，周六到周日之间的午夜 | `0 0 * * 0` |
+| `@daily` 或 `@midnight` | 每天午夜运行一次 | `0 0 * * *` |
+| `@hourly` | 每小时整点运行一次 | `0 * * * *` |
 
-#### Intervals
+## 固定间隔
 
-You may also schedule a job to execute at fixed intervals, starting at the time it's added
-or cron is run. This is supported by formatting the cron spec like this:
+也可以使用固定间隔执行任务。间隔从任务加入或 cron 启动时开始计算，格式如下：
 
-    @every <duration>
+```text
+@every <duration>
+```
 
-where "duration" is a string accepted by [time.ParseDuration](http://golang.org/pkg/time/#ParseDuration).
+其中 `duration` 是 [time.ParseDuration](http://golang.org/pkg/time/#ParseDuration) 支持的字符串。
 
-For example, `@every 1h30m10s` would indicate a schedule that activates after 1 hour, 30 minutes, 10 seconds, and then every interval after that.
+例如 `@every 1h30m10s` 表示 1 小时 30 分 10 秒后执行一次，之后每隔同样时间再次执行。

@@ -4,61 +4,61 @@ Parameters:
   InstanceType:
     Type: String
     Default: t3.micro
-    Description: EC2 machine instance size (see https://aws.amazon.com/ec2/instance-types/)
+    Description: EC2 实例规格，见 https://aws.amazon.com/ec2/instance-types/
 
   AmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
-    Description: Amazon Linux 2 image ID (leave this as is)
+    Description: Amazon Linux 2 镜像 ID，通常保持默认值即可
 
   VolumeSize:
     Type: Number
     Default: 64
     MinValue: 16
-    Description: Disk size in Gb to allocate for storing downloaded episodes
+    Description: 用于保存下载节目的磁盘大小，单位 GB
 
   PodsyncVersion:
     Type: String
     Default: latest
-    Description: Podsync version to use (see https://github.com/mxpv/podsync/releases)
+    Description: 要使用的 Podsync 版本，见 https://github.com/kyangc/podsync/releases
 
   PodsyncPort:
     Type: Number
     Default: 8080
     MaxValue: 65535
-    Description: Server port to use
+    Description: Podsync 服务端口
 
   YouTubeApiKey:
     Type: String
-    AllowedPattern: '.+' # Required
+    AllowedPattern: '.+' # 必填
     Description: |
-      Key to use for YouTube API access (see https://github.com/mxpv/podsync/blob/master/docs/how_to_get_youtube_api_key.md)
+      YouTube API 访问使用的 key，见 https://github.com/kyangc/podsync/blob/main/docs/how_to_get_youtube_api_key.md
 
   VimeoAccessToken:
     Type: String
-    AllowedPattern: '.+' # Required
+    AllowedPattern: '.+' # 必填
     Description: |
-      Key to use for Vimeo API access (see https://github.com/mxpv/podsync/blob/master/docs/how_to_get_vimeo_token.md)
+      Vimeo API 访问使用的 token，见 https://github.com/kyangc/podsync/blob/main/docs/how_to_get_vimeo_token.md
 
   FeedId:
     Type: String
     Default: 'ID1'
-    AllowedPattern: '.+' # Required
+    AllowedPattern: '.+' # 必填
     Description: |
-      ID to use for the feed (you'll access it as http://localhost/ID1.xml)
+      feed ID；部署后可以通过类似 http://localhost/ID1.xml 的地址访问
 
   FeedUrl:
     Type: String
     AllowedPattern: '.+'
     Description: |
-      YouTube or Vimeo URL to host with Podsync (for example: https://www.youtube.com/user/XYZ)
+      Podsync 要托管的 YouTube、Vimeo 或 Bilibili URL，例如 https://www.youtube.com/user/XYZ
 
   PageSize:
     Type: Number
     Default: 50
     MinValue: 5
     Description: |
-      The number of episodes to query each time
+      每次更新查询的节目数量
 
   Format:
     Type: String
@@ -66,7 +66,7 @@ Parameters:
       - 'audio'
       - 'video'
     Default: 'video'
-    Description: Feed format (audio or video)
+    Description: feed 格式，audio 或 video
 
   Quality:
     Type: String
@@ -74,27 +74,27 @@ Parameters:
       - 'high'
       - 'low'
     Default: 'high'
-    Description: Feed quality (high or low)
+    Description: feed 质量，high 或 low
 
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: 'VM configuration'
+          default: '虚拟机配置'
         Parameters:
           - InstanceType
           - KeyName
           - AmiId
           - VolumeSize
       - Label:
-          default: 'Podsync configuration'
+          default: 'Podsync 配置'
         Parameters:
           - PodsyncVersion
           - PodsyncPort
           - YouTubeApiKey
           - VimeoAccessToken
       - Label:
-          default: 'Feed configuration'
+          default: 'Feed 配置'
         Parameters:
           - FeedId
           - FeedUrl
@@ -104,15 +104,15 @@ Metadata:
 
     ParameterLabels:
       InstanceType:
-        default: 'Instance type'
+        default: '实例规格'
       AmiId:
         default: 'AMI ID'
       VolumeSize:
-        default: 'Volume size'
+        default: '磁盘大小'
       PodsyncVersion:
-        default: 'Version'
+        default: '版本'
       PodsyncPort:
-        default: 'Server port'
+        default: '服务端口'
       YouTubeApiKey:
         default: 'YouTube API Key'
       VimeoAccessToken:
@@ -122,7 +122,7 @@ Metadata:
       FeedUrl:
         default: 'Feed URL'
       PageSize:
-        default: 'Page size'
+        default: '每页数量'
 
 Resources:
   NewKeyPair:
@@ -155,14 +155,14 @@ Resources:
           set -ex
           trap '/opt/aws/bin/cfn-signal --exit-code 1 --resource Ec2Instance --region ${AWS::Region} --stack ${AWS::StackName}' ERR
 
-          # Install Docker
+          # 安装 Docker
           yum update -y
           amazon-linux-extras install docker
           systemctl start docker
           usermod -a -G docker ec2-user
 
           export publichost=$(ec2-metadata --public-hostname | cut -d ' ' -f2)
-          # Create configuration file
+          # 创建配置文件
           mkdir -p /home/ec2-user/podsync/data
           tee /home/ec2-user/podsync/config.toml <<EOF
           [server]
@@ -185,19 +185,19 @@ Resources:
             format = "${Format}"
           EOF
 
-          # Pull image and run CLI
-          docker pull mxpv/podsync:${PodsyncVersion}
+          # 拉取本 fork 镜像并运行
+          docker pull ghcr.io/kyangc/podsync:${PodsyncVersion}
           docker run -d \
             -p ${PodsyncPort}:${PodsyncPort} \
             -v /home/ec2-user/podsync/data:/app/data \
             -v /home/ec2-user/podsync/config.toml:/app/config.toml \
             --restart always \
-            mxpv/podsync:${PodsyncVersion}
+            ghcr.io/kyangc/podsync:${PodsyncVersion}
 
-          # Signal ok
+          # 通知 CloudFormation 初始化成功
           /opt/aws/bin/cfn-signal --exit-code 0 --resource Ec2Instance --region ${AWS::Region} --stack ${AWS::StackName}
 
-  # Setup instance profile with SSM policy. This let's connect to the EC2 machine via SSM console
+  # 配置带 SSM 权限的实例 profile，便于通过 SSM console 连接 EC2。
   SsmIamRole:
     Type: AWS::IAM::Role
     Properties:
@@ -221,24 +221,24 @@ Resources:
       Roles:
         - !Ref SsmIamRole
 
-  # Limit access to SSH and CLI server
+  # 限制 SSH 和 Podsync 服务访问。
   AccessSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: !Sub "Podsync CLI security group for ${AWS::StackName}"
+      GroupDescription: !Sub "Podsync CLI 安全组：${AWS::StackName}"
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: !Ref PodsyncPort
           ToPort: !Ref PodsyncPort
           CidrIp: 0.0.0.0/0
-          Description: Access to Podsync server
+          Description: 访问 Podsync 服务
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
           CidrIp: 0.0.0.0/0
-          Description: SSH access to EC2 machine
+          Description: SSH 访问 EC2
 
 Outputs:
   PodsyncUrl:
-    Description: 'Feed URL'
+    Description: 'Feed URL 地址'
     Value: !Sub "http://${Ec2Instance.PublicDnsName}:${PodsyncPort}/${FeedId}.xml/"

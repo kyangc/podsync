@@ -1,175 +1,169 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+这份文档给 Claude Code / Codex 等代码助手使用，用来快速理解本仓库的工程结构、运行行为和维护边界。
 
-## Project Overview
+## 项目概览
 
-Podsync is a Go-based service that converts YouTube, Vimeo, SoundCloud, and Twitch channels into podcast feeds. It downloads video/audio content and generates RSS feeds that can be consumed by podcast clients.
+Podsync 是一个 Go 服务，用来把 YouTube、Vimeo、SoundCloud、Twitch 和 Bilibili 的频道、用户、播放列表或空间内容转换成 podcast feed。它会发现节目、下载音视频文件，并生成可被 podcast 客户端订阅的 RSS。
 
-## Key Architecture Components
+## 本 Fork 的维护边界
 
-### Main Application (`cmd/podsync/`)
-- **main.go**: Entry point with CLI argument parsing, signal handling, and service orchestration
-- **config.go**: TOML configuration loading and validation with defaults
+本仓库以 upstream `mxpv/podsync` 的 `main` 分支为基底，目标是尽量保持 upstream 新能力，同时维护 Bilibili 转 podcast 的能力。`yangtfu/podsync` 是 Bilibili 能力的重要参考，但当前实现已经重新落在新版 Podsync 的 builder、model、update、ytdl 等结构上。
 
-### Core Packages (`pkg/`)
-- **builder/**: Media downloaders for different platforms (YouTube, Vimeo, SoundCloud, Twitch)
-- **feed/**: RSS/podcast feed generation and management, OPML export, hooks, API key rotation
-- **db/**: BadgerDB-based storage for metadata and state
-- **fs/**: Storage abstraction supporting local filesystem and S3-compatible storage
-- **model/**: Core data structures and domain models
-- **ytdl/**: YouTube-dl wrapper for media downloading
+本 fork 的主要差异：
 
-### Services (`services/`)
-- **update/**: Feed update orchestration, scheduling, episode filtering via matcher.go
-- **web/**: HTTP server for serving podcast feeds, media files, and health checks
-- **migrate/**: Filename migration tooling for transitioning to custom filename templates
+- 新增 Bilibili provider。
+- 支持 Bilibili 用户空间：`https://space.bilibili.com/<mid>`。
+- 支持 Bilibili 空间列表：`/lists/<id>?type=season` 和 `/lists/<id>?type=series`。
+- 支持可选包含“充电专属”视频：`bilibili.include_upower_exclusive = true`。
+- 支持 `bilibili.cookies_file`，用于 Bilibili API 请求和 `yt-dlp` 下载。
+- Bilibili 下载时会自动追加常见 headers：`Referer`、`Origin`、`Accept-Language`。
+- Bilibili cookies 会在下载前复制到临时目录，再传给 `yt-dlp`，避免源 cookies 文件被回写污染。
+- Bilibili 不要求官方 API token，并且会跳过旧配置里的空 `bilibili` token。
+- 新增 `filename_template`，用于控制下载文件名和 RSS enclosure 路径。
+- 新增 `--migrate-filenames` 和 `--migrate-filenames-dry-run`，用于一次性迁移已下载文件名。
+- GitHub Actions 已切到 `kyangc/podsync`：`main` 发布 `ghcr.io/kyangc/podsync:nightly`，`v*` tag 发布正式镜像和 release。
 
-### Key Dependencies
-- youtube-dl/yt-dlp for media downloading
-- BadgerDB for local storage
-- go-toml for configuration
-- robfig/cron for scheduling
-- AWS SDK for S3 storage
+Go module 路径仍保留 `github.com/mxpv/podsync`，这是为了降低与 upstream 的差异。不要为了“看起来更像 fork”随意改 module path。
 
-## Episode Lifecycle
+## 关键目录
 
-Understanding how episodes flow through the system:
+### 主程序：`cmd/podsync/`
 
-### Discovery Phase
-- Episodes are discovered during feed updates via platform APIs (YouTube Data API v3, Vimeo API, SoundCloud, Twitch)
-- `updateFeed()` in `services/update/updater.go:99-154` queries the platform API
-- New episodes are stored in BadgerDB with status `EpisodeNew`
-- Episodes matching feed URL are identified by provider-specific parsing in `pkg/builder/`
+- `main.go`：CLI 参数、信号处理、服务编排。
+- `config.go`：TOML 配置加载、默认值和校验。
 
-### Download Phase
-- `fetchEpisodes()` iterates episodes with status `EpisodeNew` or `EpisodeError`
-- Episodes are filtered by match rules (title, description, duration, age) in `services/update/matcher.go:27-72`
-- Only `page_size` episodes are queued per update cycle (default 50)
-- Downloads happen to temp directory first, then copied to storage to prevent incomplete files
-- On success: status set to `EpisodeDownloaded` with file size recorded
-- On failure: status set to `EpisodeError`, retry attempted next cycle
+### 核心包：`pkg/`
 
-### Cleanup Phase (Important!)
-- `cleanup()` in `updater.go:373-441` runs AFTER each successful update cycle
-- **Only triggered if `clean.keep_last` is configured** (global or per-feed)
-- Keeps most recent N episodes by PubDate (descending order)
-- Deleted episodes have status changed to `EpisodeCleaned` and title/description cleared
-- **Files are deleted from storage but database records are retained**
-- This is a soft-delete: episodes remain in the database forever
+- `builder/`：各平台 feed discovery，包括 YouTube、Vimeo、SoundCloud、Twitch、Bilibili。
+- `feed/`：RSS/podcast feed 生成、OPML、hooks、API key 轮换、feed 配置结构。
+- `db/`：基于 BadgerDB 的元数据和状态存储。
+- `fs/`：存储抽象，支持本地文件系统和 S3 兼容存储。
+- `model/`：核心数据结构和领域模型。
+- `ytdl/`：`youtube-dl` / `yt-dlp` 下载封装。
 
-### Episode Removal from Database
-- Episodes are removed from the database only if they:
-  1. Are no longer returned by the platform API, AND
-  2. Have status `EpisodeNew` (never downloaded)
-- Episodes with status `EpisodeDownloaded` or `EpisodeCleaned` are NEVER removed from the database
-- There is NO mechanism to compact or prune the database of old episode records
+### 服务：`services/`
 
-## Database Behavior (BadgerDB)
+- `update/`：feed 更新编排、调度、节目过滤。
+- `web/`：HTTP 服务，提供 RSS、媒体文件、健康检查等。
+- `migrate/`：文件名迁移工具，用于把已有文件迁移到新的 `filename_template`。
 
-### Data Storage
-- Uses versioned keyspace: `podsync/v1/`
-- Key prefixes: `feed/{feedID}` for feeds, `episode/{feedID}/{episodeID}` for episodes
-- Both use JSON serialization
-- Records are append-only; deleted episodes remain with `EpisodeCleaned` status
+## 节目生命周期
 
-### Database Growth and Limitations
-- **Database grows indefinitely** as new episodes are discovered
-- Deleted/cleaned episodes remain in DB forever (not physically removed)
-- **No built-in compaction or garbage collection** mechanism
-- No configuration option to prune old episode records
-- `keep_last` only deletes files, not database records
-- For very large feeds, database file size can grow significantly over time
+### 发现阶段
 
-### Configuration Options
+- feed 更新时通过平台 API 发现节目。
+- `services/update/updater.go` 中的 `updateFeed()` 会调用对应 builder。
+- 新节目写入 BadgerDB，初始状态为 `EpisodeNew`。
+- URL 解析和平台识别主要在 `pkg/builder/url.go`。
+
+### 下载阶段
+
+- `fetchEpisodes()` 会处理 `EpisodeNew` 和 `EpisodeError` 状态的节目。
+- 过滤逻辑在 `services/update/matcher.go`，支持标题、描述、时长、发布时间过滤。
+- 每次更新最多排队 `page_size` 期节目，默认 50。
+- 下载先写入临时目录，成功后再复制到目标存储，避免留下不完整文件。
+- 成功后状态变成 `EpisodeDownloaded`，并记录文件大小。
+- 失败后状态变成 `EpisodeError`，下一轮更新会重试。
+
+### 清理阶段
+
+- `cleanup()` 在成功更新后运行。
+- 只有配置了 `clean.keep_last` 时才会清理。
+- 清理按 PubDate 倒序保留最近 N 期。
+- 被清理的节目状态变成 `EpisodeCleaned`，标题和描述会被清空。
+- 文件会从存储中删除，但数据库记录会保留。
+
+### 数据库记录删除
+
+节目只有同时满足以下条件才会从数据库删除：
+
+1. 平台 API 已经不再返回它。
+2. 它仍是 `EpisodeNew`，从未下载过。
+
+`EpisodeDownloaded` 和 `EpisodeCleaned` 不会被自动物理删除。当前没有内置旧记录压缩或裁剪机制。
+
+## BadgerDB 行为
+
+- 使用版本化 keyspace：`podsync/v1/`。
+- feed key 前缀：`feed/{feedID}`。
+- episode key 前缀：`episode/{feedID}/{episodeID}`。
+- 数据使用 JSON 序列化。
+- `keep_last` 只删除媒体文件，不删除数据库记录。
+- 长期运行且 feed 很多时，数据库可能持续增长。
+
+常见配置：
+
 ```toml
 [database]
-dir = "/path/to/db"  # defaults to {config_dir}/db
+dir = "/path/to/db"
 
 [database.badger]
-truncate = true      # enable value log truncation
-file_io = true       # use file I/O instead of mmap
+truncate = true
+file_io = true
 ```
 
-## Configuration Reference
+## 配置速查
 
-### Feed Configuration (`[feeds.{ID}]`)
+### Feed 配置
+
 ```toml
 [feeds.my_feed]
-url = "https://youtube.com/..."        # Required: platform URL
-page_size = 50                         # Episodes to fetch per update (default 50)
-update_period = "6h"                   # How often to check (default 6h)
-cron_schedule = "0 */6 * * *"          # Cron expression (overrides update_period)
-quality = "high"                       # "high" or "low" (default "high")
-format = "video"                       # "audio", "video", or "custom"
-max_height = 720                       # Maximum video height (720, 1080, 1440, etc.)
-playlist_sort = "desc"                 # "asc" or "desc" for playlist ordering
-filename_template = "{{id}}"           # Tokens: {{id}}, {{title}}, {{pub_date}}, {{feed_id}}
-opml = true                            # Include in OPML export
-private_feed = false                   # Don't index by podcast aggregators
-youtube_dl_args = ["--arg1", "val"]    # Additional youtube-dl arguments
+url = "https://youtube.com/..."        # 必填：平台 URL
+page_size = 50                         # 每轮查询节目数量，默认 50
+update_period = "6h"                   # 更新频率，默认 6h
+cron_schedule = "0 */6 * * *"          # cron 表达式，会覆盖 update_period
+quality = "high"                       # "high" 或 "low"
+format = "video"                       # "audio"、"video" 或 "custom"
+max_height = 720                       # 视频最大高度
+playlist_sort = "desc"                 # 播放列表排序："asc" 或 "desc"
+filename_template = "{{id}}"           # 支持 {{id}}、{{title}}、{{pub_date}}、{{feed_id}}
+opml = true                            # 是否加入 OPML 导出
+private_feed = false                   # 是否阻止 podcast 聚合器索引
+youtube_dl_args = ["--arg1", "val"]    # 额外传给 youtube-dl/yt-dlp 的参数
+```
 
-[feeds.my_feed.custom_format]          # When format = "custom"
+### 自定义下载格式
+
+```toml
+[feeds.my_feed.custom_format]
 youtube_dl_format = "bestvideo+bestaudio"
 extension = "mkv"
+```
 
+### 清理
+
+```toml
 [feeds.my_feed.clean]
-keep_last = 10                         # Keep only N most recent episodes (deletes files, not DB records)
-
-[feeds.my_feed.filters]
-title = "regex pattern"                # Include if title matches
-not_title = "regex pattern"            # Exclude if title matches
-description = "regex pattern"          # Include if description matches
-not_description = "regex pattern"      # Exclude if description matches
-min_duration = 60                      # Minimum duration in seconds
-max_duration = 3600                    # Maximum duration in seconds
-min_age = 1                            # Skip episodes newer than N days
-max_age = 365                          # Skip episodes older than N days
+keep_last = 10
 ```
 
-### Filter Examples
+### 过滤
 
-All filters are evaluated with AND logic — an episode must satisfy every configured filter to be downloaded. Use [Go regular expression syntax](https://pkg.go.dev/regexp/syntax) to express complex conditions within a single filter field.
+过滤项之间是 AND 逻辑，节目必须满足所有配置项才会下载。
 
-**Exclude episodes with any of several keywords** (OR logic via regex alternation):
 ```toml
 [feeds.my_feed.filters]
-# Exclude episodes whose title contains "Live", "LIVE", "Q&A", or "q&a"
-not_title = "(?i)(live|q&a)"
+title = "(?i)(tutorial|guide)"
+not_title = "(?i)(shorts|preview)"
+description = "(?i)interview"
+not_description = "(?i)sponsor only"
+min_duration = 60
+max_duration = 3600
+min_age = 1
+max_age = 365
 ```
 
-**Include only episodes matching any of several keywords**:
-```toml
-[feeds.my_feed.filters]
-# Include only episodes whose title contains "tutorial", "how-to", or "guide" (case-insensitive)
-title = "(?i)(tutorial|how.to|guide)"
-```
-
-**Combine title and duration filters** (both conditions must be satisfied):
-```toml
-[feeds.my_feed.filters]
-# Exclude short clips and previews AND require a minimum duration of 10 minutes
-not_title = "(?i)(short clip|preview|trailer)"
-min_duration = 600
-```
-
-**Match a phrase** (use `\b` for word boundaries or anchor patterns with `^`/`$`):
-```toml
-[feeds.my_feed.filters]
-# Include only episodes that contain the exact phrase "full episode" (case-insensitive)
-title = "(?i)full episode"
-```
-
-> **Note**: `title` and `description` filters include episodes that match; `not_title` and `not_description` exclude episodes that match. Duration and age filters always exclude episodes outside the specified range.
+### 自定义 feed 元数据
 
 ```toml
-[feeds.my_feed.custom]                 # Override feed metadata
+[feeds.my_feed.custom]
 title = "Custom Title"
 description = "Custom description"
 author = "Author Name"
 link = "https://example.com"
 cover_art = "https://example.com/image.jpg"
-cover_art_quality = "high"             # "high" or "low"
+cover_art_quality = "high"
 category = "Technology"
 subcategories = ["Software How-To"]
 explicit = false
@@ -178,41 +172,71 @@ ownerName = "Owner"
 ownerEmail = "owner@example.com"
 ```
 
-### Hooks Configuration
-```toml
-[feeds.my_feed.hooks.on_episode_download]
-command = ["notify-send", "Downloaded: ${EPISODE_TITLE}"]
-timeout = 60  # seconds
+### Bilibili 配置
 
-[feeds.my_feed.hooks.on_episode_download_error]
+```toml
+[feeds.bilibili_user]
+url = "https://space.bilibili.com/291222529"
+
+[feeds.bilibili_upower]
+url = "https://space.bilibili.com/10835521"
+bilibili = { include_upower_exclusive = true, cookies_file = "/app/config/bilibili-cookies.txt" }
+
+[feeds.bilibili_season]
+url = "https://space.bilibili.com/7380321/lists/678635?type=season"
+
+[feeds.bilibili_series]
+url = "https://space.bilibili.com/7458285/lists/1067956?type=series"
+```
+
+注意：
+
+- `include_upower_exclusive = true` 只表示尝试包含“充电专属”视频；能否拉取和下载取决于 cookies 对应账号是否有权限。
+- `cookies_file` 必须是 Netscape cookies.txt 格式。
+- `bilibili.cookies_file` 会比单纯 `youtube_dl_args = ["--cookies", "..."]` 更完整，因为它同时用于 API 拉取和下载。
+
+### Hooks
+
+```toml
+[[feeds.my_feed.post_episode_download]]
+command = ["notify-send", "Downloaded: ${EPISODE_TITLE}"]
+timeout = 60
+
+[[feeds.my_feed.on_episode_download_error]]
 command = ["logger", "Failed: ${ERROR_MESSAGE}"]
 timeout = 60
 ```
-Environment variables available: `EPISODE_FILE`, `FEED_NAME`, `EPISODE_TITLE`, `ERROR_MESSAGE`
 
-### Server Configuration
+可用环境变量：
+
+- 下载成功 hook：`EPISODE_FILE`、`FEED_NAME`、`EPISODE_TITLE`。
+- 下载失败 hook：`FEED_NAME`、`EPISODE_TITLE`、`ERROR_MESSAGE`。
+
+### Server
+
 ```toml
 [server]
-port = 8080                            # HTTP port
-hostname = "https://example.com"       # External URL for feed links
-bind_address = "*"                     # IP to bind ("*" for all)
-path = "feeds"                         # URL path prefix (alphanumeric only)
-web_ui = false                         # Enable web UI
-tls = false                            # Enable HTTPS
+port = 8080
+hostname = "https://example.com"
+bind_address = "*"
+path = "feeds"
+web_ui = false
+tls = false
 certificate_path = "/path/to/cert.pem"
 key_file_path = "/path/to/key.pem"
-debug_endpoints = false                # Enable /debug/vars metrics
-no_index = false                       # Block search engine indexing (serves robots.txt and X-Robots-Tag header)
-no_listing = false                     # Disable directory listings, return 404 for folder access
+debug_endpoints = false
+no_index = false
+no_listing = false
 ```
 
-### Storage Configuration
+### Storage
+
 ```toml
 [storage]
-type = "local"                         # "local" or "s3"
+type = "local"
 
 [storage.local]
-data_dir = "/path/to/data"             # Required for local storage
+data_dir = "/path/to/data"
 
 [storage.s3]
 endpoint_url = "https://s3.amazonaws.com"
@@ -222,272 +246,279 @@ prefix = "podsync"
 ```
 
 ### API Tokens
+
 ```toml
 [tokens]
-youtube = "API_KEY"                    # Single key
-youtube = ["KEY1", "KEY2", "KEY3"]     # Multiple keys for rotation
+youtube = "API_KEY"
+youtube = ["KEY1", "KEY2", "KEY3"]
 vimeo = "TOKEN"
 soundcloud = "KEY"
-twitch = "CLIENT_ID:CLIENT_SECRET"     # Must include both
+twitch = "CLIENT_ID:CLIENT_SECRET"
 ```
-Environment variables: `PODSYNC_YOUTUBE_API_KEY`, `PODSYNC_VIMEO_API_KEY`, etc. (space-separated for multiple keys)
 
-### Downloader Configuration
+对应环境变量：
+
+- `PODSYNC_YOUTUBE_API_KEY`
+- `PODSYNC_VIMEO_API_KEY`
+- `PODSYNC_SOUNDCLOUD_API_KEY`
+- `PODSYNC_TWITCH_API_KEY`
+
+多个 key 用空格分隔。
+
+### Downloader
+
 ```toml
 [downloader]
-self_update = false                    # Auto-update youtube-dl every 24h
-timeout = 15                           # Download timeout in minutes (default 15)
-custom_binary = "/path/to/yt-dlp"      # Custom youtube-dl/yt-dlp binary
+self_update = false
+timeout = 15
+custom_binary = "/path/to/yt-dlp"
 ```
 
-### Global Cleanup
+### 全局清理
+
 ```toml
 [cleanup]
-keep_last = 50                         # Applied to all feeds unless overridden
+keep_last = 50
 ```
 
-### Logging
+### 日志
+
 ```toml
 [log]
 filename = "/path/to/podsync.log"
-max_size = 100                         # MB
+max_size = 100
 max_backups = 3
-max_age = 28                           # days
+max_age = 28
 compress = true
 debug = false
 ```
 
-## Platform-Specific Behaviors
+## 平台行为
 
-### YouTube (`pkg/builder/youtube.go`)
-- **Supported**: Channels, Users, Handles (@username), Playlists
-- **Not Supported**: Live streams and Premiered videos (automatically skipped)
-- API costs: Channel/User 5 units, Handle 105 units (requires extra lookup), Playlist 3 units/request
-- Thumbnail quality: uses maxres > high > medium > default
-- Size estimation based on duration and quality (not actual file size)
-- Supports playlist_sort for ordering
+### YouTube：`pkg/builder/youtube.go`
 
-### Vimeo (`pkg/builder/vimeo.go`)
-- **Supported**: Channels, Groups, Users
-- Paginated API with 50 items per page
-- Size estimated from duration and resolution
+- 支持频道、用户、handle、播放列表。
+- 自动跳过 live streams 和 Premiered videos。
+- API 成本大致为：Channel/User 5 units、Handle 105 units、Playlist 3 units/request。
+- 缩略图优先级：maxres > high > medium > default。
+- 大小估算基于时长和质量，不是实际文件大小。
+- 支持 `playlist_sort`。
 
-### SoundCloud (`pkg/builder/soundcloud.go`)
-- **Supported**: Playlists only (`/sets/` URLs)
-- **Not Supported**: Individual tracks, user profiles, likes playlists
-- No API key required
-- Size roughly estimated from duration
+### Vimeo：`pkg/builder/vimeo.go`
 
-### Twitch (`pkg/builder/twitch.go`)
-- **Supported**: User channels (video archives only)
-- **Not Supported**: Clips, highlights, ongoing streams
-- Requires `CLIENT_ID:CLIENT_SECRET` token format
-- Max 100 videos per request
+- 支持 channels、groups、users。
+- API 分页，每页 50 条。
+- 大小估算基于时长和分辨率。
 
-### API Key Rotation
-- All platforms support multiple keys for rotation
-- Round-robin rotation via `RotatedKeyProvider` in `pkg/feed/key.go`
-- Helps avoid hitting single API quota limits
+### SoundCloud：`pkg/builder/soundcloud.go`
+
+- 只支持 playlists，也就是 `/sets/` URL。
+- 不支持单曲、用户主页、likes playlists。
+- 不需要 API key。
+- 大小根据时长粗略估算。
+
+### Twitch：`pkg/builder/twitch.go`
+
+- 支持用户频道的视频归档。
+- 不支持 clips、highlights 和直播中内容。
+- token 格式必须是 `CLIENT_ID:CLIENT_SECRET`。
+- 每次请求最多 100 个视频。
+
+### Bilibili：`pkg/builder/bilibili.go`
+
+- 支持用户空间、season 列表、series 列表。
+- Bilibili API client 会设置 `Origin`、`Referer`、`Accept-Language` 等请求头。
+- 可通过 cookies 获取登录态、充电专属或受限视频信息。
+- 下载阶段在 `pkg/ytdl/ytdl.go` 中追加 Bilibili headers 和临时 cookies 副本。
+- 如果没有 cookies，公开视频仍应能正常发现和下载；受限视频可能失败。
 
 ## Web Server Endpoints
 
-- `/{path}/{feed_id}.xml` - RSS/Podcast feed
-- `/{path}/{feed_id}/{episode_name}` - Episode file download
-- `/{path}/podsync.opml` - OPML export (feeds with `opml = true`)
-- `/{path}/index.html` - Web UI (if enabled, local storage only)
-- `/health` - Health check (returns 503 if episodes failed in last 24h)
-- `/debug/vars` - Runtime metrics (if `debug_endpoints = true`)
-- `/robots.txt` - Search engine blocking (if `no_index = true`)
+- `/{path}/{feed_id}.xml`：RSS/podcast feed。
+- `/{path}/{feed_id}/{episode_name}`：节目文件下载。
+- `/{path}/podsync.opml`：OPML 导出，包含 `opml = true` 的 feed。
+- `/{path}/index.html`：Web UI，仅在启用且使用本地存储时可用。
+- `/health`：健康检查；过去 24 小时有节目下载失败时返回 503。
+- `/debug/vars`：运行指标；仅当 `debug_endpoints = true` 时启用。
+- `/robots.txt`：仅当 `no_index = true` 时提供。
 
-## Storage Behavior
+## 存储行为
 
 ### Local Storage
-- Files stored in `{data_dir}/{feed_id}/{episode_name}`
-- Web UI served from `./html/index.html` if enabled
+
+- 文件保存到 `{data_dir}/{feed_id}/{episode_name}`。
+- Web UI 从 `./html/index.html` 提供。
 
 ### S3 Storage
-- Files stored with key: `{prefix}/{feed_id}/{episode_name}`
-- **Cannot serve files via Podsync** - content must be hosted externally
-- **Filename migration not supported** (except dry-run)
-- Web UI not available
 
-### Filename Generation
-- Template tokens: `{{id}}`, `{{title}}`, `{{pub_date}}` (YYYY-MM-DD), `{{feed_id}}`
-- Default template: `{{id}}` if not configured
-- Sanitization removes invalid characters, normalizes whitespace
-- `--migrate-filenames` CLI flag renames existing files to match current template
+- 文件 key 为 `{prefix}/{feed_id}/{episode_name}`。
+- Podsync 不能直接代理提供 S3 文件，内容需要外部托管。
+- 文件名迁移只支持 dry-run。
+- Web UI 不可用。
 
-## Error Handling
+### 文件名生成
 
-- YouTube 429 (rate limit): stops current batch, retries next cycle
-- Download failures: episode status set to `EpisodeError`, retried next cycle
-- API failures: logged, scheduler continues with other feeds
-- Download timeout: configurable via `downloader.timeout` (default 15 minutes)
-- Hooks available for error notification (`on_episode_download_error`)
+- 支持 token：`{{id}}`、`{{title}}`、`{{pub_date}}`、`{{feed_id}}`。
+- 默认模板是 `{{id}}`。
+- 会清理非法字符并规整空白。
+- `--migrate-filenames` 会把现有文件改名为当前模板对应的文件名。
 
-## Limitations and Known Issues
+## 错误处理
 
-### Database
-- No automatic compaction/garbage collection
-- Deleted episodes remain in database forever
-- `keep_last` only deletes files, not database records
-- Database grows indefinitely with feed updates
+- YouTube 429：停止当前批次，下一轮重试。
+- 下载失败：节目状态设为 `EpisodeError`，下一轮重试。
+- API 失败：记录日志，调度器继续处理其他 feed。
+- 下载超时：由 `downloader.timeout` 控制，默认 15 分钟。
+- 可以用 `on_episode_download_error` hook 做失败通知。
 
-### Platforms
-- YouTube: Live/Premiered videos skipped automatically
-- SoundCloud: Only playlist URLs supported
-- Twitch: Archives only, no clips/highlights
+## 已知限制
 
-### Storage
-- S3: Cannot serve files through Podsync, no filename migration
-- Local: Web UI requires `./html/index.html` to exist
+### 数据库
 
-### Performance
-- Feed updates are sequential (not parallel)
-- Large playlists paginated with 50-item batches
-- All episodes loaded into memory when walking database
+- 没有自动压缩或垃圾回收机制。
+- 清理过的节目仍保留数据库记录。
+- `keep_last` 只删除文件，不删除 DB 记录。
+- 长期运行后数据库会随发现过的节目数量增长。
 
-## Common Development Commands
+### 平台
 
-### Building
+- YouTube：自动跳过直播和 Premiered videos。
+- SoundCloud：只支持 playlist URL。
+- Twitch：只支持视频归档，不支持 clips/highlights。
+- Bilibili：受限、会员或充电专属内容依赖 cookies 权限和平台风控状态。
+
+### 存储
+
+- S3：不能通过 Podsync 直接服务文件，也不支持真正执行文件名迁移。
+- Local：Web UI 需要 `./html/index.html` 存在。
+
+### 性能
+
+- feed 更新是顺序执行，不是并行。
+- 大播放列表按 50 条分页。
+- 遍历数据库时会把节目加载到内存。
+
+## 常用开发命令
+
+### 构建
+
 ```bash
-make build          # Build binary to bin/podsync
-make                # Build and run tests
+make build
+make
 ```
 
-### Testing
+### 测试
+
 ```bash
-make test           # Run all unit tests
-go test -v ./...    # Run tests with verbose output
-go test ./pkg/...   # Test specific packages
+make test
+go test -v ./...
+go test ./pkg/...
 ```
 
-### Linting and Formatting
+### 格式化和 lint
+
 ```bash
-golangci-lint run   # Run all configured linters and formatters
-gofmt -s -w .       # Format all Go files
-goimports -w .      # Organize imports and format
+gofmt -s -w .
+goimports -w .
+golangci-lint run
 ```
 
-### Running
+### 运行
+
 ```bash
-./bin/podsync --config config.toml      # Run with config file
-./bin/podsync --debug                   # Run with debug logging
-./bin/podsync --headless                # Run once and exit (no web server)
-./bin/podsync --no-banner               # Suppress ASCII banner on startup
-./bin/podsync --migrate-filenames       # Migrate files to current filename_template and exit
-./bin/podsync --migrate-filenames-dry-run --migrate-filenames  # Preview migration without changes
+./bin/podsync --config config.toml
+./bin/podsync --debug
+./bin/podsync --headless
+./bin/podsync --no-banner
+./bin/podsync --migrate-filenames
+./bin/podsync --migrate-filenames --migrate-filenames-dry-run
 ```
 
 ### Docker
+
 ```bash
-make docker                           # Build local Docker image
+make docker
 docker run -it --rm localhost/podsync:latest
 ```
 
-### Development Debugging
-Use VS Code with the Go extension. The repository includes `.vscode/launch.json` with a "Debug Podsync" configuration that runs with `config.toml`.
+## CI/CD
 
-### Dev Container
-The repository includes a `.devcontainer/` configuration for VS Code or GitHub Codespaces with Go tooling pre-configured.
+- CI 在 `push` 到 `main` 和针对 `main` 的 PR 上运行。
+- CI 覆盖 Linux、Windows、macOS 构建，以及 Ubuntu 测试、覆盖率和 lint。
+- Nightly workflow 在 `main` push、手动触发和每日定时触发时构建 multi-arch 镜像。
+- Nightly 镜像：`ghcr.io/kyangc/podsync:nightly`。
+- Release workflow 在推送 `v*` tag 时构建并推送：
+  - `ghcr.io/kyangc/podsync:<tag>`
+  - `ghcr.io/kyangc/podsync:latest`
 
-## Development Guidelines
+## 开发约定
 
-### Code Quality
-- Write clean, idiomatic Go code following Go conventions and best practices
-- Use structured logging with logrus for consistent log formatting
-- Ensure proper error handling and meaningful error messages
-- Follow the existing code style and patterns in the repository
+- 修改代码前先理解现有结构，优先沿用本仓库已有模式。
+- 配置校验发生在启动阶段。
+- 优雅退出通过 context cancellation 完成。
+- 存储层通过抽象支持 local/S3。
+- API key 轮换用于缓解单 key 配额限制。
+- feed 调度支持 `update_period` 和 `cron_schedule`。
+- Bilibili 相关行为要同时考虑 discovery 阶段和 `yt-dlp` 下载阶段。
+- 修改 Bilibili cookies 行为时，必须确认不会污染源 cookies 文件。
 
-### Testing and Quality Assurance
-- **CRITICAL**: Always run ALL of the following commands before making a commit or opening a PR:
-  1. `go fmt ./...` - Format all Go files
-  2. `golangci-lint run` - Run all configured linters and formatters
-  3. `make test` - Run all unit tests
-- Run tests first with `make test` to ensure functionality works correctly
-- Run linter with `golangci-lint run` to ensure proper formatting and code quality
-- Ensure ALL tests pass AND ALL linting checks pass before committing
-- Review code carefully for spelling errors, typos, and grammatical mistakes
-- Test changes locally with different configurations when applicable
-- The project uses golangci-lint with strict formatting rules - code must pass ALL checks
+## 提交前检查
 
-### Git Workflow
-- **NEVER commit or push changes unless explicitly asked by the user**
-- Keep commit messages brief and to the point
-- Use a short, descriptive commit title (50 characters or less)
-- Include a brief commit body that summarizes changes in 1-3 sentences when needed (wrap at 120 characters)
-- Do not include automated signatures or generation notices in commit messages or pull requests
-- Don't add "Generated with Claude Code" to commit messages or pull request descriptions
-- Don't add "Co-Authored-By: Claude noreply@anthropic.com" to commit messages or pull request descriptions
-- Keep commits focused and atomic - one logical change per commit
-- Ensure the build passes before pushing commits
+代码变更提交前至少运行：
 
-### Pull Request Guidelines
-- Keep PR descriptions concise and focused
-- Include the brief commit body summary plus relevant examples if applicable
-- Avoid verbose sections like "Changes Made", "Test Plan", or extensive bullet lists
-- Focus on what the change does and why, not exhaustive implementation details
-- Include code examples only when they help demonstrate usage or key functionality
+```bash
+go fmt ./...
+golangci-lint run
+make test
+```
 
-## Key Conventions
+仅文档变更不需要跑完整 Go 测试，但应检查 Markdown 链接、配置示例语法和 git diff。
 
-- Configuration validation happens at startup
-- Graceful shutdown with context cancellation
-- Storage abstraction allows switching between local/S3
-- API key rotation support for rate limiting
-- Cron-based scheduling for feed updates
-- Episode filtering and cleanup capabilities
-- Customizable filename templates with migration tooling for existing files
+## Git 工作流
 
-## GitHub Issue Handling
+- 除非用户明确要求，不要提交或推送。
+- commit 要聚焦且原子化。
+- commit title 简短清楚，必要时用 1-3 句 body 说明。
+- 不要在 commit 或 PR 里添加自动生成签名。
+- 不要添加 `Generated with Claude Code`。
+- 不要添加 `Co-Authored-By: Claude ...`。
 
-When mentioned on GitHub issues with requests like "take a look" or "can you fix this":
-- Investigate the issue and attempt to implement a fix
-- Open a pull request with the solution
-- If a fix is not possible or requirements are unclear, respond in the issue explaining what's needed or asking for clarification
+## GitHub Issue 处理
 
-## Maintaining This Documentation
+如果在 GitHub issue 中被要求 “take a look” 或 “can you fix this”：
 
-**IMPORTANT**: Keep this CLAUDE.md file up to date whenever making changes to the codebase:
+- 先复现和定位问题。
+- 能修就实现修复并开 PR。
+- 如果需求不清或暂时不能修，在 issue 中说明阻塞点或需要的澄清。
 
-- **New features**: Document new configuration options, CLI flags, endpoints, or capabilities
-- **Behavior changes**: Update relevant sections when modifying how episodes are processed, stored, or cleaned up
-- **New platform support**: Add platform-specific documentation under "Platform-Specific Behaviors"
-- **API changes**: Update configuration examples and available options
-- **Bug fixes that affect documented behavior**: Correct any documentation that no longer reflects reality
-- **New limitations or removed limitations**: Update the "Limitations and Known Issues" section
+## 维护本文档
 
-This ensures Claude can accurately answer questions about current Podsync behavior and capabilities.
+修改代码行为时同步更新这份文档：
 
-## Formatting and Linting Requirements
+- 新功能：补充配置项、CLI flag、endpoint 或能力。
+- 行为变化：更新节目处理、存储、清理、下载相关说明。
+- 新平台支持：在“平台行为”里补充。
+- API 变化：更新配置示例。
+- 会影响用户认知的 bug fix：修正文档里对应行为。
+- 新限制或限制解除：更新“已知限制”。
 
-This project uses golangci-lint with strict formatting rules configured in `.golangci.yml`. Common formatting requirements include:
+## 关键文件索引
 
-- Proper spacing around operators (`if condition {` not `if(condition){`)
-- Correct struct field alignment and spacing
-- Proper import ordering (standard library, third-party, local packages)
-- No trailing whitespace
-- Consistent spacing around assignment operators (`key: value` not `key:value`)
-- Space after commas in function parameters and struct literals
-
-**Always run `go fmt ./...`, `golangci-lint run`, AND `make test` after making ANY code changes to ensure both functionality and formatting are correct before committing.**
-
-## Key File References
-
-- Main entry: `cmd/podsync/main.go`
-- Config loading: `cmd/podsync/config.go`
-- Feed update: `services/update/updater.go` (episode lifecycle, cleanup)
-- Episode filtering: `services/update/matcher.go`
-- Database: `pkg/db/badger.go`
-- Storage: `pkg/fs/local.go`, `pkg/fs/s3.go`
-- Feed generation: `pkg/feed/xml.go` (RSS, filename handling)
-- Filename migration: `services/migrate/migrate.go`
-- Web server: `services/web/server.go`
-- YouTube builder: `pkg/builder/youtube.go`
-- Vimeo builder: `pkg/builder/vimeo.go`
-- SoundCloud builder: `pkg/builder/soundcloud.go`
-- Twitch builder: `pkg/builder/twitch.go`
-- URL parsing: `pkg/builder/url.go`
-- youtube-dl wrapper: `pkg/ytdl/ytdl.go`
-- Hooks: `pkg/feed/hooks.go`
-- API key rotation: `pkg/feed/key.go`
+- 主入口：`cmd/podsync/main.go`
+- 配置加载：`cmd/podsync/config.go`
+- Feed 更新：`services/update/updater.go`
+- 节目过滤：`services/update/matcher.go`
+- 数据库：`pkg/db/badger.go`
+- 存储：`pkg/fs/local.go`、`pkg/fs/s3.go`
+- RSS 生成：`pkg/feed/xml.go`
+- 文件名迁移：`services/migrate/migrate.go`
+- Web 服务：`services/web/server.go`
+- YouTube builder：`pkg/builder/youtube.go`
+- Vimeo builder：`pkg/builder/vimeo.go`
+- SoundCloud builder：`pkg/builder/soundcloud.go`
+- Twitch builder：`pkg/builder/twitch.go`
+- Bilibili builder：`pkg/builder/bilibili.go`、`pkg/builder/bilibili_api.go`
+- URL 解析：`pkg/builder/url.go`
+- yt-dlp 封装：`pkg/ytdl/ytdl.go`
+- Hooks：`pkg/feed/hooks.go`
+- API key 轮换：`pkg/feed/key.go`

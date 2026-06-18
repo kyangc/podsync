@@ -1,25 +1,31 @@
-# How to get Vimeo API token
+# 获取 Vimeo API Token
 
-1. Create an account on https://vimeo.com
-2. Navigate to https://developer.vimeo.com
-3. Click `New app` button.
+1. 在 https://vimeo.com 创建账号。
+2. 打开 https://developer.vimeo.com
+3. 点击 `New app`。
 ![Create a new app](img/vimeo_create_app.png)
-4. Click `Create App`.
-5. Navigate to [Generate an access token](https://developer.vimeo.com/apps/160740#generate_access_token) section.
+4. 点击 `Create App`。
+5. 进入 [Generate an access token](https://developer.vimeo.com/apps/160740#generate_access_token) 区域。
 ![Generate an access token](img/vimeo_access_token.png)
-6. Click `Generate`.
+6. 点击 `Generate`。
 ![Tokens](img/vimeo_token.png)
-7. Copy a token to your CLI's configuration file or set it as an environment variable.
+7. 复制生成的 token，写入 Podsync 配置文件，或设置为环境变量。
+
+配置文件写法：
+
 ```toml
 [tokens]
 vimeo = "key1"
 ```
-Or set the environment variable:
-```sh
+
+环境变量写法：
+
+```bash
 export PODSYNC_VIMEO_API_KEY="key1"
 ```
 
-For API key rotation, you can specify multiple keys separated by spaces:
-```sh
+如果要轮换多个 API key，用空格分隔：
+
+```bash
 export PODSYNC_VIMEO_API_KEY="key1 key2"
 ```

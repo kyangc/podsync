@@ -1,161 +1,160 @@
-# This is an example of TOML configuration file for Podsync.
+# Podsync TOML 配置示例。
 
-# Global cleanup policy applied to feeds that don't specify their own cleanup policy.
-# When set, this policy is used as a fallback for all feeds.
-# Comment out or remove this section if you don't want a global cleanup policy.
+# 全局清理策略。没有单独配置清理策略的 feed 会使用这里的配置。
+# 如果不需要全局清理，注释或删除整个 [cleanup] 段即可。
 [cleanup]
-keep_last = 50  # Keep last 50 episodes globally (unless overridden per feed)
+keep_last = 50  # 全局只保留最近 50 期节目文件；单个 feed 可覆盖
 
-# Web server related configuration.
+# Web 服务配置。
 [server]
-# HTTP server port.
+# HTTP 服务端口。
 port = 8080
-# Optional. If you want to hide Podsync behind reverse proxy like nginx, you can use hostname field.
-# Server will be accessible from http://localhost:8080, but episode links will point to https://my.test.host:4443/ID1/XYZ
+# 可选。如果 Podsync 位于 nginx 等反向代理后面，可以设置外部访问地址。
+# 服务本身仍监听 http://localhost:8080，但 RSS 中的节目链接会指向 https://my.test.host:4443/ID1/XYZ。
 hostname = "https://my.test.host:4443"
-# Bind a specific IP addresses for server ,"*": bind all IP addresses which is default option, localhost or 127.0.0.1  bind a single IPv4 address
+# 绑定地址。"*" 表示绑定所有 IP；也可以填 localhost、127.0.0.1 或某个具体 IPv4 地址。
 bind_address = "172.20.10.2"
-# Specify path for reverse proxy and only [A-Za-z0-9]
+# 反向代理路径前缀，只能包含 [A-Za-z0-9]。
 path = "test"
-# Optional. Enable Web UI. Feeds have to be include in OPML file to appear (see below)
+# 可选。启用 Web UI。要出现在 Web UI 中的 feed 需要配置 opml = true。
 web_ui = true
-# Optional. If you want to use TLS you must set the TLS flag and path to the certificate file and private key file.
+# 可选。启用 TLS 时必须同时设置证书文件和私钥文件路径。
 tls = true
 certificate_path = "/var/www/cert.pem"
 key_file_path = "/var/www/priv.pem"
-# Optional. Enable debug endpoints (/debug/vars) for runtime metrics. Disabled by default for security.
-# Only enable this if you need to debug the application and the endpoint is not publicly accessible.
+# 可选。启用 /debug/vars 运行指标端点。出于安全考虑默认关闭。
+# 只有在需要调试且端点不会暴露到公网时才建议开启。
 debug_endpoints = false
-# Optional. Block search engine indexing by serving robots.txt and adding X-Robots-Tag header.
+# 可选。阻止搜索引擎索引：提供 robots.txt，并添加 X-Robots-Tag 响应头。
 no_index = false
-# Optional. Disable directory listings, return 404 for folder access (e.g. GET / or GET /feedID).
+# 可选。关闭目录列表；访问目录路径时返回 404，例如 GET / 或 GET /feedID。
 no_listing = false
 
-# Configure where to store the episode data
+# 节目文件存储位置。
 [storage]
-  # Could be "local" (default) for the local file system, or "s3" for a S3-compatible storage provider (e.g. AWS S3)
+  # 可选 "local" 或 "s3"。"local" 是默认值；"s3" 表示兼容 S3 的存储服务，例如 AWS S3。
   type = "local"
 
   [storage.local]
-  data_dir = "/app/data" # Don't change if you run podsync via docker
+  data_dir = "/app/data" # 使用 Docker 运行时通常不要改这个路径
 
-  # To configure for a S3 provider, set key and secret in environment variables `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, respectively;
-  # then fillout the API endpoint, region, and bucket below.
+  # 使用 S3 时，把访问凭据放到环境变量 AWS_ACCESS_KEY_ID 和 AWS_SECRET_ACCESS_KEY。
+  # 然后在下面填写 endpoint、region 和 bucket。
   [storage.s3]
   endpoint_url = "https://s3.us-west-2.amazonaws.com"
   region = "us-west-2"
   bucket = "example-bucket-name"
-  # If you use prefix, you may need to add a path to `server.hostname` setting
-  # e.g. https://example-bucket-name.s3.us-west-2.amazonaws.com/example/prefix/
+  # 如果设置了 prefix，server.hostname 通常也需要带上对应路径。
+  # 例如 https://example-bucket-name.s3.us-west-2.amazonaws.com/example/prefix/
   prefix = "example/prefix"
 
-# API keys to be used to access providers that require API credentials.
-# Bilibili feeds do not require an official API token.
-# These can be either specified as string parameter or array of string (so those will be rotated).
-# Alternatively, you can set the following environment variables:
-#   PODSYNC_YOUTUBE_API_KEY for YouTube
-#   PODSYNC_VIMEO_API_KEY for Vimeo
-#   PODSYNC_SOUNDCLOUD_API_KEY for Soundcloud
-#   PODSYNC_TWITCH_API_KEY for Twitch (format: CLIENT_ID:CLIENT_SECRET)
-# Environment variables support multiple keys separated by spaces for API key rotation:
+# 需要 API 凭据的平台在这里配置 key。
+# Bilibili feed 不需要官方 API token。
+# key 可以写成字符串，也可以写成字符串数组；数组会启用轮换。
+# 也可以使用以下环境变量：
+#   PODSYNC_YOUTUBE_API_KEY 用于 YouTube
+#   PODSYNC_VIMEO_API_KEY 用于 Vimeo
+#   PODSYNC_SOUNDCLOUD_API_KEY 用于 SoundCloud
+#   PODSYNC_TWITCH_API_KEY 用于 Twitch，格式为 CLIENT_ID:CLIENT_SECRET
+# 环境变量也支持多个 key，用空格分隔：
 #   export PODSYNC_YOUTUBE_API_KEY="key1 key2 key3"
 [tokens]
-youtube = "YOUTUBE_API_TOKEN" # YouTube API Key. See https://developers.google.com/youtube/registering_an_application
-vimeo = [ # Multiple keys will be rotated.
-  "VIMEO_API_KEY_1", # Vimeo developer keys. See https://developer.vimeo.com/api/guides/start#generate-access-token
+youtube = "YOUTUBE_API_TOKEN" # YouTube API Key，见 https://developers.google.com/youtube/registering_an_application
+vimeo = [ # 多个 key 会轮换使用。
+  "VIMEO_API_KEY_1", # Vimeo developer key，见 https://developer.vimeo.com/api/guides/start#generate-access-token
   "VIMEO_API_KEY_2"
 ]
 
-# The list of data sources to be hosted by Podsync.
-# These are channels, users, playlists, etc.
+# Podsync 要托管的数据源列表，例如频道、用户、播放列表、Bilibili 空间等。
 [feeds]
-  # Each channel must have a unique identifier (in this example "ID1").
+  # 每个 feed 都需要一个唯一 ID，本例为 "ID1"。
   [feeds.ID1]
-  # URL address of a channel, group, user, or playlist.
+  # 频道、用户、播放列表或空间地址。
   url = "https://www.youtube.com/channel/CHANNEL_NAME_TO_HOST"
-  # Bilibili examples:
+  # Bilibili 示例：
   # url = "https://space.bilibili.com/291222529"
   # url = "https://space.bilibili.com/7380321/lists/678635?type=season"
   # url = "https://space.bilibili.com/7458285/lists/1067956?type=series"
 
-  # The number of episodes to query each update (keep in mind, that this might drain API token)
+  # 每次更新时查询的节目数量。数值太大可能更快消耗 API 配额。
   page_size = 50
 
-  # How often query for updates, examples: "60m", "4h", "2h45m"
+  # 更新频率，示例："60m"、"4h"、"2h45m"。
   update_period = "12h"
 
-  quality = "high" # "high" or "low"
-  format = "video" # "audio", "video" or "custom"
-  # When format = "custom"
-  # YouTubeDL format parameter and result file extension
+  quality = "high" # "high" 或 "low"
+  format = "video" # "audio"、"video" 或 "custom"
+  # 当 format = "custom" 时使用。
+  # youtube_dl_format 是传给 yt-dlp 的格式选择器，extension 是结果文件后缀。
   custom_format = { youtube_dl_format = "bestaudio[ext=m4a]", extension = "m4a" }
 
-  playlist_sort = "asc" # or "desc", which will fetch playlist items from the end
+  playlist_sort = "asc" # 也可以是 "desc"，表示从播放列表末尾开始抓取
 
-  # Optional maximal height of video, example: 720, 1080, 1440, 2160, ...
+  # 可选。视频最大高度，例如 720、1080、1440、2160 等。
   max_height = 720
 
-  # Optionally include this feed in OPML file (default value: false)
+  # 可选。是否把这个 feed 加入 OPML 导出，默认 false。
   opml = true
 
-  # Optional cron expression format for more precise update schedule.
-  # If set then overwrite 'update_period'.
+  # 可选。更精确的 cron 调度表达式。
+  # 设置后会覆盖 update_period。
   cron_schedule = "@every 12h"
 
-  # Whether to cleanup old episodes for this specific feed.
-  # Keep last 10 episodes (order desc by PubDate)
-  # This overrides the global cleanup policy if one is set.
+  # 这个 feed 的旧节目清理策略。
+  # 只保留最近 10 期节目文件，按 PubDate 倒序计算。
+  # 如果设置了全局清理策略，这里会覆盖全局配置。
   clean = { keep_last = 10 }
 
-  # Optional Golang regexp format.
-  # If set, then only download matching episodes.
-  # Duration filters are in seconds.
-  # max_age filter is in days.
-  # min_age filter is in days.
+  # 可选。Go regexp 正则表达式。
+  # 设置后，只有匹配条件的节目才会下载。
+  # 时长过滤单位为秒。
+  # max_age 单位为天。
+  # min_age 单位为天。
   filters = { title = "regex for title here", not_title = "regex for negative title match", description = "...", not_description = "...", min_duration = 0, max_duration = 86400, max_age = 365, min_age = 1 }
 
-  # Optional extra arguments passed to youtube-dl when downloading videos from this feed.
-  # This example would embed available English closed captions in the videos.
-  # Note that setting '--audio-format' for audio format feeds, or '--format' or '--output' for any format may cause
-  # unexpected behaviour. You should only use this if you know what you are doing, and have read up on youtube-dl's options!
+  # 可选。下载这个 feed 时额外传给 youtube-dl/yt-dlp 的参数。
+  # 下面示例会把可用的英文字幕写入并嵌入视频文件。
+  # 注意：audio feed 中设置 '--audio-format'，或任何 feed 中设置 '--format' / '--output'，
+  # 都可能造成非预期行为。只有在理解 youtube-dl/yt-dlp 参数含义时才建议使用。
   youtube_dl_args = ["--write-sub", "--embed-subs", "--sub-lang", "en,en-US,en-GB"]
 
-  # Optional Bilibili-specific settings.
-  # cookies_file should point to a Netscape-format cookies.txt file when fetching or downloading restricted videos.
+  # 可选。Bilibili 专用配置。
+  # include_upower_exclusive = true 时会尝试包含“充电专属”视频。
+  # cookies_file 指向 Netscape 格式 cookies.txt；访问登录态、会员或受限视频时通常需要。
   bilibili = { include_upower_exclusive = false, cookies_file = "" }
 
-  # Optional filename template for downloaded media and RSS enclosure links (without extension).
-  # Supported tokens: {{id}}, {{title}}, {{pub_date}}, {{feed_id}}
-  # Example output: 2026-02-08_My_Video_Title_dQw4w9WgXcQ.mp4
+  # 可选。下载媒体文件和 RSS enclosure 链接使用的文件名模板，不包含扩展名。
+  # 支持 token：{{id}}、{{title}}、{{pub_date}}、{{feed_id}}
+  # 示例输出：2026-02-08_My_Video_Title_dQw4w9WgXcQ.mp4
   filename_template = "{{pub_date}}_{{title}}_{{id}}"
 
-  # When set to true, podcasts indexers such as iTunes or Google Podcasts will not index this podcast
+  # 设置为 true 后，iTunes、Google Podcasts 等索引服务不应索引这个 podcast。
   private_feed = true
 
-  # Optional post-episode download hooks
-  # Execute commands after each episode is downloaded
-  # Available environment variables: EPISODE_FILE, FEED_NAME, EPISODE_TITLE
-  
-  # Webhook notification example
+  # 可选。节目下载成功后的 hook。
+  # 每下载完成一期节目就执行命令。
+  # 可用环境变量：EPISODE_FILE、FEED_NAME、EPISODE_TITLE。
+
+  # Webhook 通知示例。
   [[feeds.ID1.post_episode_download]]
   command = ["curl", "-X", "POST", "-d", "New episode: $EPISODE_TITLE", "https://webhook.example.com/notify"]
   timeout = 30
 
-  # Custom script example
+  # 自定义脚本示例。
   [[feeds.ID1.post_episode_download]]
   command = ["/path/to/your/process-episode.sh"]
   timeout = 120
 
-  # Optional episode download error hooks
-  # Execute commands when an episode download fails (e.g. to notify on cookie expiry)
-  # Available environment variables: FEED_NAME, EPISODE_TITLE, ERROR_MESSAGE
+  # 可选。节目下载失败后的 hook。
+  # 例如 cookies 过期时发送通知。
+  # 可用环境变量：FEED_NAME、EPISODE_TITLE、ERROR_MESSAGE。
 
-  # Webhook notification example
+  # Webhook 通知示例。
   [[feeds.ID1.on_episode_download_error]]
   command = ["curl", "-X", "POST", "-d", "Download failed for $FEED_NAME: $ERROR_MESSAGE", "https://webhook.example.com/notify"]
   timeout = 30
 
-  # Optional feed customizations
+  # 可选。自定义 feed 元数据。
   [feeds.ID1.custom]
   title = "Level1News"
   description = "News sections of Level1Techs, in a podcast feed!"
@@ -166,30 +165,29 @@ vimeo = [ # Multiple keys will be rotated.
   subcategories = ["Documentary", "Tech News"]
   explicit = true
   lang = "en"
-  author = "Mrs. Smith (mrs@smith.org)"
   ownerName = "Mrs. Smith"
   ownerEmail = "mrs@smith.org"
-  # optional: this will override the default link (usually the URL address) in the generated RSS feed with another link
+  # 可选。覆盖生成的 RSS feed 中默认 link，默认通常是源 URL。
   link = "https://example.org"
 
-# Podsync uses local database to store feeds and episodes metadata.
-# This section is optional and usually not needed to configure unless some very specific corner cases.
-# Refer to https://dgraph.io/docs/badger/get-started/#memory-usage for documentation.
+# Podsync 使用本地数据库存储 feed 和节目元数据。
+# 这个配置段可选，通常不需要设置，除非遇到特定 BadgerDB 运行环境问题。
+# 参考：https://dgraph.io/docs/badger/get-started/#memory-usage
 [database]
   badger = { truncate = true, file_io = true }
 
-# Youtube-dl specific configuration.
+# youtube-dl/yt-dlp 相关配置。
 [downloader]
-# Optional, auto update youtube-dl every 24 hours
+# 可选。每 24 小时自动更新 youtube-dl/yt-dlp。
 self_update = true
-# Download timeout in minutes.
+# 下载超时时间，单位为分钟。
 timeout = 15
 
-# Optional log config. If not specified logs to the stdout
+# 可选。日志配置。不配置时输出到 stdout。
 [log]
 filename = "podsync.log"
 max_size = 50 # MB
-max_age = 30 # days
+max_age = 30 # 天
 max_backups = 7
 compress = true
 debug = false
