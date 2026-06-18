@@ -300,6 +300,11 @@ func buildArgs(feedConfig *feed.Config, episode *model.Episode, outputFilePath s
 		format := "bestaudio"
 		if feedConfig.Quality == model.QualityLow {
 			format = "worstaudio"
+			if isBilibiliURL(episode.VideoURL) {
+				format = "worstaudio/worst"
+			}
+		} else if isBilibiliURL(episode.VideoURL) {
+			format = "bestaudio/best"
 		}
 
 		args = append(args, "--extract-audio", "--audio-format", "mp3", "--format", format)

@@ -54,7 +54,21 @@ func TestBuildArgs(t *testing.T) {
 			output:   "/tmp/1",
 			videoURL: "https://www.bilibili.com/video/BV1e3JK6ZEjF",
 			expect: []string{
-				"--extract-audio", "--audio-format", "mp3", "--format", "bestaudio",
+				"--extract-audio", "--audio-format", "mp3", "--format", "bestaudio/best",
+				"--add-header", "Referer:https://www.bilibili.com/",
+				"--add-header", "Origin:https://www.bilibili.com",
+				"--add-header", "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
+				"--output", "/tmp/1", "https://www.bilibili.com/video/BV1e3JK6ZEjF",
+			},
+		},
+		{
+			name:     "Audio Bilibili low quality falls back to video",
+			format:   model.FormatAudio,
+			quality:  model.QualityLow,
+			output:   "/tmp/1",
+			videoURL: "https://www.bilibili.com/video/BV1e3JK6ZEjF",
+			expect: []string{
+				"--extract-audio", "--audio-format", "mp3", "--format", "worstaudio/worst",
 				"--add-header", "Referer:https://www.bilibili.com/",
 				"--add-header", "Origin:https://www.bilibili.com",
 				"--add-header", "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
@@ -68,7 +82,7 @@ func TestBuildArgs(t *testing.T) {
 			videoURL: "https://www.bilibili.com/video/BV1tGjV68E7h",
 			ytdlArgs: []string{"--cookies-from-browser", "chrome"},
 			expect: []string{
-				"--extract-audio", "--audio-format", "mp3", "--format", "bestaudio",
+				"--extract-audio", "--audio-format", "mp3", "--format", "bestaudio/best",
 				"--add-header", "Referer:https://www.bilibili.com/",
 				"--add-header", "Origin:https://www.bilibili.com",
 				"--add-header", "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
@@ -83,7 +97,7 @@ func TestBuildArgs(t *testing.T) {
 			videoURL: "https://www.bilibili.com/video/BV1tGjV68E7h",
 			bilibili: feed.BilibiliConfig{CookiesFile: "/app/config/bilibili-cookies.txt"},
 			expect: []string{
-				"--extract-audio", "--audio-format", "mp3", "--format", "bestaudio",
+				"--extract-audio", "--audio-format", "mp3", "--format", "bestaudio/best",
 				"--add-header", "Referer:https://www.bilibili.com/",
 				"--add-header", "Origin:https://www.bilibili.com",
 				"--add-header", "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
