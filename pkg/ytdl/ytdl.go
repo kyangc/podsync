@@ -225,7 +225,18 @@ func (dl *YoutubeDl) Download(ctx context.Context, feedConfig *feed.Config, epis
 	// filePath with YoutubeDl template format
 	filePath := filepath.Join(tmpDir, fmt.Sprintf("%s.%s", baseName, "%(ext)s"))
 
-	args := buildArgs(feedConfig, episode, filePath)
+	downloadFeedConfig := feedConfig
+	cookiesFile, err := prepareBilibiliCookiesFile(feedConfig, episode, tmpDir)
+	if err != nil {
+		return nil, err
+	}
+	if cookiesFile != "" {
+		copiedConfig := *feedConfig
+		copiedConfig.Bilibili.CookiesFile = cookiesFile
+		downloadFeedConfig = &copiedConfig
+	}
+
+	args := buildArgs(downloadFeedConfig, episode, filePath)
 
 	dl.updateLock.Lock()
 	defer dl.updateLock.Unlock()
@@ -304,6 +315,34 @@ func buildArgs(feedConfig *feed.Config, episode *model.Episode, outputFilePath s
 
 	args = append(args, "--output", outputFilePath, episode.VideoURL)
 	return args
+}
+
+func prepareBilibiliCookiesFile(feedConfig *feed.Config, episode *model.Episode, tmpDir string) (string, error) {
+	if feedConfig.Bilibili.CookiesFile == "" || !isBilibiliURL(episode.VideoURL) {
+		return "", nil
+	}
+
+	source, err := os.Open(feedConfig.Bilibili.CookiesFile)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to open bilibili cookies file")
+	}
+	defer source.Close()
+
+	cookiesFile := filepath.Join(tmpDir, "bilibili-cookies.txt")
+	dest, err := os.OpenFile(cookiesFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create temporary bilibili cookies file")
+	}
+
+	if _, err := io.Copy(dest, source); err != nil {
+		dest.Close()
+		return "", errors.Wrap(err, "failed to copy bilibili cookies file")
+	}
+	if err := dest.Close(); err != nil {
+		return "", errors.Wrap(err, "failed to close temporary bilibili cookies file")
+	}
+
+	return cookiesFile, nil
 }
 
 func defaultDownloadArgs(feedConfig *feed.Config, episode *model.Episode) []string {

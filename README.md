@@ -146,8 +146,8 @@ url = "https://space.bilibili.com/291222529"
 youtube_dl_args = ["--cookies", "/app/config/cookies.txt"]
 ```
 
-For Bilibili feeds, setting `bilibili.cookies_file` uses the same cookies file for both Bilibili API requests and
-`yt-dlp` downloads.
+For Bilibili feeds, setting `bilibili.cookies_file` uses the configured cookies file for Bilibili API requests. Podsync
+passes a temporary copy to `yt-dlp` downloads so `yt-dlp` cannot overwrite or trim the source cookies file.
 
 ## 🚀 How to run
 

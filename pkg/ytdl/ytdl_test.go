@@ -1,12 +1,15 @@
 package ytdl
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/mxpv/podsync/pkg/feed"
 	"github.com/mxpv/podsync/pkg/model"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildArgs(t *testing.T) {
@@ -173,4 +176,44 @@ func TestBuildArgs(t *testing.T) {
 			assert.EqualValues(t, tst.expect, result)
 		})
 	}
+}
+
+func TestPrepareBilibiliCookiesFileUsesTemporaryCopy(t *testing.T) {
+	sourceDir := t.TempDir()
+	sourcePath := filepath.Join(sourceDir, "bilibili-cookies.txt")
+	require.NoError(t, os.WriteFile(sourcePath, []byte("login-cookie"), 0600))
+
+	tmpDir := t.TempDir()
+	cookiesFile, err := prepareBilibiliCookiesFile(&feed.Config{
+		Bilibili: feed.BilibiliConfig{CookiesFile: sourcePath},
+	}, &model.Episode{
+		VideoURL: "https://www.bilibili.com/video/BV1tGjV68E7h",
+	}, tmpDir)
+
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(tmpDir, "bilibili-cookies.txt"), cookiesFile)
+	assert.NotEqual(t, sourcePath, cookiesFile)
+
+	copied, err := os.ReadFile(cookiesFile)
+	require.NoError(t, err)
+	assert.Equal(t, "login-cookie", string(copied))
+
+	require.NoError(t, os.WriteFile(cookiesFile, []byte("anonymous-cookie"), 0600))
+	source, err := os.ReadFile(sourcePath)
+	require.NoError(t, err)
+	assert.Equal(t, "login-cookie", string(source))
+}
+
+func TestPrepareBilibiliCookiesFileSkipsNonBilibiliEpisodes(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "cookies.txt")
+	require.NoError(t, os.WriteFile(sourcePath, []byte("login-cookie"), 0600))
+
+	cookiesFile, err := prepareBilibiliCookiesFile(&feed.Config{
+		Bilibili: feed.BilibiliConfig{CookiesFile: sourcePath},
+	}, &model.Episode{
+		VideoURL: "https://youtube.com/watch?v=abc",
+	}, t.TempDir())
+
+	require.NoError(t, err)
+	assert.Empty(t, cookiesFile)
 }
