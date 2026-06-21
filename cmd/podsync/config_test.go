@@ -21,6 +21,7 @@ vimeo = ["321", "456"]
 [server]
 port = 80
 data_dir = "test/data/"
+health_max_feed_age = "2h"
 
 [database]
 dir = "/home/user/db/"
@@ -63,6 +64,7 @@ timeout = 15
 
 	assert.Equal(t, "test/data/", config.Server.DataDir)
 	assert.EqualValues(t, 80, config.Server.Port)
+	assert.EqualValues(t, 2*time.Hour, config.Server.HealthMaxFeedAge)
 
 	assert.Equal(t, "/home/user/db/", config.Database.Dir)
 

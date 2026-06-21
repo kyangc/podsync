@@ -15,7 +15,8 @@ import (
 
 type Server struct {
 	http.Server
-	db db.Storage
+	db               db.Storage
+	healthMaxFeedAge time.Duration
 }
 
 type Config struct {
@@ -46,7 +47,11 @@ type Config struct {
 	NoIndex bool `toml:"no_index"`
 	// NoListing returns 404 for directory listings, only serving actual files (disabled by default)
 	NoListing bool `toml:"no_listing"`
+	// HealthMaxFeedAge is the maximum age of the latest successful feed update before /health reports unhealthy.
+	HealthMaxFeedAge time.Duration `toml:"health_max_feed_age"`
 }
+
+const defaultHealthMaxFeedAge = 24 * time.Hour
 
 func New(cfg Config, storage http.FileSystem, database db.Storage) *Server {
 	port := cfg.Port
@@ -60,7 +65,8 @@ func New(cfg Config, storage http.FileSystem, database db.Storage) *Server {
 	}
 
 	srv := Server{
-		db: database,
+		db:               database,
+		healthMaxFeedAge: cfg.healthMaxFeedAge(),
 	}
 
 	srv.Addr = fmt.Sprintf("%s:%d", bindAddress, port)
@@ -95,21 +101,45 @@ func New(cfg Config, storage http.FileSystem, database db.Storage) *Server {
 }
 
 type HealthStatus struct {
-	Status         string    `json:"status"`
-	Timestamp      time.Time `json:"timestamp"`
-	FailedEpisodes int       `json:"failed_episodes,omitempty"`
-	Message        string    `json:"message,omitempty"`
+	Status              string     `json:"status"`
+	Timestamp           time.Time  `json:"timestamp"`
+	FailedEpisodes      int        `json:"failed_episodes,omitempty"`
+	LastFeedUpdate      *time.Time `json:"last_feed_update,omitempty"`
+	MaxFeedAgeSeconds   int64      `json:"max_feed_age_seconds,omitempty"`
+	StaleFeedAgeSeconds int64      `json:"stale_feed_age_seconds,omitempty"`
+	Message             string     `json:"message,omitempty"`
 }
 
 func (s *Server) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	now := time.Now()
+	maxFeedAge := s.healthMaxFeedAge
+	status := HealthStatus{
+		Timestamp:         now,
+		MaxFeedAgeSeconds: int64(maxFeedAge.Seconds()),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if s.db == nil {
+		status.Status = "unhealthy"
+		status.Message = "database is not configured"
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(status)
+		return
+	}
 
 	// Check for recent download failures within the last 24 hours
 	failedCount := 0
-	cutoffTime := time.Now().Add(-24 * time.Hour)
+	cutoffTime := now.Add(-24 * time.Hour)
+	feedCount := 0
+	var lastFeedUpdate time.Time
 
 	// Walk through all feeds to count recent failures
 	err := s.db.WalkFeeds(ctx, func(feed *model.Feed) error {
+		feedCount++
+		if feed.UpdatedAt.After(lastFeedUpdate) {
+			lastFeedUpdate = feed.UpdatedAt
+		}
 		return s.db.WalkEpisodes(ctx, feed.ID, func(episode *model.Episode) error {
 			if episode.Status == model.EpisodeError && episode.PubDate.After(cutoffTime) {
 				failedCount++
@@ -118,10 +148,10 @@ func (s *Server) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	})
 
-	w.Header().Set("Content-Type", "application/json")
-
-	status := HealthStatus{
-		Timestamp: time.Now(),
+	if !lastFeedUpdate.IsZero() {
+		lastUpdate := lastFeedUpdate
+		status.LastFeedUpdate = &lastUpdate
+		status.StaleFeedAgeSeconds = int64(now.Sub(lastFeedUpdate).Seconds())
 	}
 
 	if err != nil {
@@ -134,13 +164,29 @@ func (s *Server) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 		status.FailedEpisodes = failedCount
 		status.Message = fmt.Sprintf("found %d failed downloads in the last 24 hours", failedCount)
 		w.WriteHeader(http.StatusServiceUnavailable)
+	} else if feedCount == 0 || lastFeedUpdate.IsZero() {
+		status.Status = "unhealthy"
+		status.Message = "no successful feed updates recorded"
+		w.WriteHeader(http.StatusServiceUnavailable)
+	} else if now.Sub(lastFeedUpdate) > maxFeedAge {
+		status.Status = "unhealthy"
+		status.Message = fmt.Sprintf("latest successful feed update is older than %s", maxFeedAge)
+		w.WriteHeader(http.StatusServiceUnavailable)
 	} else {
 		status.Status = "healthy"
-		status.Message = "no recent download failures detected"
+		status.Message = "recent feed updates and downloads look healthy"
 		w.WriteHeader(http.StatusOK)
 	}
 
 	json.NewEncoder(w).Encode(status)
+}
+
+func (cfg Config) healthMaxFeedAge() time.Duration {
+	if cfg.HealthMaxFeedAge <= 0 {
+		return defaultHealthMaxFeedAge
+	}
+
+	return cfg.HealthMaxFeedAge
 }
 
 func robotsTxtHandler(w http.ResponseWriter, r *http.Request) {

@@ -338,7 +338,7 @@ debug = false
 - `/{path}/{feed_id}/{episode_name}`：节目文件下载。
 - `/{path}/podsync.opml`：OPML 导出，包含 `opml = true` 的 feed。
 - `/{path}/index.html`：Web UI，仅在启用且使用本地存储时可用。
-- `/health`：健康检查；过去 24 小时有节目下载失败时返回 503。
+- `/health`：健康检查；过去 24 小时有节目下载失败，或超过 `server.health_max_feed_age` 没有任何 feed 成功更新时返回 503。
 - `/debug/vars`：运行指标；仅当 `debug_endpoints = true` 时启用。
 - `/robots.txt`：仅当 `no_index = true` 时提供。
 

@@ -29,6 +29,9 @@ debug_endpoints = false
 no_index = false
 # 可选。关闭目录列表；访问目录路径时返回 404，例如 GET / 或 GET /feedID。
 no_listing = false
+# 可选。/health 允许的“最近一次成功更新 feed”最大年龄。
+# 超过这个时间没有任何 feed 成功更新时，/health 会返回 503。
+health_max_feed_age = "24h"
 
 # 节目文件存储位置。
 [storage]
