@@ -3,21 +3,29 @@ import type {
   AdminEpisodeAction,
   AdminEpisodeListRow,
   AdminEpisodeStatusRequest,
+  AdminEventRow,
   AdminFeedListRow,
   AdminFeedStatusRequest,
   AdminSubscriptionFeedRow,
   AdminSubscriptionOpmlRow,
+  AdminSyncRunRow,
   DownloaderDefaults,
   EpisodeAdminRow,
   EpisodeStatus,
   EpisodeStatusRow,
   EpisodeUpsertRequest,
+  EventBatchRequest,
+  EventLevel,
   FeedStatusRow,
   FeedTomlRow,
   MaxSequenceRow,
   PublicEpisodeRow,
   PublicFeedRow,
   PublicOpmlFeedRow,
+  RemoteEventInput,
+  RemoteEventType,
+  SyncRunStatus,
+  SyncRunUpsertRequest,
   TombstoneChangeRow,
 } from "./db";
 import type { Env } from "./env";
@@ -32,6 +40,40 @@ const defaultYoutubeDefaults: DownloaderDefaults = {
 };
 const maxJsonBodyBytes = 64 * 1024;
 const publicPathTokenPattern = /^[A-Za-z0-9_-]+$/;
+const maxEventBatchEvents = 100;
+const maxRunIDLength = 128;
+const maxEventTypeLength = 64;
+const maxEventMessageLength = 512;
+const maxEventCodeLength = 128;
+const maxEventDetailLength = 2048;
+const utcTimestampPattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/;
+
+const syncRunStatuses = new Set<SyncRunStatus>(["running", "success", "partial", "failed"]);
+const eventLevels = new Set<EventLevel>(["debug", "info", "warn", "error"]);
+const remoteEventTypes = new Set<RemoteEventType>([
+  "sync_run_started",
+  "sync_run_finished",
+  "remote_config_fetched",
+  "remote_config_fallback_used",
+  "remote_config_invalid",
+  "feed_update_started",
+  "feed_update_finished",
+  "feed_update_failed",
+  "episode_discovered",
+  "episode_download_finished",
+  "episode_download_failed",
+  "episode_upload_finished",
+  "episode_upload_failed",
+  "episode_report_finished",
+  "episode_report_failed",
+  "tombstone_fetched",
+  "tombstone_applied",
+  "tombstone_apply_failed",
+  "r2_probe_failed",
+  "remote_api_failed",
+  "cookie_profile_missing",
+  "cookie_profile_invalid",
+]);
 
 function text(body: string, status = 200, contentType = "text/plain; charset=utf-8"): Response {
   return new Response(body, {
@@ -127,6 +169,35 @@ function isProvider(value: unknown): value is EpisodeUpsertRequest["provider"] {
 	return value === "youtube" || value === "bilibili";
 }
 
+function validDateString(value: string): boolean {
+  const match = utcTimestampPattern.exec(value);
+  if (!match) return false;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return false;
+  const [, year, month, day, hour, minute, second] = match;
+  return parsed.getUTCFullYear() === Number(year)
+    && parsed.getUTCMonth() + 1 === Number(month)
+    && parsed.getUTCDate() === Number(day)
+    && parsed.getUTCHours() === Number(hour)
+    && parsed.getUTCMinutes() === Number(minute)
+    && parsed.getUTCSeconds() === Number(second);
+}
+
+function nonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function positiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function optionalBoundedString(value: unknown, maxLength: number, name: string): string | null | Response {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return badRequest(`${name} must be string`);
+  if (value.length > maxLength) return badRequest(`${name} is too long`);
+  return value;
+}
+
 function parseEpisodeUpsert(body: unknown): EpisodeUpsertRequest | Response {
 	if (!body || typeof body !== "object") return badRequest("invalid episode body");
 	const value = body as Record<string, unknown>;
@@ -177,6 +248,105 @@ function parseEpisodeUpsert(body: unknown): EpisodeUpsertRequest | Response {
 	if (publishedAt !== undefined) request.published_at = publishedAt;
 	if (value.duration !== undefined) request.duration = value.duration as number;
 	return request;
+}
+
+function parseSyncRunUpsert(value: unknown): SyncRunUpsertRequest | Response {
+  if (!value || typeof value !== "object") return badRequest("run is required");
+  const run = value as Record<string, unknown>;
+  if (!nonEmptyString(run.id) || run.id.length > maxRunIDLength) return badRequest("run.id is invalid");
+  if (!nonEmptyString(run.started_at) || !validDateString(run.started_at)) return badRequest("run.started_at is invalid");
+  const finishedAt = run.finished_at;
+  let finishedAtValue: string | null = null;
+  if (finishedAt !== undefined && finishedAt !== null && (!nonEmptyString(finishedAt) || !validDateString(finishedAt))) {
+    return badRequest("run.finished_at is invalid");
+  }
+  if (typeof finishedAt === "string") finishedAtValue = finishedAt;
+  if (typeof run.status !== "string" || !syncRunStatuses.has(run.status as SyncRunStatus)) {
+    return badRequest("run.status is invalid");
+  }
+  const status = run.status as SyncRunStatus;
+  if (status === "running" && finishedAtValue !== null) {
+    return badRequest("run.finished_at must be null while running");
+  }
+  if (status !== "running" && finishedAtValue === null) {
+    return badRequest("run.finished_at is required for final status");
+  }
+  if (finishedAtValue !== null && finishedAtValue < run.started_at) {
+    return badRequest("run.finished_at must be after started_at");
+  }
+  const feedsUpdated = run.feeds_updated;
+  if (!nonNegativeInteger(feedsUpdated)) return badRequest("run.feeds_updated is invalid");
+  const episodesDownloaded = run.episodes_downloaded;
+  if (!nonNegativeInteger(episodesDownloaded)) return badRequest("run.episodes_downloaded is invalid");
+  const episodesUploaded = run.episodes_uploaded;
+  if (!nonNegativeInteger(episodesUploaded)) return badRequest("run.episodes_uploaded is invalid");
+  const errorsCount = run.errors_count;
+  if (!nonNegativeInteger(errorsCount)) return badRequest("run.errors_count is invalid");
+  return {
+    id: run.id,
+    started_at: run.started_at,
+    finished_at: finishedAtValue,
+    status,
+    feeds_updated: feedsUpdated,
+    episodes_downloaded: episodesDownloaded,
+    episodes_uploaded: episodesUploaded,
+    errors_count: errorsCount,
+  };
+}
+
+function parseRemoteEvent(value: unknown): RemoteEventInput | Response {
+  if (!value || typeof value !== "object") return badRequest("event is invalid");
+  const event = value as Record<string, unknown>;
+  if (!positiveInteger(event.sequence)) return badRequest("event.sequence is invalid");
+  if (!nonEmptyString(event.event_time) || !validDateString(event.event_time)) return badRequest("event.event_time is invalid");
+  if (typeof event.level !== "string" || !eventLevels.has(event.level as EventLevel)) {
+    return badRequest("event.level is invalid");
+  }
+  if (typeof event.type !== "string" || event.type.length > maxEventTypeLength || !remoteEventTypes.has(event.type as RemoteEventType)) {
+    return badRequest("event.type is invalid");
+  }
+
+  const feedID = optionalBoundedString(event.feed_id, maxRunIDLength, "event.feed_id");
+  if (feedID instanceof Response) return feedID;
+  const localEpisodeID = optionalBoundedString(event.local_episode_id, maxRunIDLength, "event.local_episode_id");
+  if (localEpisodeID instanceof Response) return localEpisodeID;
+  const message = optionalBoundedString(event.message, maxEventMessageLength, "event.message");
+  if (message instanceof Response) return message;
+  const errorCode = optionalBoundedString(event.error_code, maxEventCodeLength, "event.error_code");
+  if (errorCode instanceof Response) return errorCode;
+  const errorDetail = optionalBoundedString(event.error_detail, maxEventDetailLength, "event.error_detail");
+  if (errorDetail instanceof Response) return errorDetail;
+
+  return {
+    sequence: event.sequence,
+    event_time: event.event_time,
+    level: event.level as EventLevel,
+    type: event.type as RemoteEventType,
+    feed_id: feedID,
+    local_episode_id: localEpisodeID,
+    message,
+    error_code: errorCode,
+    error_detail: errorDetail,
+  };
+}
+
+function parseEventBatch(body: unknown): EventBatchRequest | Response {
+  if (!body || typeof body !== "object") return badRequest("invalid event batch body");
+  const value = body as Record<string, unknown>;
+  const run = parseSyncRunUpsert(value.run);
+  if (run instanceof Response) return run;
+  if (!Array.isArray(value.events)) return badRequest("events must be array");
+  if (value.events.length > maxEventBatchEvents) return badRequest("events batch is too large");
+  const events: RemoteEventInput[] = [];
+  const seenSequences = new Set<number>();
+  for (const rawEvent of value.events) {
+    const event = parseRemoteEvent(rawEvent);
+    if (event instanceof Response) return event;
+    if (seenSequences.has(event.sequence)) return badRequest("event.sequence is duplicated");
+    seenSequences.add(event.sequence);
+    events.push(event);
+  }
+  return { run, events };
 }
 
 function parseAdminFeedStatus(body: unknown): AdminFeedStatusRequest | Response {
@@ -267,6 +437,37 @@ function episodeStatusUpdateSQL(action: AdminEpisodeAction): string {
            WHERE feed_id = ?
              AND local_episode_id = ?
              AND status IN ('pending', 'visible')`;
+}
+
+function syncRunUpsertSQL(): string {
+  return `INSERT INTO sync_runs (
+            id, started_at, finished_at, status, feeds_updated,
+            episodes_downloaded, episodes_uploaded, errors_count
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            started_at = CASE
+              WHEN sync_runs.status = 'running' AND excluded.started_at < sync_runs.started_at THEN excluded.started_at
+              ELSE sync_runs.started_at
+            END,
+            finished_at = CASE
+              WHEN sync_runs.status = 'running' THEN excluded.finished_at
+              ELSE sync_runs.finished_at
+            END,
+            status = CASE
+              WHEN sync_runs.status = 'running' THEN excluded.status
+              ELSE sync_runs.status
+            END,
+            feeds_updated = max(sync_runs.feeds_updated, excluded.feeds_updated),
+            episodes_downloaded = max(sync_runs.episodes_downloaded, excluded.episodes_downloaded),
+            episodes_uploaded = max(sync_runs.episodes_uploaded, excluded.episodes_uploaded),
+            errors_count = max(sync_runs.errors_count, excluded.errors_count)`;
+}
+
+function eventInsertSQL(): string {
+  return `INSERT OR IGNORE INTO events (
+            run_id, sequence, event_time, level, type, feed_id,
+            local_episode_id, message, error_code, error_detail
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 }
 
 function parseIntegerParam(value: string | null, fallback: number, name: string): number | Response {
@@ -555,6 +756,90 @@ async function handleAdminSubscriptions(request: Request, env: Env): Promise<Res
   });
 }
 
+async function handleAdminSyncRuns(url: URL, env: Env): Promise<Response> {
+  const limit = adminListLimit(url, 50, 200);
+  if (limit instanceof Response) return limit;
+  const offset = adminListOffset(url);
+  if (offset instanceof Response) return offset;
+
+  const { results } = await env.DB.prepare(
+    `SELECT id, started_at, finished_at, status, feeds_updated,
+            episodes_downloaded, episodes_uploaded, errors_count
+       FROM sync_runs
+      ORDER BY started_at DESC, id DESC
+      LIMIT ? OFFSET ?`,
+  ).bind(limit, offset).all<AdminSyncRunRow>();
+
+  return Response.json({ limit, offset, sync_runs: results });
+}
+
+async function handleAdminEvents(url: URL, env: Env): Promise<Response> {
+  const limit = adminListLimit(url, 50, 200);
+  if (limit instanceof Response) return limit;
+  const offset = adminListOffset(url);
+  if (offset instanceof Response) return offset;
+
+  const { results } = await env.DB.prepare(
+    `SELECT run_id, sequence, event_time, level, type, feed_id,
+            local_episode_id, message, error_code, error_detail
+       FROM events
+      ORDER BY event_time DESC, run_id DESC, sequence DESC
+      LIMIT ? OFFSET ?`,
+  ).bind(limit, offset).all<AdminEventRow>();
+
+  return Response.json({ limit, offset, events: results });
+}
+
+async function handleNasEventsBatch(request: Request, env: Env): Promise<Response> {
+  if (!(await isAuthorizedNasRequest(request, env))) {
+    return text("unauthorized", 401);
+  }
+  const rawBody = await readBoundedJson(request);
+  if (rawBody instanceof Response) return rawBody;
+
+  const parsed = parseEventBatch(rawBody);
+  if (parsed instanceof Response) return parsed;
+
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare(syncRunUpsertSQL()).bind(
+      parsed.run.id,
+      parsed.run.started_at,
+      parsed.run.finished_at ?? null,
+      parsed.run.status,
+      parsed.run.feeds_updated,
+      parsed.run.episodes_downloaded,
+      parsed.run.episodes_uploaded,
+      parsed.run.errors_count,
+    ),
+  ];
+
+  for (const event of parsed.events) {
+    statements.push(env.DB.prepare(eventInsertSQL()).bind(
+      parsed.run.id,
+      event.sequence,
+      event.event_time,
+      event.level,
+      event.type,
+      event.feed_id ?? null,
+      event.local_episode_id ?? null,
+      event.message ?? null,
+      event.error_code ?? null,
+      event.error_detail ?? null,
+    ));
+  }
+
+  const results = await env.DB.batch(statements);
+  const insertedEvents = results.slice(1).reduce((count, result) => count + (result.meta.changes ?? 0), 0);
+
+  return Response.json({
+    ok: true,
+    run_id: parsed.run.id,
+    accepted_events: parsed.events.length,
+    inserted_events: insertedEvents,
+    duplicate_events: parsed.events.length - insertedEvents,
+  });
+}
+
 async function handleEpisodeUpsert(request: Request, env: Env): Promise<Response> {
 	if (!(await isAuthorizedNasRequest(request, env))) {
 		return text("unauthorized", 401);
@@ -795,6 +1080,11 @@ export default {
       return handleNasTombstones(request, env, url);
     }
 
+    if (url.pathname === "/api/nas/events/batch") {
+      if (request.method !== "POST") return methodNotAllowed();
+      return handleNasEventsBatch(request, env);
+    }
+
     if (url.pathname.startsWith("/api/admin/")) {
       if (!hasCloudflareAccessIdentity(request)) return text("forbidden", 403);
       if (url.pathname === "/api/admin/feeds") {
@@ -808,6 +1098,14 @@ export default {
       if (url.pathname === "/api/admin/subscriptions") {
         if (request.method !== "GET") return methodNotAllowed();
         return handleAdminSubscriptions(request, env);
+      }
+      if (url.pathname === "/api/admin/sync-runs") {
+        if (request.method !== "GET") return methodNotAllowed();
+        return handleAdminSyncRuns(url, env);
+      }
+      if (url.pathname === "/api/admin/events") {
+        if (request.method !== "GET") return methodNotAllowed();
+        return handleAdminEvents(url, env);
       }
       if (url.pathname === "/api/admin/feeds/status") {
         if (request.method !== "POST") return methodNotAllowed();

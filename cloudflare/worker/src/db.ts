@@ -99,6 +99,85 @@ export interface AdminSubscriptionOpmlRow {
   public_path: string | null;
 }
 
+export type SyncRunStatus = "running" | "success" | "partial" | "failed";
+export type EventLevel = "debug" | "info" | "warn" | "error";
+
+export type RemoteEventType =
+  | "sync_run_started"
+  | "sync_run_finished"
+  | "remote_config_fetched"
+  | "remote_config_fallback_used"
+  | "remote_config_invalid"
+  | "feed_update_started"
+  | "feed_update_finished"
+  | "feed_update_failed"
+  | "episode_discovered"
+  | "episode_download_finished"
+  | "episode_download_failed"
+  | "episode_upload_finished"
+  | "episode_upload_failed"
+  | "episode_report_finished"
+  | "episode_report_failed"
+  | "tombstone_fetched"
+  | "tombstone_applied"
+  | "tombstone_apply_failed"
+  | "r2_probe_failed"
+  | "remote_api_failed"
+  | "cookie_profile_missing"
+  | "cookie_profile_invalid";
+
+export interface SyncRunUpsertRequest {
+  id: string;
+  started_at: string;
+  finished_at?: string | null;
+  status: SyncRunStatus;
+  feeds_updated: number;
+  episodes_downloaded: number;
+  episodes_uploaded: number;
+  errors_count: number;
+}
+
+export interface RemoteEventInput {
+  sequence: number;
+  event_time: string;
+  level: EventLevel;
+  type: RemoteEventType;
+  feed_id?: string | null;
+  local_episode_id?: string | null;
+  message?: string | null;
+  error_code?: string | null;
+  error_detail?: string | null;
+}
+
+export interface EventBatchRequest {
+  run: SyncRunUpsertRequest;
+  events: RemoteEventInput[];
+}
+
+export interface AdminSyncRunRow {
+  id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: SyncRunStatus;
+  feeds_updated: number;
+  episodes_downloaded: number;
+  episodes_uploaded: number;
+  errors_count: number;
+}
+
+export interface AdminEventRow {
+  run_id: string;
+  sequence: number;
+  event_time: string;
+  level: EventLevel;
+  type: RemoteEventType;
+  feed_id: string | null;
+  local_episode_id: string | null;
+  message: string | null;
+  error_code: string | null;
+  error_detail: string | null;
+}
+
 export interface AdminFeedStatusRequest {
   feed_id: string;
   enabled?: boolean;

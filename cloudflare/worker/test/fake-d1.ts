@@ -1,14 +1,19 @@
 import type {
   AdminEpisodeListRow,
+  AdminEventRow,
   AdminFeedListRow,
   AdminSubscriptionFeedRow,
   AdminSubscriptionOpmlRow,
+  AdminSyncRunRow,
   DownloaderDefaults,
   EpisodeStatus,
+  EventLevel,
   FeedTomlRow,
   PublicEpisodeRow,
   PublicFeedRow,
   PublicOpmlFeedRow,
+  RemoteEventType,
+  SyncRunStatus,
   TombstoneChangeRow,
 } from "../src/db";
 
@@ -21,6 +26,8 @@ interface FakeD1Options {
   feedsByID?: Map<string, FakeFeedRow> | undefined;
   episodesByKey?: Map<string, FakeEpisodeRow> | undefined;
   tombstoneChanges?: FakeTombstoneChangeRow[] | undefined;
+  syncRunsByID?: Map<string, FakeSyncRunRow> | undefined;
+  eventsByKey?: Map<string, FakeEventRow> | undefined;
   sqlLog?: string[] | undefined;
   beforeEpisodeUpsert?: ((key: string, episode: FakeEpisodeRow | undefined) => void) | undefined;
   beforeEpisodeStatusUpdate?: ((key: string, episode: FakeEpisodeRow | undefined) => void) | undefined;
@@ -95,6 +102,30 @@ export interface FakeEpisodeRow {
 }
 
 export interface FakeTombstoneChangeRow extends TombstoneChangeRow {}
+
+export interface FakeSyncRunRow {
+  id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: SyncRunStatus;
+  feeds_updated: number;
+  episodes_downloaded: number;
+  episodes_uploaded: number;
+  errors_count: number;
+}
+
+export interface FakeEventRow {
+  run_id: string;
+  sequence: number;
+  event_time: string;
+  level: EventLevel;
+  type: RemoteEventType;
+  feed_id: string | null;
+  local_episode_id: string | null;
+  message: string | null;
+  error_code: string | null;
+  error_detail: string | null;
+}
 
 class FakeStatement {
   private params: unknown[] = [];
@@ -263,6 +294,24 @@ class FakeStatement {
         .slice(0, limit);
     }
 
+    if (this.query.includes("FROM sync_runs")) {
+      const limit = Number(this.params[0] ?? 50);
+      const offset = Number(this.params[1] ?? 0);
+      return [...(this.options.syncRunsByID?.values() ?? [])]
+        .sort(compareAdminSyncRunOrder)
+        .slice(offset, offset + limit)
+        .map(adminSyncRunRow);
+    }
+
+    if (this.query.includes("FROM events")) {
+      const limit = Number(this.params[0] ?? 50);
+      const offset = Number(this.params[1] ?? 0);
+      return [...(this.options.eventsByKey?.values() ?? [])]
+        .sort(compareAdminEventOrder)
+        .slice(offset, offset + limit)
+        .map(adminEventRow);
+    }
+
     return [];
   }
 
@@ -278,6 +327,10 @@ class FakeStatement {
       changes = this.runEpisodeStatusUpdate(options);
     } else if (this.query.includes("INSERT INTO tombstone_changes")) {
       changes = this.runTombstoneInsert(options);
+    } else if (this.query.includes("INSERT INTO sync_runs") && this.query.includes("ON CONFLICT(id)")) {
+      changes = this.runSyncRunUpsert(options);
+    } else if (this.query.includes("INSERT OR IGNORE INTO events")) {
+      changes = this.runEventInsert(options);
     }
     options.lastChanges = changes;
     return { results: [], success: true, meta: { changes } } as unknown as D1Result;
@@ -400,10 +453,94 @@ class FakeStatement {
     });
     return 1;
   }
+
+  private runSyncRunUpsert(options: FakeD1Options): number {
+    const [
+      id,
+      startedAt,
+      finishedAt,
+      status,
+      feedsUpdated,
+      episodesDownloaded,
+      episodesUploaded,
+      errorsCount,
+    ] = this.params;
+    const runID = String(id);
+    const runs = options.syncRunsByID ?? new Map<string, FakeSyncRunRow>();
+    options.syncRunsByID = runs;
+    const existing = runs.get(runID);
+    const incoming: FakeSyncRunRow = {
+      id: runID,
+      started_at: String(startedAt),
+      finished_at: nullableString(finishedAt),
+      status: status as SyncRunStatus,
+      feeds_updated: Number(feedsUpdated),
+      episodes_downloaded: Number(episodesDownloaded),
+      episodes_uploaded: Number(episodesUploaded),
+      errors_count: Number(errorsCount),
+    };
+    if (!existing || existing.status === "running") {
+      runs.set(runID, {
+        id: runID,
+        started_at: earlierTimestamp(existing?.started_at, incoming.started_at),
+        finished_at: incoming.finished_at,
+        status: incoming.status,
+        feeds_updated: Math.max(existing?.feeds_updated ?? 0, incoming.feeds_updated),
+        episodes_downloaded: Math.max(existing?.episodes_downloaded ?? 0, incoming.episodes_downloaded),
+        episodes_uploaded: Math.max(existing?.episodes_uploaded ?? 0, incoming.episodes_uploaded),
+        errors_count: Math.max(existing?.errors_count ?? 0, incoming.errors_count),
+      });
+    } else {
+      runs.set(runID, {
+        ...existing,
+        feeds_updated: Math.max(existing.feeds_updated, incoming.feeds_updated),
+        episodes_downloaded: Math.max(existing.episodes_downloaded, incoming.episodes_downloaded),
+        episodes_uploaded: Math.max(existing.episodes_uploaded, incoming.episodes_uploaded),
+        errors_count: Math.max(existing.errors_count, incoming.errors_count),
+      });
+    }
+    return 1;
+  }
+
+  private runEventInsert(options: FakeD1Options): number {
+    const [
+      runID,
+      sequence,
+      eventTime,
+      level,
+      type,
+      feedID,
+      localEpisodeID,
+      message,
+      errorCode,
+      errorDetail,
+    ] = this.params;
+    const key = fakeEventKey(String(runID), Number(sequence));
+    const events = options.eventsByKey ?? new Map<string, FakeEventRow>();
+    options.eventsByKey = events;
+    if (events.has(key)) return 0;
+    events.set(key, {
+      run_id: String(runID),
+      sequence: Number(sequence),
+      event_time: String(eventTime),
+      level: level as EventLevel,
+      type: type as RemoteEventType,
+      feed_id: nullableString(feedID),
+      local_episode_id: nullableString(localEpisodeID),
+      message: nullableString(message),
+      error_code: nullableString(errorCode),
+      error_detail: nullableString(errorDetail),
+    });
+    return 1;
+  }
 }
 
 export function fakeEpisodeKey(feedID: string, localEpisodeID: string): string {
   return `${feedID}\0${localEpisodeID}`;
+}
+
+export function fakeEventKey(runID: string, sequence: number): string {
+  return `${runID}\0${sequence}`;
 }
 
 function nullableString(value: unknown): string | null {
@@ -552,6 +689,11 @@ function sqliteDateTimeMillis(value: string | null): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function earlierTimestamp(current: string | undefined, incoming: string): string {
+  if (current === undefined) return incoming;
+  return incoming < current ? incoming : current;
+}
+
 function coalesceSQLiteDateTimeMillis(primary: string | null, fallback: string | null): number {
   const primaryTime = sqliteDateTimeMillis(primary);
   if (primaryTime !== 0) return primaryTime;
@@ -579,6 +721,26 @@ function adminEpisodeListRow(episode: FakeEpisodeRow): AdminEpisodeListRow {
     mime_type: episode.mime_type,
     updated_at: episode.updated_at ?? "2026-07-06 00:00:00",
   };
+}
+
+function compareAdminSyncRunOrder(left: FakeSyncRunRow, right: FakeSyncRunRow): number {
+  if (left.started_at !== right.started_at) return right.started_at.localeCompare(left.started_at);
+  return right.id.localeCompare(left.id);
+}
+
+function adminSyncRunRow(row: FakeSyncRunRow): AdminSyncRunRow {
+  return { ...row };
+}
+
+function compareAdminEventOrder(left: FakeEventRow, right: FakeEventRow): number {
+  if (left.event_time !== right.event_time) return right.event_time.localeCompare(left.event_time);
+  const runCompare = right.run_id.localeCompare(left.run_id);
+  if (runCompare !== 0) return runCompare;
+  return right.sequence - left.sequence;
+}
+
+function adminEventRow(row: FakeEventRow): AdminEventRow {
+  return { ...row };
 }
 
 export function fakeD1(options: FakeD1Options = {}): D1Database {
@@ -609,6 +771,8 @@ function cloneOptions(options: FakeD1Options): FakeD1Options {
     feedsByID: cloneMap(options.feedsByID),
     episodesByKey: cloneMap(options.episodesByKey),
     tombstoneChanges: options.tombstoneChanges?.map((change) => ({ ...change })),
+    syncRunsByID: cloneMap(options.syncRunsByID),
+    eventsByKey: cloneMap(options.eventsByKey),
     lastChanges: undefined,
   };
 }
@@ -633,6 +797,10 @@ function commitOptions(target: FakeD1Options, staged: FakeD1Options): void {
   if (!target.episodesByKey) target.episodesByKey = staged.episodesByKey;
   commitArray(target.tombstoneChanges, staged.tombstoneChanges, (value) => ({ ...value }));
   if (!target.tombstoneChanges) target.tombstoneChanges = staged.tombstoneChanges;
+  commitMap(target.syncRunsByID, staged.syncRunsByID);
+  if (!target.syncRunsByID) target.syncRunsByID = staged.syncRunsByID;
+  commitMap(target.eventsByKey, staged.eventsByKey);
+  if (!target.eventsByKey) target.eventsByKey = staged.eventsByKey;
   target.lastChanges = staged.lastChanges;
 }
 
