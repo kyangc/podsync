@@ -100,6 +100,812 @@ function text(body: string, status = 200, contentType = "text/plain; charset=utf
   });
 }
 
+function dashboardHeaders(): Headers {
+  return new Headers({
+    "content-type": "text/html; charset=utf-8",
+    "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    "cache-control": "no-store",
+  });
+}
+
+function dashboardHTML(): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Podsync Control</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --panel-soft: #f0f3f6;
+      --line: #d7dde4;
+      --text: #18212c;
+      --muted: #687481;
+      --accent: #176f6b;
+      --accent-strong: #0f5652;
+      --warn: #9a5b00;
+      --danger: #a33434;
+      --ok: #22714f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, select {
+      font: inherit;
+    }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      padding: 6px 10px;
+    }
+    button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); }
+    button:disabled { cursor: not-allowed; opacity: 0.55; }
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #ffffff;
+    }
+    button.danger { color: var(--danger); }
+    a { color: var(--accent-strong); }
+    main {
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .title h1 {
+      font-size: 24px;
+      line-height: 1.2;
+      margin: 0;
+    }
+    .title p {
+      margin: 4px 0 0;
+      color: var(--muted);
+    }
+    .status {
+      min-height: 22px;
+      color: var(--muted);
+      text-align: right;
+    }
+    .status.error { color: var(--danger); }
+    .status.ok { color: var(--ok); }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 22px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.4fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .lower {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(300px, 0.8fr) minmax(360px, 1.1fr);
+      gap: 16px;
+      margin-top: 16px;
+      align-items: start;
+    }
+    section {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      min-width: 0;
+    }
+    section header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-soft);
+      border-radius: 8px 8px 0 0;
+    }
+    section h2 {
+      font-size: 15px;
+      margin: 0;
+    }
+    .section-tools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      background: #fbfcfd;
+    }
+    tbody tr.selected { background: #eaf5f3; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .muted { color: var(--muted); }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: #ffffff;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .pill.visible { color: var(--ok); border-color: #b7dbc9; }
+    .pill.hidden, .pill.delete_pending { color: var(--warn); border-color: #e0c892; }
+    .pill.purged { color: var(--danger); border-color: #e0b0b0; }
+    .actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .empty {
+      padding: 16px;
+      color: var(--muted);
+    }
+    .url-list {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+    }
+    .url-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 8px;
+    }
+    .url-row:last-child { border-bottom: 0; padding-bottom: 0; }
+    .stack { display: grid; gap: 4px; min-width: 0; }
+    .nowrap { white-space: nowrap; }
+    @media (max-width: 980px) {
+      main { padding: 14px; }
+      .summary, .layout, .lower { grid-template-columns: 1fr; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .status { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <main id="app" data-dashboard-app>
+    <div class="topbar">
+      <div class="title">
+        <h1>Podsync Control</h1>
+        <p>Remote feeds, subscriptions, episode visibility, and recent NAS activity.</p>
+      </div>
+      <div class="section-tools">
+        <button id="refresh-dashboard" class="primary" type="button">Refresh</button>
+        <div id="dashboard-status" class="status" role="status" aria-live="polite">Loading...</div>
+      </div>
+    </div>
+
+    <div class="summary" aria-label="Summary">
+      <div class="metric"><span>Feeds</span><strong id="metric-feeds">-</strong></div>
+      <div class="metric"><span>Enabled</span><strong id="metric-enabled">-</strong></div>
+      <div class="metric"><span>In OPML</span><strong id="metric-opml">-</strong></div>
+      <div class="metric"><span>Latest Run</span><strong id="metric-run">-</strong></div>
+    </div>
+
+    <div class="layout">
+      <section data-region="feeds" aria-labelledby="feeds-title">
+        <header>
+          <h2 id="feeds-title">Feeds</h2>
+          <span id="selected-feed-label" class="muted">No feed selected</span>
+        </header>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 34%">Feed</th>
+                <th style="width: 14%">Provider</th>
+                <th style="width: 14%">Enabled</th>
+                <th style="width: 14%">OPML</th>
+                <th style="width: 24%">Subscription</th>
+              </tr>
+            </thead>
+            <tbody id="feeds-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section data-region="episodes" aria-labelledby="episodes-title">
+        <header>
+          <h2 id="episodes-title">Episodes</h2>
+          <div class="section-tools">
+            <select id="episode-status-filter" aria-label="Episode status filter">
+              <option value="">All statuses</option>
+              <option value="visible">Visible</option>
+              <option value="hidden">Hidden</option>
+              <option value="delete_pending">Delete pending</option>
+              <option value="purged">Purged</option>
+              <option value="pending">Pending</option>
+            </select>
+            <button id="refresh-episodes" type="button">Reload</button>
+          </div>
+        </header>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 36%">Episode</th>
+                <th style="width: 14%">Status</th>
+                <th style="width: 18%">Time</th>
+                <th style="width: 12%">Media</th>
+                <th style="width: 20%">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="episodes-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="lower">
+      <section data-region="subscriptions" aria-labelledby="subscriptions-title">
+        <header><h2 id="subscriptions-title">Subscriptions</h2></header>
+        <div class="url-list">
+          <div>
+            <div class="muted">Feed URLs</div>
+            <div id="subscription-feeds" class="stack"></div>
+          </div>
+          <div>
+            <div class="muted">OPML URLs</div>
+            <div id="subscription-opml" class="stack"></div>
+          </div>
+        </div>
+      </section>
+
+      <section data-region="runs" aria-labelledby="runs-title">
+        <header><h2 id="runs-title">Recent Runs</h2></header>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Run</th><th>Status</th><th>Counts</th></tr>
+            </thead>
+            <tbody id="runs-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section data-region="events" aria-labelledby="events-title">
+        <header><h2 id="events-title">Recent Events</h2></header>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Event</th><th>Target</th><th>Detail</th></tr>
+            </thead>
+            <tbody id="events-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var paths = {
+        feeds: "/api/admin/feeds",
+        subscriptions: "/api/admin/subscriptions",
+        episodes: "/api/admin/episodes",
+        feedStatus: "/api/admin/feeds/status",
+        episodeStatus: "/api/admin/episodes/status",
+        syncRuns: "/api/admin/sync-runs?limit=10",
+        events: "/api/admin/events?limit=25"
+      };
+
+      var state = {
+        feeds: [],
+        subscriptions: { feeds: [], opml: [] },
+        episodes: [],
+        syncRuns: [],
+        events: [],
+        selectedFeedID: "",
+        episodeStatus: "",
+        busy: false
+      };
+
+      function byID(id) {
+        return document.getElementById(id);
+      }
+
+      function el(tag, className, text) {
+        var node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined && text !== null) node.textContent = String(text);
+        return node;
+      }
+
+      function setStatus(message, kind) {
+        var node = byID("dashboard-status");
+        node.className = "status" + (kind ? " " + kind : "");
+        node.textContent = message;
+      }
+
+      function showError(error) {
+        setStatus(error instanceof Error ? error.message : String(error), "error");
+      }
+
+      async function api(path, options) {
+        var init = options || {};
+        var headers = Object.assign({ accept: "application/json" }, init.headers || {});
+        var response = await fetch(path, Object.assign({}, init, { headers: headers }));
+        if (!response.ok) {
+          var detail = await response.text();
+          throw new Error(detail || ("HTTP " + response.status + " for " + path));
+        }
+        return response.json();
+      }
+
+      function postJSON(path, body) {
+        return api(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body)
+        });
+      }
+
+      function setBusy(value) {
+        state.busy = value;
+        byID("refresh-dashboard").disabled = value;
+        byID("refresh-episodes").disabled = value || !state.selectedFeedID;
+      }
+
+      function emptyRow(colspan, message) {
+        var row = el("tr");
+        var cell = el("td", "empty", message);
+        cell.colSpan = colspan;
+        row.appendChild(cell);
+        return row;
+      }
+
+      function appendCell(row, childOrText, className) {
+        var cell = el("td", className || "");
+        if (childOrText instanceof Node) {
+          cell.appendChild(childOrText);
+        } else if (childOrText !== undefined && childOrText !== null) {
+          cell.textContent = String(childOrText);
+        }
+        row.appendChild(cell);
+        return cell;
+      }
+
+      function formatDate(value) {
+        if (!value) return "-";
+        var date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value);
+        return date.toLocaleString();
+      }
+
+      function formatBytes(value) {
+        if (!value || value <= 0) return "-";
+        var units = ["B", "KB", "MB", "GB"];
+        var size = Number(value);
+        var unit = 0;
+        while (size >= 1024 && unit < units.length - 1) {
+          size = size / 1024;
+          unit++;
+        }
+        return size.toFixed(unit === 0 ? 0 : 1) + " " + units[unit];
+      }
+
+      function safeExternalURL(value) {
+        if (!value) return "";
+        try {
+          var url = new URL(value, window.location.origin);
+          if (url.protocol === "http:" || url.protocol === "https:") return url.toString();
+        } catch (error) {
+          return "";
+        }
+        return "";
+      }
+
+      function copyText(value) {
+        if (!value) return;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(value).then(function () {
+            setStatus("Copied URL", "ok");
+          }).catch(function () {
+            fallbackCopy(value);
+          });
+          return;
+        }
+        fallbackCopy(value);
+      }
+
+      function fallbackCopy(value) {
+        var input = document.createElement("input");
+        input.value = value;
+        input.setAttribute("readonly", "readonly");
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand("copy");
+        input.remove();
+        setStatus("Copied URL", "ok");
+      }
+
+      function renderSummary() {
+        var enabled = state.feeds.filter(function (feed) { return feed.enabled; }).length;
+        var inOpml = state.feeds.filter(function (feed) { return feed.include_in_opml; }).length;
+        var latest = state.syncRuns[0];
+        byID("metric-feeds").textContent = String(state.feeds.length);
+        byID("metric-enabled").textContent = String(enabled);
+        byID("metric-opml").textContent = String(inOpml);
+        byID("metric-run").textContent = latest ? latest.status : "-";
+      }
+
+      function renderFeeds() {
+        var body = byID("feeds-body");
+        body.replaceChildren();
+        if (state.feeds.length === 0) {
+          body.appendChild(emptyRow(5, "No feeds configured."));
+          byID("selected-feed-label").textContent = "No feed selected";
+          return;
+        }
+        state.feeds.forEach(function (feed) {
+          var row = el("tr", feed.feed_id === state.selectedFeedID ? "selected" : "");
+
+          var name = el("button", "", feed.title || feed.feed_id);
+          name.type = "button";
+          name.title = feed.url || feed.feed_id;
+          name.addEventListener("click", function () {
+            selectFeed(feed.feed_id);
+          });
+          var nameStack = el("div", "stack");
+          nameStack.appendChild(name);
+          nameStack.appendChild(el("span", "mono muted", feed.feed_id));
+          appendCell(row, nameStack);
+          appendCell(row, el("span", "pill", feed.provider));
+
+          var enabled = document.createElement("input");
+          enabled.type = "checkbox";
+          enabled.checked = Boolean(feed.enabled);
+          enabled.disabled = state.busy;
+          enabled.addEventListener("change", function () {
+            updateFeedStatus(feed.feed_id, { enabled: enabled.checked });
+          });
+          appendCell(row, enabled);
+
+          var opml = document.createElement("input");
+          opml.type = "checkbox";
+          opml.checked = Boolean(feed.include_in_opml);
+          opml.disabled = state.busy;
+          opml.addEventListener("change", function () {
+            updateFeedStatus(feed.feed_id, { include_in_opml: opml.checked });
+          });
+          appendCell(row, opml);
+
+          var actions = el("div", "actions");
+          var copy = el("button", "", "Copy");
+          copy.type = "button";
+          copy.disabled = !feed.public_feed_url;
+          copy.title = feed.public_feed_url || "No public URL";
+          copy.addEventListener("click", function () {
+            copyText(feed.public_feed_url);
+          });
+          actions.appendChild(copy);
+          appendCell(row, actions);
+          body.appendChild(row);
+        });
+        var selected = state.feeds.find(function (feed) { return feed.feed_id === state.selectedFeedID; });
+        byID("selected-feed-label").textContent = selected ? selected.feed_id : "No feed selected";
+      }
+
+      function renderEpisodes() {
+        var body = byID("episodes-body");
+        body.replaceChildren();
+        if (!state.selectedFeedID) {
+          body.appendChild(emptyRow(5, "Select a feed to inspect episodes."));
+          return;
+        }
+        if (state.episodes.length === 0) {
+          body.appendChild(emptyRow(5, "No episodes match this view."));
+          return;
+        }
+        state.episodes.forEach(function (episode) {
+          var row = el("tr");
+          var episodeStack = el("div", "stack");
+          var title = episode.title || episode.local_episode_id;
+          var safeSourceURL = safeExternalURL(episode.source_url);
+          if (safeSourceURL) {
+            var link = el("a", "", title);
+            link.href = safeSourceURL;
+            link.rel = "noopener noreferrer";
+            link.target = "_blank";
+            episodeStack.appendChild(link);
+          } else {
+            episodeStack.appendChild(el("span", "", title));
+          }
+          episodeStack.appendChild(el("span", "mono muted", episode.local_episode_id));
+          appendCell(row, episodeStack);
+          appendCell(row, el("span", "pill " + episode.status, episode.status));
+          appendCell(row, formatDate(episode.published_at || episode.updated_at));
+          appendCell(row, episode.has_media ? formatBytes(episode.size) : "No media");
+          appendCell(row, episodeActions(episode));
+          body.appendChild(row);
+        });
+      }
+
+      function episodeActions(episode) {
+        var actions = el("div", "actions");
+        var list = [];
+        if (episode.status === "pending" || episode.status === "visible") {
+          list.push(["hide", "Hide"]);
+          list.push(["delete", "Remote delete"]);
+        } else if (episode.status === "hidden") {
+          list.push(["restore", "Restore"]);
+          list.push(["delete", "Remote delete"]);
+        } else if (episode.status === "delete_pending") {
+          list.push(["restore", "Restore"]);
+        }
+        if (list.length === 0) {
+          actions.appendChild(el("span", "muted", "No actions"));
+          return actions;
+        }
+        list.forEach(function (item) {
+          var action = item[0];
+          var label = item[1];
+          var button = el("button", action === "delete" ? "danger" : "", label);
+          button.type = "button";
+          if (action === "delete") {
+            button.title = "Remote RSS hides immediately; R2 media is purged later. NAS local files are not deleted.";
+          }
+          button.disabled = state.busy;
+          button.addEventListener("click", function () {
+            updateEpisodeStatus(episode.local_episode_id, action);
+          });
+          actions.appendChild(button);
+        });
+        return actions;
+      }
+
+      function renderSubscriptions() {
+        renderUrlList(byID("subscription-feeds"), state.subscriptions.feeds || [], "feed_id");
+        renderUrlList(byID("subscription-opml"), state.subscriptions.opml || [], "label");
+      }
+
+      function renderUrlList(container, rows, labelField) {
+        container.replaceChildren();
+        if (!rows.length) {
+          container.appendChild(el("div", "empty", "No URLs."));
+          return;
+        }
+        rows.forEach(function (row) {
+          var wrapper = el("div", "url-row");
+          var stack = el("div", "stack");
+          stack.appendChild(el("span", "", row.title || row[labelField] || "subscription"));
+          stack.appendChild(el("span", "mono muted", row.xml_url));
+          var button = el("button", "", "Copy");
+          button.type = "button";
+          button.addEventListener("click", function () {
+            copyText(row.xml_url);
+          });
+          wrapper.appendChild(stack);
+          wrapper.appendChild(button);
+          container.appendChild(wrapper);
+        });
+      }
+
+      function renderRuns() {
+        var body = byID("runs-body");
+        body.replaceChildren();
+        if (!state.syncRuns.length) {
+          body.appendChild(emptyRow(3, "No sync runs reported."));
+          return;
+        }
+        state.syncRuns.forEach(function (run) {
+          var row = el("tr");
+          var runStack = el("div", "stack");
+          runStack.appendChild(el("span", "mono", run.id));
+          runStack.appendChild(el("span", "muted", formatDate(run.started_at)));
+          appendCell(row, runStack);
+          appendCell(row, el("span", "pill " + run.status, run.status));
+          appendCell(row, "feeds " + run.feeds_updated + " / downloads " + run.episodes_downloaded + " / uploads " + run.episodes_uploaded + " / errors " + run.errors_count);
+          body.appendChild(row);
+        });
+      }
+
+      function renderEvents() {
+        var body = byID("events-body");
+        body.replaceChildren();
+        if (!state.events.length) {
+          body.appendChild(emptyRow(3, "No events reported."));
+          return;
+        }
+        state.events.forEach(function (event) {
+          var row = el("tr");
+          var eventStack = el("div", "stack");
+          eventStack.appendChild(el("span", "pill " + event.level, event.level));
+          eventStack.appendChild(el("span", "mono muted", event.type));
+          appendCell(row, eventStack);
+          appendCell(row, [event.feed_id, event.local_episode_id].filter(Boolean).join(" / ") || "-");
+          appendCell(row, event.error_detail || event.message || event.error_code || formatDate(event.event_time));
+          body.appendChild(row);
+        });
+      }
+
+      function renderAll() {
+        renderSummary();
+        renderFeeds();
+        renderEpisodes();
+        renderSubscriptions();
+        renderRuns();
+        renderEvents();
+      }
+
+      async function loadDashboard() {
+        setBusy(true);
+        setStatus("Loading...");
+        try {
+          var results = await Promise.all([
+            api(paths.feeds),
+            api(paths.subscriptions),
+            api(paths.syncRuns),
+            api(paths.events)
+          ]);
+          state.feeds = results[0].feeds || [];
+          state.subscriptions = results[1] || { feeds: [], opml: [] };
+          state.syncRuns = results[2].sync_runs || [];
+          state.events = results[3].events || [];
+          if (!state.selectedFeedID && state.feeds.length > 0) {
+            state.selectedFeedID = state.feeds[0].feed_id;
+          }
+          if (state.selectedFeedID && !state.feeds.some(function (feed) { return feed.feed_id === state.selectedFeedID; })) {
+            state.selectedFeedID = state.feeds.length > 0 ? state.feeds[0].feed_id : "";
+          }
+          await loadEpisodes(false);
+          setStatus("Loaded " + new Date().toLocaleTimeString(), "ok");
+        } catch (error) {
+          showError(error);
+          renderAll();
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function loadEpisodes(showLoading) {
+        if (!state.selectedFeedID) {
+          state.episodes = [];
+          renderAll();
+          return;
+        }
+        if (showLoading) setStatus("Loading episodes...");
+        var query = "?feed_id=" + encodeURIComponent(state.selectedFeedID) + "&limit=50";
+        if (state.episodeStatus) query += "&status=" + encodeURIComponent(state.episodeStatus);
+        try {
+          var result = await api(paths.episodes + query);
+          state.episodes = result.episodes || [];
+          renderAll();
+          if (showLoading) setStatus("Episodes loaded", "ok");
+        } catch (error) {
+          showError(error);
+        }
+      }
+
+      function selectFeed(feedID) {
+        state.selectedFeedID = feedID;
+        state.episodes = [];
+        renderAll();
+        loadEpisodes(true);
+      }
+
+      async function updateFeedStatus(feedID, patch) {
+        setBusy(true);
+        try {
+          await postJSON(paths.feedStatus, Object.assign({ feed_id: feedID }, patch));
+          await loadDashboard();
+        } catch (error) {
+          showError(error);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function updateEpisodeStatus(localEpisodeID, action) {
+        if (!state.selectedFeedID) return;
+        if (action === "delete") {
+          var ok = window.confirm("Remote delete hides this episode from remote RSS and schedules delayed R2 purge. NAS local files are not deleted. Continue?");
+          if (!ok) return;
+        }
+        setBusy(true);
+        try {
+          await postJSON(paths.episodeStatus, {
+            feed_id: state.selectedFeedID,
+            local_episode_id: localEpisodeID,
+            action: action
+          });
+          await loadEpisodes(true);
+        } catch (error) {
+          showError(error);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      byID("refresh-dashboard").addEventListener("click", loadDashboard);
+      byID("refresh-episodes").addEventListener("click", function () {
+        loadEpisodes(true);
+      });
+      byID("episode-status-filter").addEventListener("change", function (event) {
+        state.episodeStatus = event.target.value;
+        loadEpisodes(true);
+      });
+
+      loadDashboard();
+    }());
+  </script>
+</body>
+</html>`;
+}
+
+function dashboardResponse(): Response {
+  return new Response(dashboardHTML(), {
+    status: 200,
+    headers: dashboardHeaders(),
+  });
+}
+
 function pathToken(pathname: string, prefix: string): string | null {
   if (!pathname.startsWith(prefix) || !pathname.endsWith(".xml")) return null;
   const token = pathname.slice(prefix.length, -".xml".length);
@@ -1349,7 +2155,7 @@ export default {
     if (url.pathname === "/dashboard" || url.pathname.startsWith("/dashboard/")) {
       if (request.method !== "GET") return methodNotAllowed();
       if (!hasCloudflareAccessIdentity(request)) return text("forbidden", 403);
-      return text("<!doctype html><title>Podsync</title>", 200, "text/html; charset=utf-8");
+      return dashboardResponse();
     }
 
     if (url.pathname.startsWith("/f/")) {
