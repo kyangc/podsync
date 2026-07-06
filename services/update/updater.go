@@ -27,16 +27,29 @@ type Downloader interface {
 	PlaylistMetadata(ctx context.Context, url string) (metadata ytdl.PlaylistMetadata, err error)
 }
 
+type RemotePublishOutbox interface {
+	EnqueueRemotePublishTask(ctx context.Context, task *model.RemotePublishTask) error
+}
+
+type Option func(*Manager)
+
+func WithRemotePublishOutbox(outbox RemotePublishOutbox) Option {
+	return func(u *Manager) {
+		u.remotePublishOutbox = outbox
+	}
+}
+
 type TokenList []string
 
 type Manager struct {
-	mu         sync.RWMutex
-	hostname   string
-	downloader Downloader
-	db         db.Storage
-	fs         fs.Storage
-	feeds      map[string]*feed.Config
-	keys       map[model.Provider]feed.KeyProvider
+	mu                  sync.RWMutex
+	hostname            string
+	downloader          Downloader
+	db                  db.Storage
+	fs                  fs.Storage
+	feeds               map[string]*feed.Config
+	keys                map[model.Provider]feed.KeyProvider
+	remotePublishOutbox RemotePublishOutbox
 }
 
 func NewUpdater(
@@ -46,15 +59,20 @@ func NewUpdater(
 	downloader Downloader,
 	db db.Storage,
 	fs fs.Storage,
+	options ...Option,
 ) (*Manager, error) {
-	return &Manager{
+	manager := &Manager{
 		hostname:   hostname,
 		downloader: downloader,
 		db:         db,
 		fs:         fs,
 		feeds:      feeds,
 		keys:       keys,
-	}, nil
+	}
+	for _, option := range options {
+		option(manager)
+	}
+	return manager, nil
 }
 
 func (u *Manager) SetFeeds(feeds map[string]*feed.Config) {
@@ -78,6 +96,21 @@ func (u *Manager) feedSnapshot() map[string]*feed.Config {
 		feeds[id] = cfg
 	}
 	return feeds
+}
+
+func (u *Manager) enqueueRemotePublishTask(ctx context.Context, feedConfig *feed.Config, episode *model.Episode, mediaPath string, size int64) error {
+	if u.remotePublishOutbox == nil {
+		return nil
+	}
+	return u.remotePublishOutbox.EnqueueRemotePublishTask(ctx, &model.RemotePublishTask{
+		FeedID:         feedConfig.ID,
+		LocalEpisodeID: episode.ID,
+		MediaPath:      mediaPath,
+		Size:           size,
+		Title:          episode.Title,
+		SourceURL:      episode.VideoURL,
+		PublishedAt:    episode.PubDate,
+	})
 }
 
 func (u *Manager) Update(ctx context.Context, feedConfig *feed.Config) error {
@@ -253,10 +286,11 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 		var (
 			logger      = log.WithFields(log.Fields{"index": idx, "episode_id": episode.ID})
 			episodeName = feed.EpisodeName(feedConfig, episode)
+			mediaPath   = fmt.Sprintf("%s/%s", feedID, episodeName)
 		)
 
 		// Check whether episode already exists
-		size, err := u.fs.Size(ctx, fmt.Sprintf("%s/%s", feedID, episodeName))
+		size, err := u.fs.Size(ctx, mediaPath)
 		if err == nil {
 			logger.Infof("episode %q already exists on disk", episode.ID)
 
@@ -268,6 +302,10 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 			}); err != nil {
 				logger.WithError(err).Error("failed to update file info")
 				return err
+			}
+
+			if err := u.enqueueRemotePublishTask(ctx, feedConfig, episode, mediaPath, size); err != nil {
+				logger.WithError(err).Warn("failed to enqueue remote publish task")
 			}
 
 			continue
@@ -321,7 +359,7 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 		}
 
 		logger.Debug("copying file")
-		fileSize, err := u.fs.Create(ctx, fmt.Sprintf("%s/%s", feedID, episodeName), tempFile)
+		fileSize, err := u.fs.Create(ctx, mediaPath, tempFile)
 		tempFile.Close()
 		if err != nil {
 			logger.WithError(err).Error("failed to copy file")
@@ -331,7 +369,7 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 		// Execute post episode download hooks
 		if len(feedConfig.PostEpisodeDownload) > 0 {
 			env := []string{
-				"EPISODE_FILE=" + fmt.Sprintf("%s/%s", feedID, episodeName),
+				"EPISODE_FILE=" + mediaPath,
 				"FEED_NAME=" + feedID,
 				"EPISODE_TITLE=" + episode.Title,
 			}
@@ -354,6 +392,10 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 			return nil
 		}); err != nil {
 			return err
+		}
+
+		if err := u.enqueueRemotePublishTask(ctx, feedConfig, episode, mediaPath, fileSize); err != nil {
+			logger.WithError(err).Warn("failed to enqueue remote publish task")
 		}
 
 		downloaded++

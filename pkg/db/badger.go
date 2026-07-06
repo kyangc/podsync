@@ -20,6 +20,9 @@ const (
 	feedPath      = "feed/%s"
 	episodePrefix = "episode/%s/"
 	episodePath   = "episode/%s/%s" // FeedID + EpisodeID
+
+	remotePublishTaskPrefix = "remote/publish/"
+	remotePublishTaskPath   = "remote/publish/%s"
 )
 
 // BadgerConfig represents BadgerDB configuration parameters

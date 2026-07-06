@@ -184,7 +184,8 @@ func main() {
 	}
 
 	log.Debug("creating update manager")
-	manager, err := update.NewUpdater(activeFeeds, keys, cfg.Server.Hostname, downloader, database, storage)
+	updateOptions := remotePublishOptions(cfg, database)
+	manager, err := update.NewUpdater(activeFeeds, keys, cfg.Server.Hostname, downloader, database, storage, updateOptions...)
 	if err != nil {
 		log.WithError(err).Fatal("failed to create updater")
 	}
