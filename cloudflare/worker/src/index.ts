@@ -157,7 +157,7 @@ function dashboardHTML(): string {
       color: var(--text);
       font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    button, input, select {
+    button, input, select, textarea {
       font: inherit;
     }
     button {
@@ -267,6 +267,64 @@ function dashboardHTML(): string {
       gap: 8px;
       flex-wrap: wrap;
     }
+    .feed-form {
+      border-bottom: 1px solid var(--line);
+      padding: 12px 14px;
+      display: grid;
+      gap: 12px;
+      background: #ffffff;
+    }
+    .feed-form[hidden] { display: none; }
+    .feed-form-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+    .feed-form-title strong { font-size: 14px; }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .form-field {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .form-field.wide { grid-column: 1 / -1; }
+    .form-field label,
+    .form-group-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .form-field input,
+    .form-field select,
+    .form-field textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 7px 8px;
+      background: #ffffff;
+      color: var(--text);
+    }
+    .form-field textarea {
+      min-height: 58px;
+      resize: vertical;
+    }
+    .check-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .check-row label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text);
+    }
     .table-wrap { overflow-x: auto; }
     table {
       width: 100%;
@@ -337,6 +395,7 @@ function dashboardHTML(): string {
     @media (max-width: 980px) {
       main { padding: 14px; }
       .summary, .layout, .lower { grid-template-columns: 1fr; }
+      .form-grid { grid-template-columns: 1fr; }
       .topbar { align-items: flex-start; flex-direction: column; }
       .status { text-align: left; }
     }
@@ -366,8 +425,101 @@ function dashboardHTML(): string {
       <section data-region="feeds" aria-labelledby="feeds-title">
         <header>
           <h2 id="feeds-title">Feeds</h2>
-          <span id="selected-feed-label" class="muted">No feed selected</span>
+          <div class="section-tools">
+            <span id="selected-feed-label" class="muted">No feed selected</span>
+            <button id="new-feed" type="button">New</button>
+          </div>
         </header>
+        <form id="feed-form" class="feed-form" data-feed-form hidden>
+          <div class="feed-form-title">
+            <strong id="feed-form-title">New feed</strong>
+            <div class="section-tools">
+              <button id="feed-form-save" class="primary" type="submit">Save</button>
+              <button id="feed-form-cancel" type="button">Cancel</button>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="form-field">
+              <label for="feed-id">Feed ID</label>
+              <input id="feed-id" type="text" autocomplete="off">
+            </div>
+            <div class="form-field">
+              <label for="feed-provider">Provider</label>
+              <select id="feed-provider">
+                <option value="youtube">youtube</option>
+                <option value="bilibili">bilibili</option>
+              </select>
+            </div>
+            <div class="form-field wide">
+              <label for="feed-url">URL</label>
+              <input id="feed-url" type="text" autocomplete="off">
+            </div>
+            <div class="form-field">
+              <label for="feed-title-override">Title override</label>
+              <input id="feed-title-override" type="text" autocomplete="off">
+            </div>
+            <div class="form-field">
+              <label for="feed-cookie-profile">Cookie profile</label>
+              <input id="feed-cookie-profile" type="text" autocomplete="off">
+            </div>
+            <div class="form-field wide">
+              <label for="feed-description-override">Description override</label>
+              <textarea id="feed-description-override"></textarea>
+            </div>
+            <div class="form-field">
+              <label for="feed-update-period">Update period</label>
+              <input id="feed-update-period" type="text" autocomplete="off">
+            </div>
+            <div class="form-field">
+              <label for="feed-page-size">Page size</label>
+              <input id="feed-page-size" type="number" min="1" step="1">
+            </div>
+            <div class="form-field">
+              <label for="feed-keep-last">Keep last</label>
+              <input id="feed-keep-last" type="number" min="0" step="1">
+            </div>
+            <div class="form-field wide">
+              <span class="form-group-label">Publication</span>
+              <div class="check-row">
+                <label><input id="feed-enabled" type="checkbox"> Enabled</label>
+                <label><input id="feed-include-in-opml" type="checkbox"> OPML</label>
+                <label><input id="feed-private-feed" type="checkbox"> Private feed</label>
+              </div>
+            </div>
+            <div class="form-field">
+              <label for="feed-filter-title">Filter title</label>
+              <input id="feed-filter-title" type="text" autocomplete="off">
+            </div>
+            <div class="form-field">
+              <label for="feed-filter-not-title">Filter not title</label>
+              <input id="feed-filter-not-title" type="text" autocomplete="off">
+            </div>
+            <div class="form-field">
+              <label for="feed-filter-description">Filter description</label>
+              <input id="feed-filter-description" type="text" autocomplete="off">
+            </div>
+            <div class="form-field">
+              <label for="feed-filter-not-description">Filter not description</label>
+              <input id="feed-filter-not-description" type="text" autocomplete="off">
+            </div>
+            <div class="form-field">
+              <label for="feed-filter-min-duration">Min duration</label>
+              <input id="feed-filter-min-duration" type="number" min="0" step="1">
+            </div>
+            <div class="form-field">
+              <label for="feed-filter-max-duration">Max duration</label>
+              <input id="feed-filter-max-duration" type="number" min="0" step="1">
+            </div>
+            <div class="form-field">
+              <label for="feed-filter-min-age">Min age</label>
+              <input id="feed-filter-min-age" type="number" min="0" step="1">
+            </div>
+            <div class="form-field">
+              <label for="feed-filter-max-age">Max age</label>
+              <input id="feed-filter-max-age" type="number" min="0" step="1">
+            </div>
+          </div>
+        </form>
         <div class="table-wrap">
           <table>
             <thead>
@@ -465,6 +617,7 @@ function dashboardHTML(): string {
         feeds: "/api/admin/feeds",
         subscriptions: "/api/admin/subscriptions",
         episodes: "/api/admin/episodes",
+        feedUpsert: "/api/admin/feeds/upsert",
         feedStatus: "/api/admin/feeds/status",
         episodeStatus: "/api/admin/episodes/status",
         syncRuns: "/api/admin/sync-runs?limit=10",
@@ -479,8 +632,34 @@ function dashboardHTML(): string {
         events: [],
         selectedFeedID: "",
         episodeStatus: "",
+        feedFormOpen: false,
+        feedFormMode: "create",
+        editingFeedID: "",
         busy: false
       };
+
+      var feedFormFieldIDs = [
+        "feed-id",
+        "feed-provider",
+        "feed-url",
+        "feed-title-override",
+        "feed-description-override",
+        "feed-enabled",
+        "feed-include-in-opml",
+        "feed-private-feed",
+        "feed-update-period",
+        "feed-page-size",
+        "feed-keep-last",
+        "feed-cookie-profile",
+        "feed-filter-title",
+        "feed-filter-not-title",
+        "feed-filter-description",
+        "feed-filter-not-description",
+        "feed-filter-min-duration",
+        "feed-filter-max-duration",
+        "feed-filter-min-age",
+        "feed-filter-max-age"
+      ];
 
       function byID(id) {
         return document.getElementById(id);
@@ -526,6 +705,9 @@ function dashboardHTML(): string {
         state.busy = value;
         byID("refresh-dashboard").disabled = value;
         byID("refresh-episodes").disabled = value || !state.selectedFeedID;
+        byID("new-feed").disabled = value;
+        byID("feed-form-save").disabled = value || !state.feedFormOpen;
+        byID("feed-form-cancel").disabled = value;
       }
 
       function emptyRow(colspan, message) {
@@ -603,6 +785,216 @@ function dashboardHTML(): string {
         setStatus("Copied URL", "ok");
       }
 
+      function findFeedByID(feedID) {
+        return state.feeds.find(function (feed) { return feed.feed_id === feedID; }) || null;
+      }
+
+      function emptyFilters() {
+        return {
+          title: null,
+          not_title: null,
+          description: null,
+          not_description: null,
+          min_duration: null,
+          max_duration: null,
+          min_age: null,
+          max_age: null
+        };
+      }
+
+      function defaultFeedFormValues() {
+        return {
+          feed_id: "",
+          provider: "youtube",
+          url: "",
+          title_override: null,
+          description_override: null,
+          enabled: true,
+          include_in_opml: true,
+          private_feed: true,
+          update_period: "1h",
+          page_size: 25,
+          keep_last: 25,
+          cookie_profile: null,
+          filters: emptyFilters()
+        };
+      }
+
+      function valueOrDefault(value, fallback) {
+        return value === null || value === undefined ? fallback : value;
+      }
+
+      function feedFormValuesFromFeed(feed) {
+        var filters = feed.filters || {};
+        return {
+          feed_id: feed.feed_id,
+          provider: feed.provider,
+          url: feed.url || "",
+          title_override: feed.title_override,
+          description_override: feed.description_override,
+          enabled: Boolean(feed.enabled),
+          include_in_opml: Boolean(feed.include_in_opml),
+          private_feed: Boolean(feed.private_feed),
+          update_period: feed.update_period || "1h",
+          page_size: valueOrDefault(feed.page_size, 25),
+          keep_last: valueOrDefault(feed.keep_last, 25),
+          cookie_profile: feed.cookie_profile,
+          filters: {
+            title: filters.title,
+            not_title: filters.not_title,
+            description: filters.description,
+            not_description: filters.not_description,
+            min_duration: filters.min_duration,
+            max_duration: filters.max_duration,
+            min_age: filters.min_age,
+            max_age: filters.max_age
+          }
+        };
+      }
+
+      function setTextField(id, value) {
+        byID(id).value = value === null || value === undefined ? "" : String(value);
+      }
+
+      function setCheckField(id, value) {
+        byID(id).checked = Boolean(value);
+      }
+
+      function setFeedFormValues(feed) {
+        var filters = feed.filters || emptyFilters();
+        setTextField("feed-id", feed.feed_id);
+        setTextField("feed-provider", feed.provider);
+        setTextField("feed-url", feed.url);
+        setTextField("feed-title-override", feed.title_override);
+        setTextField("feed-description-override", feed.description_override);
+        setCheckField("feed-enabled", feed.enabled);
+        setCheckField("feed-include-in-opml", feed.include_in_opml);
+        setCheckField("feed-private-feed", feed.private_feed);
+        setTextField("feed-update-period", feed.update_period);
+        setTextField("feed-page-size", feed.page_size);
+        setTextField("feed-keep-last", feed.keep_last);
+        setTextField("feed-cookie-profile", feed.cookie_profile);
+        setTextField("feed-filter-title", filters.title);
+        setTextField("feed-filter-not-title", filters.not_title);
+        setTextField("feed-filter-description", filters.description);
+        setTextField("feed-filter-not-description", filters.not_description);
+        setTextField("feed-filter-min-duration", filters.min_duration);
+        setTextField("feed-filter-max-duration", filters.max_duration);
+        setTextField("feed-filter-min-age", filters.min_age);
+        setTextField("feed-filter-max-age", filters.max_age);
+      }
+
+      function textOrNull(id) {
+        var value = byID(id).value.trim();
+        return value === "" ? null : value;
+      }
+
+      function requiredText(id, label) {
+        var value = byID(id).value.trim();
+        if (value === "") throw new Error(label + " is required");
+        return value;
+      }
+
+      function requiredInteger(id, label, min) {
+        var raw = byID(id).value.trim();
+        if (!/^\\d+$/.test(raw)) throw new Error(label + " must be an integer");
+        var value = Number(raw);
+        if (!Number.isSafeInteger(value) || value < min) throw new Error(label + " is invalid");
+        return value;
+      }
+
+      function optionalInteger(id, label) {
+        var raw = byID(id).value.trim();
+        if (raw === "") return null;
+        if (!/^\\d+$/.test(raw)) throw new Error(label + " must be an integer");
+        var value = Number(raw);
+        if (!Number.isSafeInteger(value)) throw new Error(label + " is invalid");
+        return value;
+      }
+
+      function readFeedFormValues() {
+        var feedID;
+        var provider;
+        if (state.feedFormMode === "edit") {
+          var original = findFeedByID(state.editingFeedID);
+          if (!original) throw new Error("Original feed is missing");
+          feedID = state.editingFeedID;
+          provider = original.provider;
+        } else {
+          feedID = requiredText("feed-id", "Feed ID");
+          provider = byID("feed-provider").value;
+        }
+        if (provider !== "youtube" && provider !== "bilibili") throw new Error("Provider is invalid");
+        return {
+          feed_id: feedID,
+          provider: provider,
+          url: requiredText("feed-url", "URL"),
+          title_override: textOrNull("feed-title-override"),
+          description_override: textOrNull("feed-description-override"),
+          enabled: byID("feed-enabled").checked,
+          include_in_opml: byID("feed-include-in-opml").checked,
+          private_feed: byID("feed-private-feed").checked,
+          update_period: requiredText("feed-update-period", "Update period"),
+          page_size: requiredInteger("feed-page-size", "Page size", 1),
+          keep_last: requiredInteger("feed-keep-last", "Keep last", 0),
+          cookie_profile: textOrNull("feed-cookie-profile"),
+          filters: {
+            title: textOrNull("feed-filter-title"),
+            not_title: textOrNull("feed-filter-not-title"),
+            description: textOrNull("feed-filter-description"),
+            not_description: textOrNull("feed-filter-not-description"),
+            min_duration: optionalInteger("feed-filter-min-duration", "Min duration"),
+            max_duration: optionalInteger("feed-filter-max-duration", "Max duration"),
+            min_age: optionalInteger("feed-filter-min-age", "Min age"),
+            max_age: optionalInteger("feed-filter-max-age", "Max age")
+          }
+        };
+      }
+
+      function renderFeedForm() {
+        var form = byID("feed-form");
+        form.hidden = !state.feedFormOpen;
+        byID("feed-form-title").textContent = state.feedFormMode === "edit" ? "Edit feed" : "New feed";
+        var editing = state.feedFormMode === "edit";
+        feedFormFieldIDs.forEach(function (id) {
+          byID(id).disabled = state.busy;
+        });
+        byID("feed-id").readOnly = editing;
+        byID("feed-provider").disabled = state.busy || editing;
+        byID("feed-form-save").disabled = state.busy || !state.feedFormOpen;
+        byID("feed-form-cancel").disabled = state.busy;
+      }
+
+      function openNewFeedForm() {
+        state.feedFormOpen = true;
+        state.feedFormMode = "create";
+        state.editingFeedID = "";
+        setFeedFormValues(defaultFeedFormValues());
+        renderFeedForm();
+        setStatus("New feed ready");
+      }
+
+      function openEditFeedForm(feedID) {
+        var feed = findFeedByID(feedID);
+        if (!feed) {
+          showError("Feed not found");
+          return;
+        }
+        state.feedFormOpen = true;
+        state.feedFormMode = "edit";
+        state.editingFeedID = feed.feed_id;
+        setFeedFormValues(feedFormValuesFromFeed(feed));
+        renderFeedForm();
+        setStatus("Editing " + feed.feed_id);
+      }
+
+      function closeFeedForm() {
+        state.feedFormOpen = false;
+        state.feedFormMode = "create";
+        state.editingFeedID = "";
+        renderFeedForm();
+      }
+
       function renderSummary() {
         var enabled = state.feeds.filter(function (feed) { return feed.enabled; }).length;
         var inOpml = state.feeds.filter(function (feed) { return feed.include_in_opml; }).length;
@@ -663,6 +1055,13 @@ function dashboardHTML(): string {
             copyText(feed.public_feed_url);
           });
           actions.appendChild(copy);
+          var edit = el("button", "", "Edit");
+          edit.type = "button";
+          edit.disabled = state.busy;
+          edit.addEventListener("click", function () {
+            openEditFeedForm(feed.feed_id);
+          });
+          actions.appendChild(edit);
           appendCell(row, actions);
           body.appendChild(row);
         });
@@ -806,6 +1205,7 @@ function dashboardHTML(): string {
       function renderAll() {
         renderSummary();
         renderFeeds();
+        renderFeedForm();
         renderEpisodes();
         renderSubscriptions();
         renderRuns();
@@ -868,6 +1268,34 @@ function dashboardHTML(): string {
         loadEpisodes(true);
       }
 
+      async function submitFeedForm(event) {
+        event.preventDefault();
+        var payload;
+        try {
+          payload = readFeedFormValues();
+        } catch (error) {
+          showError(error);
+          return;
+        }
+        setBusy(true);
+        renderFeedForm();
+        try {
+          var result = await postJSON(paths.feedUpsert, payload);
+          var saved = result.feed || payload;
+          state.selectedFeedID = saved.feed_id;
+          state.feedFormOpen = false;
+          state.feedFormMode = "create";
+          state.editingFeedID = "";
+          await loadDashboard();
+          setStatus("Saved feed " + saved.feed_id, "ok");
+        } catch (error) {
+          showError(error);
+        } finally {
+          setBusy(false);
+          renderFeedForm();
+        }
+      }
+
       async function updateFeedStatus(feedID, patch) {
         setBusy(true);
         try {
@@ -902,6 +1330,9 @@ function dashboardHTML(): string {
       }
 
       byID("refresh-dashboard").addEventListener("click", loadDashboard);
+      byID("new-feed").addEventListener("click", openNewFeedForm);
+      byID("feed-form").addEventListener("submit", submitFeedForm);
+      byID("feed-form-cancel").addEventListener("click", closeFeedForm);
       byID("refresh-episodes").addEventListener("click", function () {
         loadEpisodes(true);
       });

@@ -137,14 +137,92 @@ describe("route auth boundaries", () => {
     expect(body).toContain("/api/admin/feeds");
     expect(body).toContain("/api/admin/subscriptions");
     expect(body).toContain("/api/admin/episodes");
+    expect(body).toContain("/api/admin/feeds/upsert");
     expect(body).toContain("/api/admin/feeds/status");
     expect(body).toContain("/api/admin/episodes/status");
     expect(body).toContain("/api/admin/sync-runs?limit=10");
     expect(body).toContain("/api/admin/events?limit=25");
+    expect(body).toContain("data-feed-form");
+    expect(body).toContain("function openNewFeedForm");
+    expect(body).toContain("function openEditFeedForm");
+    expect(body).toContain("function submitFeedForm");
+    expect(body).toContain("function readFeedFormValues");
+    expect(body).toContain("postJSON(paths.feedUpsert, payload)");
+    expect(body).toContain("feedID = state.editingFeedID");
+    expect(body).toContain("provider = original.provider");
     expect(body).toContain("function safeExternalURL");
     expect(body).toContain("url.protocol === \"http:\" || url.protocol === \"https:\"");
     expect(body).toContain("noopener noreferrer");
     expect(body.length).toBeGreaterThan(12000);
+  });
+
+  it("serves dashboard feed form fields and full upsert payload markers", async () => {
+    const response = await worker.fetch(
+      new Request("https://podcast.example.com/dashboard/", {
+        headers: { "cf-access-jwt-assertion": "present" },
+      }),
+      env,
+    );
+
+    const body = await response.text();
+    const fieldIDs = [
+      "feed-id",
+      "feed-provider",
+      "feed-url",
+      "feed-title-override",
+      "feed-description-override",
+      "feed-enabled",
+      "feed-include-in-opml",
+      "feed-private-feed",
+      "feed-update-period",
+      "feed-page-size",
+      "feed-keep-last",
+      "feed-cookie-profile",
+      "feed-filter-title",
+      "feed-filter-not-title",
+      "feed-filter-description",
+      "feed-filter-not-description",
+      "feed-filter-min-duration",
+      "feed-filter-max-duration",
+      "feed-filter-min-age",
+      "feed-filter-max-age",
+    ];
+    for (const id of fieldIDs) {
+      expect(body).toContain(`id="${id}"`);
+    }
+
+    const payloadKeys = [
+      "feed_id:",
+      "provider:",
+      "url:",
+      "title_override:",
+      "description_override:",
+      "enabled:",
+      "include_in_opml:",
+      "private_feed:",
+      "update_period:",
+      "page_size:",
+      "keep_last:",
+      "cookie_profile:",
+      "filters:",
+    ];
+    for (const key of payloadKeys) {
+      expect(body).toContain(key);
+    }
+
+    const filterKeys = [
+      "title: textOrNull(\"feed-filter-title\")",
+      "not_title: textOrNull(\"feed-filter-not-title\")",
+      "description: textOrNull(\"feed-filter-description\")",
+      "not_description: textOrNull(\"feed-filter-not-description\")",
+      "min_duration: optionalInteger(\"feed-filter-min-duration\", \"Min duration\")",
+      "max_duration: optionalInteger(\"feed-filter-max-duration\", \"Max duration\")",
+      "min_age: optionalInteger(\"feed-filter-min-age\", \"Min age\")",
+      "max_age: optionalInteger(\"feed-filter-max-age\", \"Max age\")",
+    ];
+    for (const key of filterKeys) {
+      expect(body).toContain(key);
+    }
   });
 
   it("keeps dashboard source free of unsafe DOM shortcuts and external assets", async () => {
