@@ -102,14 +102,23 @@ func (u *Manager) enqueueRemotePublishTask(ctx context.Context, feedConfig *feed
 	if u.remotePublishOutbox == nil {
 		return nil
 	}
+	info, err := builder.ParseURL(feedConfig.URL)
+	if err != nil {
+		return err
+	}
 	return u.remotePublishOutbox.EnqueueRemotePublishTask(ctx, &model.RemotePublishTask{
-		FeedID:         feedConfig.ID,
-		LocalEpisodeID: episode.ID,
-		MediaPath:      mediaPath,
-		Size:           size,
-		Title:          episode.Title,
-		SourceURL:      episode.VideoURL,
-		PublishedAt:    episode.PubDate,
+		FeedID:          feedConfig.ID,
+		Provider:        info.Provider,
+		LocalEpisodeID:  episode.ID,
+		SourceEpisodeID: episode.ID,
+		MediaPath:       mediaPath,
+		Size:            size,
+		Title:           episode.Title,
+		Description:     episode.Description,
+		Thumbnail:       episode.Thumbnail,
+		Duration:        episode.Duration,
+		SourceURL:       episode.VideoURL,
+		PublishedAt:     episode.PubDate,
 	})
 }
 

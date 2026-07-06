@@ -101,6 +101,8 @@ func TestBadger_EnqueueRemotePublishTaskPreservesRemoteAssetState(t *testing.T) 
 			first.R2Key = "audio/feed/episode-token.mp3"
 			first.AssetToken = "token"
 			first.MimeType = "audio/mpeg"
+			first.ServerStatus = "visible"
+			first.UpsertedAt = completedAt
 			first.CompletedAt = completedAt
 			first.CreatedAt = completedAt.Add(-time.Hour)
 			first.UpdatedAt = completedAt
@@ -110,6 +112,9 @@ func TestBadger_EnqueueRemotePublishTaskPreservesRemoteAssetState(t *testing.T) 
 			second.MediaPath = "feed/episode-new.mp3"
 			second.Size = 999
 			second.Title = "Episode new"
+			second.Description = "Episode new description"
+			second.Thumbnail = "https://example.com/new.jpg"
+			second.Duration = 456
 			require.NoError(t, db.EnqueueRemotePublishTask(ctx, second))
 
 			got, err := db.GetRemotePublishTask(ctx, model.RemotePublishTaskID("feed", "episode"))
@@ -117,6 +122,9 @@ func TestBadger_EnqueueRemotePublishTaskPreservesRemoteAssetState(t *testing.T) 
 			assert.Equal(t, "feed/episode-new.mp3", got.MediaPath)
 			assert.EqualValues(t, 999, got.Size)
 			assert.Equal(t, "Episode new", got.Title)
+			assert.Equal(t, "Episode new description", got.Description)
+			assert.Equal(t, "https://example.com/new.jpg", got.Thumbnail)
+			assert.EqualValues(t, 456, got.Duration)
 			assert.Equal(t, tt.status, got.Status)
 			assert.Equal(t, 4, got.Attempts)
 			assert.Equal(t, first.NextAttemptAt, got.NextAttemptAt)
@@ -124,6 +132,8 @@ func TestBadger_EnqueueRemotePublishTaskPreservesRemoteAssetState(t *testing.T) 
 			assert.Equal(t, "audio/feed/episode-token.mp3", got.R2Key)
 			assert.Equal(t, "token", got.AssetToken)
 			assert.Equal(t, "audio/mpeg", got.MimeType)
+			assert.Equal(t, "visible", got.ServerStatus)
+			assert.Equal(t, completedAt, got.UpsertedAt)
 			assert.Equal(t, completedAt, got.CompletedAt)
 		})
 	}
@@ -326,7 +336,7 @@ func TestBadger_CompleteRemotePublishTaskMarksSucceeded(t *testing.T) {
 	task.LastError = "old error"
 	require.NoError(t, db.seedRemotePublishTask(task))
 
-	require.NoError(t, db.CompleteRemotePublishTask(ctx, task.ID, now))
+	require.NoError(t, db.CompleteRemotePublishTask(ctx, task.ID, "", now))
 
 	got, err := db.GetRemotePublishTask(ctx, task.ID)
 	require.NoError(t, err)
@@ -335,6 +345,23 @@ func TestBadger_CompleteRemotePublishTaskMarksSucceeded(t *testing.T) {
 	assert.True(t, got.NextAttemptAt.IsZero())
 	assert.Equal(t, now, got.CompletedAt)
 	assert.Equal(t, now, got.UpdatedAt)
+}
+
+func TestBadger_CompleteRemotePublishTaskRecordsServerStatus(t *testing.T) {
+	db := newTestBadger(t)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	task := seededRemotePublishTask("feed", "episode", model.RemotePublishPending, now)
+	require.NoError(t, db.seedRemotePublishTask(task))
+
+	require.NoError(t, db.CompleteRemotePublishTask(ctx, task.ID, "hidden", now))
+
+	got, err := db.GetRemotePublishTask(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, model.RemotePublishSucceeded, got.Status)
+	assert.Equal(t, "hidden", got.ServerStatus)
+	assert.Equal(t, now, got.UpsertedAt)
+	assert.Equal(t, now, got.CompletedAt)
 }
 
 func TestRemotePublishNextAttempt(t *testing.T) {
@@ -408,13 +435,18 @@ func newTestBadger(t *testing.T) *Badger {
 
 func newRemotePublishTask(feedID, episodeID string) *model.RemotePublishTask {
 	return &model.RemotePublishTask{
-		FeedID:         feedID,
-		LocalEpisodeID: episodeID,
-		MediaPath:      feedID + "/" + episodeID + ".mp3",
-		Size:           123,
-		Title:          "Episode " + episodeID,
-		SourceURL:      "https://example.com/" + episodeID,
-		PublishedAt:    time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
+		FeedID:          feedID,
+		Provider:        model.ProviderYoutube,
+		LocalEpisodeID:  episodeID,
+		SourceEpisodeID: episodeID,
+		MediaPath:       feedID + "/" + episodeID + ".mp3",
+		Size:            123,
+		Title:           "Episode " + episodeID,
+		Description:     "Description " + episodeID,
+		Thumbnail:       "https://example.com/" + episodeID + ".jpg",
+		Duration:        123,
+		SourceURL:       "https://example.com/" + episodeID,
+		PublishedAt:     time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
 	}
 }
 

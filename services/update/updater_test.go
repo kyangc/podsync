@@ -88,7 +88,7 @@ func TestEnqueueRemotePublishTaskNoopsWithoutOutbox(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestEnqueueRemotePublishTaskRecordsEpisodeMetadata(t *testing.T) {
+func TestEnqueueRemotePublishTaskRecordsProviderAndEpisodeMetadata(t *testing.T) {
 	outbox := &recordingRemoteOutbox{}
 	manager := &Manager{remotePublishOutbox: outbox}
 	episode := testEpisode()
@@ -99,12 +99,29 @@ func TestEnqueueRemotePublishTaskRecordsEpisodeMetadata(t *testing.T) {
 	require.Len(t, outbox.tasks, 1)
 	task := outbox.tasks[0]
 	require.Equal(t, "feed", task.FeedID)
+	require.Equal(t, model.ProviderYoutube, task.Provider)
 	require.Equal(t, "episode", task.LocalEpisodeID)
+	require.Equal(t, "episode", task.SourceEpisodeID)
 	require.Equal(t, "feed/episode.mp3", task.MediaPath)
 	require.EqualValues(t, 123, task.Size)
 	require.Equal(t, episode.Title, task.Title)
+	require.Equal(t, episode.Description, task.Description)
+	require.Equal(t, episode.Thumbnail, task.Thumbnail)
+	require.Equal(t, episode.Duration, task.Duration)
 	require.Equal(t, episode.VideoURL, task.SourceURL)
 	require.Equal(t, episode.PubDate, task.PublishedAt)
+}
+
+func TestEnqueueRemotePublishTaskReturnsProviderParseError(t *testing.T) {
+	outbox := &recordingRemoteOutbox{}
+	manager := &Manager{remotePublishOutbox: outbox}
+	feedConfig := testFeedConfig()
+	feedConfig.URL = "://bad"
+
+	err := manager.enqueueRemotePublishTask(context.Background(), feedConfig, testEpisode(), "feed/episode.mp3", 123)
+
+	require.Error(t, err)
+	require.Zero(t, outbox.calls)
 }
 
 func TestEnqueueRemotePublishTaskReturnsOutboxError(t *testing.T) {
@@ -276,15 +293,19 @@ func (h hookDownloader) PlaylistMetadata(context.Context, string) (ytdl.Playlist
 func testFeedConfig() *feed.Config {
 	return &feed.Config{
 		ID:     "feed",
+		URL:    "https://www.youtube.com/channel/UCrLtQJG-ZNJeU08N0SNIJzw",
 		Format: model.FormatAudio,
 	}
 }
 
 func testEpisode() *model.Episode {
 	return &model.Episode{
-		ID:       "episode",
-		Title:    "Episode",
-		VideoURL: "https://example.com/episode",
-		PubDate:  time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
+		ID:          "episode",
+		Title:       "Episode",
+		Description: "Episode description",
+		Thumbnail:   "https://example.com/episode.jpg",
+		Duration:    123,
+		VideoURL:    "https://www.youtube.com/watch?v=episode",
+		PubDate:     time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
 	}
 }

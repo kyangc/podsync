@@ -15,7 +15,7 @@ import (
 type Outbox interface {
 	DueRemotePublishTasks(ctx context.Context, now time.Time, limit int) ([]*model.RemotePublishTask, error)
 	PrepareRemotePublishAttempt(ctx context.Context, id string, r2Key string, assetToken string, mimeType string, now time.Time) (*model.RemotePublishTask, error)
-	CompleteRemotePublishTask(ctx context.Context, id string, now time.Time) error
+	CompleteRemotePublishTask(ctx context.Context, id string, serverStatus string, now time.Time) error
 	RetryRemotePublishTask(ctx context.Context, id string, cause error, now time.Time) error
 	DeferRemotePublishTask(ctx context.Context, id string, cause error, now time.Time) error
 	FailRemotePublishTask(ctx context.Context, id string, cause error, now time.Time) error
@@ -32,6 +32,7 @@ type MediaStore interface {
 type Processor struct {
 	Outbox    Outbox
 	Publisher Publisher
+	Upserter  EpisodeUpserter
 	Store     MediaStore
 	Prefix    string
 	Limit     int
@@ -99,5 +100,19 @@ func (p *Processor) processOne(ctx context.Context, task *model.RemotePublishTas
 		}
 		return err
 	}
-	return p.Outbox.CompleteRemotePublishTask(ctx, task.ID, now)
+	serverStatus := ""
+	if p.Upserter != nil {
+		result, err := p.Upserter.UpsertEpisode(ctx, prepared)
+		if err != nil {
+			if IsNonRetryable(err) {
+				return p.Outbox.FailRemotePublishTask(ctx, task.ID, err, now)
+			}
+			if retryErr := p.Outbox.RetryRemotePublishTask(ctx, task.ID, err, now); retryErr != nil {
+				return retryErr
+			}
+			return err
+		}
+		serverStatus = result.Status
+	}
+	return p.Outbox.CompleteRemotePublishTask(ctx, task.ID, serverStatus, now)
 }

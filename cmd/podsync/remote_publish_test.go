@@ -40,6 +40,8 @@ func TestRemotePublishEnabledRequiresRemoteLocalStorageAndR2(t *testing.T) {
 	assert.False(t, remotePublishEnabled(cfg))
 
 	tests := []func(*Config){
+		func(cfg *Config) { cfg.Remote.BaseURL = "" },
+		func(cfg *Config) { cfg.Remote.Token = "" },
 		func(cfg *Config) { cfg.R2.Endpoint = "" },
 		func(cfg *Config) { cfg.R2.Bucket = "" },
 		func(cfg *Config) { cfg.R2.AccessKeyID = "" },
@@ -82,6 +84,9 @@ func TestBuildRemoteProcessorSkipsDisabledOrIncompleteConfig(t *testing.T) {
 			processor, err := buildRemoteProcessor(cfg, &cmdFakeOutbox{}, func(remotepublish.R2Config) (remotepublish.Publisher, error) {
 				called = true
 				return &cmdFakePublisher{}, nil
+			}, func(string, string) (remotepublish.EpisodeUpserter, error) {
+				called = true
+				return &cmdFakeUpserter{}, nil
 			})
 
 			require.NoError(t, err)
@@ -94,19 +99,28 @@ func TestBuildRemoteProcessorSkipsDisabledOrIncompleteConfig(t *testing.T) {
 func TestBuildRemoteProcessorBuildsLocalR2Processor(t *testing.T) {
 	cfg := completeRemotePublishConfig()
 	var gotCfg remotepublish.R2Config
+	var gotBaseURL string
+	var gotToken string
 
 	processor, err := buildRemoteProcessor(cfg, &cmdFakeOutbox{}, func(cfg remotepublish.R2Config) (remotepublish.Publisher, error) {
 		gotCfg = cfg
 		return &cmdFakePublisher{}, nil
+	}, func(baseURL string, token string) (remotepublish.EpisodeUpserter, error) {
+		gotBaseURL = baseURL
+		gotToken = token
+		return &cmdFakeUpserter{}, nil
 	})
 
 	require.NoError(t, err)
 	require.NotNil(t, processor)
 	assert.Equal(t, remoteR2Config(cfg), gotCfg)
+	assert.Equal(t, "https://podcast.example.com", gotBaseURL)
+	assert.Equal(t, "secret", gotToken)
 	remoteProcessor, ok := processor.(*remotepublish.Processor)
 	require.True(t, ok)
 	assert.Equal(t, defaultRemotePublishBatchSize, remoteProcessor.Limit)
 	assert.Equal(t, "podcasts/audio", remoteProcessor.Prefix)
+	assert.NotNil(t, remoteProcessor.Upserter)
 	store, ok := remoteProcessor.Store.(remotepublish.LocalMediaStore)
 	require.True(t, ok)
 	assert.Equal(t, "/data", store.Root)
@@ -134,7 +148,7 @@ func TestRunRemotePublishLoopProcessesImmediatelyAndStops(t *testing.T) {
 
 func completeRemotePublishConfig() *Config {
 	return &Config{
-		Remote: RemoteConfig{Enabled: true},
+		Remote: RemoteConfig{Enabled: true, BaseURL: "https://podcast.example.com", Token: "secret"},
 		Storage: fs.Config{
 			Type:  "local",
 			Local: fs.LocalConfig{DataDir: "/data"},
@@ -157,6 +171,12 @@ type cmdFakePublisher struct{}
 
 func (p *cmdFakePublisher) Upload(context.Context, *model.RemotePublishTask, io.ReadSeeker) error {
 	return nil
+}
+
+type cmdFakeUpserter struct{}
+
+func (u *cmdFakeUpserter) UpsertEpisode(context.Context, *model.RemotePublishTask) (*remotepublish.EpisodeUpsertResult, error) {
+	return &remotepublish.EpisodeUpsertResult{Status: "visible"}, nil
 }
 
 type cmdFakeProcessor struct {

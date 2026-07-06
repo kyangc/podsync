@@ -64,6 +64,96 @@ func TestProcessorRetriesUploadFailure(t *testing.T) {
 	assert.Empty(t, outbox.completed)
 }
 
+func TestProcessorUpsertsAfterUploadAndCompletesWithServerStatus(t *testing.T) {
+	root := t.TempDir()
+	task := newProcessorTask("feed", "episode")
+	writeProcessorMedia(t, root, task.MediaPath, []byte("audio bytes"))
+	outbox := &fakeOutbox{due: []*model.RemotePublishTask{task}}
+	upserter := &fakeEpisodeUpserter{status: "visible"}
+	processor := &Processor{
+		Outbox:    outbox,
+		Publisher: &fakeProcessorPublisher{},
+		Upserter:  upserter,
+		Store:     LocalMediaStore{Root: root},
+	}
+
+	err := processor.ProcessDue(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, upserter.tasks, 1)
+	assert.NotEmpty(t, upserter.tasks[0].R2Key)
+	assert.Equal(t, []string{task.ID}, outbox.completed)
+	assert.Equal(t, []string{"visible"}, outbox.completedStatuses)
+	assert.Empty(t, outbox.retried)
+	assert.Empty(t, outbox.failed)
+}
+
+func TestProcessorRetriesWhenUpsertFails(t *testing.T) {
+	root := t.TempDir()
+	task := newProcessorTask("feed", "episode")
+	writeProcessorMedia(t, root, task.MediaPath, []byte("audio bytes"))
+	upsertErr := errors.New("worker unavailable")
+	outbox := &fakeOutbox{due: []*model.RemotePublishTask{task}}
+	processor := &Processor{
+		Outbox:    outbox,
+		Publisher: &fakeProcessorPublisher{},
+		Upserter:  &fakeEpisodeUpserter{err: upsertErr},
+		Store:     LocalMediaStore{Root: root},
+	}
+
+	err := processor.ProcessDue(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{task.ID}, outbox.retried)
+	require.Len(t, outbox.retryErrors, 1)
+	assert.Equal(t, upsertErr, outbox.retryErrors[0])
+	assert.Empty(t, outbox.completed)
+	assert.Empty(t, outbox.failed)
+}
+
+func TestProcessorFailsNonRetryableUpsertValidation(t *testing.T) {
+	root := t.TempDir()
+	task := newProcessorTask("feed", "episode")
+	writeProcessorMedia(t, root, task.MediaPath, []byte("audio bytes"))
+	outbox := &fakeOutbox{due: []*model.RemotePublishTask{task}}
+	processor := &Processor{
+		Outbox:    outbox,
+		Publisher: &fakeProcessorPublisher{},
+		Upserter:  &fakeEpisodeUpserter{err: nonRetryable("bad metadata")},
+		Store:     LocalMediaStore{Root: root},
+	}
+
+	err := processor.ProcessDue(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{task.ID}, outbox.failed)
+	require.Len(t, outbox.failErrors, 1)
+	assert.True(t, IsNonRetryable(outbox.failErrors[0]))
+	assert.Empty(t, outbox.retried)
+	assert.Empty(t, outbox.completed)
+}
+
+func TestProcessorCompletesWhenUpsertReturnsHiddenStatus(t *testing.T) {
+	root := t.TempDir()
+	task := newProcessorTask("feed", "episode")
+	writeProcessorMedia(t, root, task.MediaPath, []byte("audio bytes"))
+	outbox := &fakeOutbox{due: []*model.RemotePublishTask{task}}
+	processor := &Processor{
+		Outbox:    outbox,
+		Publisher: &fakeProcessorPublisher{},
+		Upserter:  &fakeEpisodeUpserter{status: "hidden"},
+		Store:     LocalMediaStore{Root: root},
+	}
+
+	err := processor.ProcessDue(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{task.ID}, outbox.completed)
+	assert.Equal(t, []string{"hidden"}, outbox.completedStatuses)
+	assert.Empty(t, outbox.retried)
+	assert.Empty(t, outbox.failed)
+}
+
 func TestProcessorMarksMissingMediaAsFailed(t *testing.T) {
 	task := newProcessorTask("feed", "episode")
 	outbox := &fakeOutbox{due: []*model.RemotePublishTask{task}}
@@ -262,14 +352,16 @@ func TestProcessorWithBadgerLocalStoreAndMockPublisher(t *testing.T) {
 }
 
 type fakeOutbox struct {
-	due         []*model.RemotePublishTask
-	prepared    []*model.RemotePublishTask
-	completed   []string
-	retried     []string
-	retryErrors []error
-	deferred    []string
-	deferErrors []error
-	failed      []string
+	due               []*model.RemotePublishTask
+	prepared          []*model.RemotePublishTask
+	completed         []string
+	completedStatuses []string
+	retried           []string
+	retryErrors       []error
+	deferred          []string
+	deferErrors       []error
+	failed            []string
+	failErrors        []error
 }
 
 func (o *fakeOutbox) DueRemotePublishTasks(_ context.Context, _ time.Time, _ int) ([]*model.RemotePublishTask, error) {
@@ -293,8 +385,9 @@ func (o *fakeOutbox) PrepareRemotePublishAttempt(_ context.Context, id string, r
 	return nil, model.ErrNotFound
 }
 
-func (o *fakeOutbox) CompleteRemotePublishTask(_ context.Context, id string, _ time.Time) error {
+func (o *fakeOutbox) CompleteRemotePublishTask(_ context.Context, id string, serverStatus string, _ time.Time) error {
 	o.completed = append(o.completed, id)
+	o.completedStatuses = append(o.completedStatuses, serverStatus)
 	return nil
 }
 
@@ -310,9 +403,29 @@ func (o *fakeOutbox) DeferRemotePublishTask(_ context.Context, id string, cause 
 	return nil
 }
 
-func (o *fakeOutbox) FailRemotePublishTask(_ context.Context, id string, _ error, _ time.Time) error {
+func (o *fakeOutbox) FailRemotePublishTask(_ context.Context, id string, cause error, _ time.Time) error {
 	o.failed = append(o.failed, id)
+	o.failErrors = append(o.failErrors, cause)
 	return nil
+}
+
+type fakeEpisodeUpserter struct {
+	status string
+	err    error
+	tasks  []*model.RemotePublishTask
+}
+
+func (u *fakeEpisodeUpserter) UpsertEpisode(_ context.Context, task *model.RemotePublishTask) (*EpisodeUpsertResult, error) {
+	cloned := *task
+	u.tasks = append(u.tasks, &cloned)
+	if u.err != nil {
+		return nil, u.err
+	}
+	status := u.status
+	if status == "" {
+		status = "visible"
+	}
+	return &EpisodeUpsertResult{Status: status}, nil
 }
 
 type fakeProcessorPublisher struct {
@@ -369,15 +482,20 @@ func (p *fakeProcessorPublisher) Upload(_ context.Context, task *model.RemotePub
 
 func newProcessorTask(feedID, episodeID string) *model.RemotePublishTask {
 	return &model.RemotePublishTask{
-		ID:             model.RemotePublishTaskID(feedID, episodeID),
-		FeedID:         feedID,
-		LocalEpisodeID: episodeID,
-		MediaPath:      feedID + "/" + episodeID + ".mp3",
-		Size:           11,
-		Title:          "Episode " + episodeID,
-		SourceURL:      "https://example.com/" + episodeID,
-		PublishedAt:    time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
-		Status:         model.RemotePublishPending,
+		ID:              model.RemotePublishTaskID(feedID, episodeID),
+		FeedID:          feedID,
+		Provider:        model.ProviderYoutube,
+		LocalEpisodeID:  episodeID,
+		SourceEpisodeID: episodeID,
+		MediaPath:       feedID + "/" + episodeID + ".mp3",
+		Size:            11,
+		Title:           "Episode " + episodeID,
+		Description:     "Description " + episodeID,
+		Thumbnail:       "https://example.com/" + episodeID + ".jpg",
+		Duration:        123,
+		SourceURL:       "https://example.com/" + episodeID,
+		PublishedAt:     time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
+		Status:          model.RemotePublishPending,
 	}
 }
 

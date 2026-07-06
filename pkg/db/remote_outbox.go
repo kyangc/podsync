@@ -37,9 +37,14 @@ func (b *Badger) EnqueueRemotePublishTask(_ context.Context, task *model.RemoteP
 		err := b.getObj(txn, key, &existing)
 		switch err {
 		case nil:
+			existing.Provider = task.Provider
+			existing.SourceEpisodeID = task.SourceEpisodeID
 			existing.MediaPath = task.MediaPath
 			existing.Size = task.Size
 			existing.Title = task.Title
+			existing.Description = task.Description
+			existing.Thumbnail = task.Thumbnail
+			existing.Duration = task.Duration
 			existing.SourceURL = task.SourceURL
 			existing.PublishedAt = task.PublishedAt
 			existing.UpdatedAt = now
@@ -111,7 +116,7 @@ func (b *Badger) PrepareRemotePublishAttempt(_ context.Context, id string, r2Key
 	return &task, err
 }
 
-func (b *Badger) CompleteRemotePublishTask(_ context.Context, id string, now time.Time) error {
+func (b *Badger) CompleteRemotePublishTask(_ context.Context, id string, serverStatus string, now time.Time) error {
 	return b.db.Update(func(txn *badger.Txn) error {
 		var task model.RemotePublishTask
 		if err := b.getRemotePublishTask(txn, id, &task); err != nil {
@@ -120,6 +125,10 @@ func (b *Badger) CompleteRemotePublishTask(_ context.Context, id string, now tim
 		task.Status = model.RemotePublishSucceeded
 		task.LastError = ""
 		task.NextAttemptAt = time.Time{}
+		if serverStatus != "" {
+			task.ServerStatus = serverStatus
+			task.UpsertedAt = now
+		}
 		task.CompletedAt = now
 		task.UpdatedAt = now
 		return b.setObj(txn, b.getKey(remotePublishTaskPath, id), &task, true)

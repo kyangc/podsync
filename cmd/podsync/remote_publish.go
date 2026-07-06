@@ -18,6 +18,7 @@ type remotePublishProcessor interface {
 }
 
 type remotePublisherFactory func(remotepublish.R2Config) (remotepublish.Publisher, error)
+type remoteUpserterFactory func(baseURL string, token string) (remotepublish.EpisodeUpserter, error)
 
 func remotePublishOptions(cfg *Config, outbox update.RemotePublishOutbox) []update.Option {
 	if !cfg.Remote.Enabled {
@@ -28,6 +29,8 @@ func remotePublishOptions(cfg *Config, outbox update.RemotePublishOutbox) []upda
 
 func remotePublishEnabled(cfg *Config) bool {
 	return cfg.Remote.Enabled &&
+		cfg.Remote.BaseURL != "" &&
+		cfg.Remote.Token != "" &&
 		cfg.Storage.Type == "local" &&
 		cfg.R2.Endpoint != "" &&
 		cfg.R2.Bucket != "" &&
@@ -49,7 +52,11 @@ func newRemoteR2Publisher(cfg remotepublish.R2Config) (remotepublish.Publisher, 
 	return remotepublish.NewR2Publisher(cfg)
 }
 
-func buildRemoteProcessor(cfg *Config, outbox remotepublish.Outbox, newPublisher remotePublisherFactory) (remotePublishProcessor, error) {
+func newRemoteNASUpserter(baseURL string, token string) (remotepublish.EpisodeUpserter, error) {
+	return remotepublish.NewNASClient(baseURL, token, nil)
+}
+
+func buildRemoteProcessor(cfg *Config, outbox remotepublish.Outbox, newPublisher remotePublisherFactory, newUpserter remoteUpserterFactory) (remotePublishProcessor, error) {
 	if !remotePublishEnabled(cfg) {
 		return nil, nil
 	}
@@ -57,9 +64,14 @@ func buildRemoteProcessor(cfg *Config, outbox remotepublish.Outbox, newPublisher
 	if err != nil {
 		return nil, err
 	}
+	upserter, err := newUpserter(cfg.Remote.BaseURL, cfg.Remote.Token)
+	if err != nil {
+		return nil, err
+	}
 	return &remotepublish.Processor{
 		Outbox:    outbox,
 		Publisher: publisher,
+		Upserter:  upserter,
 		Store:     remotepublish.LocalMediaStore{Root: cfg.Storage.Local.DataDir},
 		Prefix:    cfg.R2.Prefix,
 		Limit:     defaultRemotePublishBatchSize,

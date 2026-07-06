@@ -189,7 +189,7 @@ func main() {
 	if err != nil {
 		log.WithError(err).Fatal("failed to create updater")
 	}
-	remoteProcessor, err := buildRemoteProcessor(cfg, database, newRemoteR2Publisher)
+	remoteProcessor, err := buildRemoteProcessor(cfg, database, newRemoteR2Publisher, newRemoteNASUpserter)
 	if err != nil {
 		log.WithError(err).Warn("remote publish disabled")
 	} else if remoteProcessor == nil && cfg.Remote.Enabled {

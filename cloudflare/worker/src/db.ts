@@ -36,10 +36,47 @@ export interface DownloaderDefaults {
 
 export interface PublicFeedRow {
   feed_id: string;
+  provider: "youtube" | "bilibili";
   url: string;
   title_override: string | null;
   description_override: string | null;
+  page_size: number;
   title: string | null;
   description: string | null;
   link: string | null;
+}
+
+export type EpisodeStatus = "pending" | "visible" | "hidden" | "delete_pending" | "purged";
+
+export interface EpisodeUpsertRequest {
+  feed_id: string;
+  provider: "youtube" | "bilibili";
+  source_episode_id: string;
+  local_episode_id: string;
+  source_url?: string;
+  thumbnail?: string;
+  title?: string;
+  description?: string;
+  published_at?: string;
+  duration?: number;
+  r2_key: string;
+  size: number;
+  mime_type: string;
+  asset_token: string;
+}
+
+export interface EpisodeStatusRow {
+  status: EpisodeStatus;
+}
+
+export interface PublicEpisodeRow {
+  local_episode_id: string;
+  source_url: string | null;
+  title: string | null;
+  description: string | null;
+  published_at: string | null;
+  duration: number | null;
+  r2_key: string;
+  size: number;
+  mime_type: string;
 }

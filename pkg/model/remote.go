@@ -14,24 +14,31 @@ const (
 )
 
 type RemotePublishTask struct {
-	ID             string              `json:"id"`
-	FeedID         string              `json:"feed_id"`
-	LocalEpisodeID string              `json:"local_episode_id"`
-	MediaPath      string              `json:"media_path"`
-	Size           int64               `json:"size"`
-	Title          string              `json:"title"`
-	SourceURL      string              `json:"source_url"`
-	PublishedAt    time.Time           `json:"published_at"`
-	Status         RemotePublishStatus `json:"status"`
-	Attempts       int                 `json:"attempts"`
-	NextAttemptAt  time.Time           `json:"next_attempt_at"`
-	LastError      string              `json:"last_error"`
-	R2Key          string              `json:"r2_key"`
-	AssetToken     string              `json:"asset_token"`
-	MimeType       string              `json:"mime_type"`
-	CompletedAt    time.Time           `json:"completed_at"`
-	CreatedAt      time.Time           `json:"created_at"`
-	UpdatedAt      time.Time           `json:"updated_at"`
+	ID              string              `json:"id"`
+	FeedID          string              `json:"feed_id"`
+	Provider        Provider            `json:"provider"`
+	LocalEpisodeID  string              `json:"local_episode_id"`
+	SourceEpisodeID string              `json:"source_episode_id"`
+	MediaPath       string              `json:"media_path"`
+	Size            int64               `json:"size"`
+	Title           string              `json:"title"`
+	Description     string              `json:"description"`
+	Thumbnail       string              `json:"thumbnail"`
+	Duration        int64               `json:"duration"`
+	SourceURL       string              `json:"source_url"`
+	PublishedAt     time.Time           `json:"published_at"`
+	Status          RemotePublishStatus `json:"status"`
+	Attempts        int                 `json:"attempts"`
+	NextAttemptAt   time.Time           `json:"next_attempt_at"`
+	LastError       string              `json:"last_error"`
+	R2Key           string              `json:"r2_key"`
+	AssetToken      string              `json:"asset_token"`
+	MimeType        string              `json:"mime_type"`
+	ServerStatus    string              `json:"server_status"`
+	UpsertedAt      time.Time           `json:"upserted_at"`
+	CompletedAt     time.Time           `json:"completed_at"`
+	CreatedAt       time.Time           `json:"created_at"`
+	UpdatedAt       time.Time           `json:"updated_at"`
 }
 
 func RemotePublishTaskID(feedID, localEpisodeID string) string {
