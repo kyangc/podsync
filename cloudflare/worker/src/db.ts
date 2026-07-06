@@ -253,6 +253,7 @@ export interface EpisodeAdminRow {
   feed_id: string;
   local_episode_id: string;
   status: EpisodeStatus;
+  r2_key: string | null;
 }
 
 export interface TombstoneChangeRow {

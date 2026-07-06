@@ -1870,7 +1870,27 @@ function episodeTransition(current: EpisodeStatus, action: AdminEpisodeAction): 
   return { changed: false, status: current, action: "restore", conflict: "episode cannot be restored from current status" };
 }
 
-function episodeStatusUpdateSQL(action: AdminEpisodeAction): string {
+function r2KeyBlank(value: string | null): boolean {
+  return value === null || value === "";
+}
+
+function restoreRequiresR2Head(action: AdminEpisodeAction, episode: EpisodeAdminRow): boolean {
+  return action === "restore" && episode.status === "delete_pending" && !r2KeyBlank(episode.r2_key);
+}
+
+async function verifyRestorableR2Object(env: Env, action: AdminEpisodeAction, episode: EpisodeAdminRow): Promise<Response | null> {
+  if (!restoreRequiresR2Head(action, episode)) return null;
+  if (!env.MEDIA_BUCKET) return text("media bucket unavailable", 503);
+  try {
+    const object = await env.MEDIA_BUCKET.head(episode.r2_key!);
+    if (!object) return text("media object not found", 409);
+  } catch {
+    return text("media object check failed", 502);
+  }
+  return null;
+}
+
+function episodeStatusUpdateSQL(action: AdminEpisodeAction, episode?: EpisodeAdminRow): string {
   if (action === "delete") {
     return `UPDATE episodes
                SET status = 'delete_pending',
@@ -1882,6 +1902,11 @@ function episodeStatusUpdateSQL(action: AdminEpisodeAction): string {
                AND status IN ('pending', 'visible', 'hidden')`;
   }
   if (action === "restore") {
+    const statusPredicate = episode?.status === "hidden"
+      ? "status = 'hidden'"
+      : r2KeyBlank(episode?.r2_key ?? null)
+        ? "status = 'delete_pending' AND (r2_key IS NULL OR r2_key = '')"
+        : "status = 'delete_pending' AND r2_key = ?";
     return `UPDATE episodes
                SET status = 'visible',
                    deleted_at = NULL,
@@ -1889,7 +1914,7 @@ function episodeStatusUpdateSQL(action: AdminEpisodeAction): string {
                    updated_at = CURRENT_TIMESTAMP
              WHERE feed_id = ?
                AND local_episode_id = ?
-               AND status IN ('hidden', 'delete_pending')`;
+               AND ${statusPredicate}`;
   }
   return `UPDATE episodes
              SET status = 'hidden',
@@ -1897,6 +1922,14 @@ function episodeStatusUpdateSQL(action: AdminEpisodeAction): string {
            WHERE feed_id = ?
              AND local_episode_id = ?
              AND status IN ('pending', 'visible')`;
+}
+
+function episodeStatusUpdateBindings(action: AdminEpisodeAction, episode: EpisodeAdminRow, feedID: string, localEpisodeID: string): unknown[] {
+  const base = [feedID, localEpisodeID];
+  if (action === "restore" && episode.status === "delete_pending" && !r2KeyBlank(episode.r2_key)) {
+    return [...base, episode.r2_key];
+  }
+  return base;
 }
 
 function syncRunUpsertSQL(): string {
@@ -2345,7 +2378,7 @@ async function handleAdminFeedStatus(request: Request, env: Env): Promise<Respon
 
 async function selectEpisodeAdminRow(env: Env, feedID: string, localEpisodeID: string): Promise<EpisodeAdminRow | null> {
   return env.DB.prepare(
-    `SELECT feed_id, local_episode_id, status
+    `SELECT feed_id, local_episode_id, status, r2_key
        FROM episodes
       WHERE feed_id = ? AND local_episode_id = ?`,
   ).bind(feedID, localEpisodeID).first<EpisodeAdminRow>();
@@ -2374,7 +2407,12 @@ async function handleAdminEpisodeStatus(request: Request, env: Env): Promise<Res
     });
   }
 
-  const updateStatement = env.DB.prepare(episodeStatusUpdateSQL(parsed.action)).bind(parsed.feed_id, parsed.local_episode_id);
+  const restoreGuard = await verifyRestorableR2Object(env, parsed.action, episode);
+  if (restoreGuard) return restoreGuard;
+
+  const updateStatement = env.DB.prepare(episodeStatusUpdateSQL(parsed.action, episode)).bind(
+    ...episodeStatusUpdateBindings(parsed.action, episode, parsed.feed_id, parsed.local_episode_id),
+  );
   const tombstoneStatement = env.DB.prepare(
     `INSERT INTO tombstone_changes (feed_id, local_episode_id, status, action, created_at)
      SELECT ?, ?, ?, ?, CURRENT_TIMESTAMP

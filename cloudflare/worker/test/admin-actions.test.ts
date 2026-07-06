@@ -84,6 +84,18 @@ function episode(status: FakeEpisodeRow["status"], overrides: Partial<FakeEpisod
   };
 }
 
+class FakeR2Bucket {
+  existingKeys = new Set<string>();
+  failKeys = new Set<string>();
+  headKeys: string[] = [];
+
+  async head(key: string): Promise<unknown | null> {
+    this.headKeys.push(key);
+    if (this.failKeys.has(key)) throw new Error("head failed");
+    return this.existingKeys.has(key) ? { key } : null;
+  }
+}
+
 describe("admin actions", () => {
   it("requires Cloudflare Access for feed status changes", async () => {
     const response = await worker.fetch(
@@ -308,17 +320,138 @@ describe("admin actions", () => {
       [fakeEpisodeKey("feed", "episode"), episode("delete_pending", { deleted_at: "2026-07-06 00:00:00", purge_after: "2026-07-13 00:00:00" })],
     ]);
     const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+    const bucket = new FakeR2Bucket();
+    bucket.existingKeys.add("audio/feed/episode.mp3");
+    const response = await worker.fetch(
+      adminRequest("/api/admin/episodes/status", { feed_id: "feed", local_episode_id: "episode", action: "restore" }),
+      { DB: fakeD1({ episodesByKey, tombstoneChanges }), MEDIA_BUCKET: bucket as unknown as R2Bucket },
+    );
+
+    expect(response.status).toBe(200);
+    expect(bucket.headKeys).toEqual(["audio/feed/episode.mp3"]);
+    const got = episodesByKey.get(fakeEpisodeKey("feed", "episode"));
+    expect(got?.status).toBe("visible");
+    expect(got?.deleted_at).toBeNull();
+    expect(got?.purge_after).toBeNull();
+    expect(tombstoneChanges[0]).toMatchObject({ status: "visible", action: "restore" });
+  });
+
+  it("restores delete_pending episodes without bucket when r2 key is null or empty", async () => {
+    for (const r2Key of [null, ""]) {
+      const episodesByKey = new Map([
+        [fakeEpisodeKey("feed", "episode"), episode("delete_pending", {
+          r2_key: r2Key,
+          deleted_at: "2026-07-06 00:00:00",
+          purge_after: "2026-07-13 00:00:00",
+        })],
+      ]);
+      const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+      const response = await worker.fetch(
+        adminRequest("/api/admin/episodes/status", { feed_id: "feed", local_episode_id: "episode", action: "restore" }),
+        { DB: fakeD1({ episodesByKey, tombstoneChanges }) },
+      );
+
+      expect(response.status, String(r2Key)).toBe(200);
+      expect(episodesByKey.get(fakeEpisodeKey("feed", "episode"))?.status).toBe("visible");
+      expect(tombstoneChanges).toHaveLength(1);
+      expect(tombstoneChanges[0]).toMatchObject({ status: "visible", action: "restore" });
+    }
+  });
+
+  it("rejects delete_pending restore when the media object is missing", async () => {
+    const episodesByKey = new Map([
+      [fakeEpisodeKey("feed", "episode"), episode("delete_pending", { deleted_at: "2026-07-06 00:00:00", purge_after: "2026-07-13 00:00:00" })],
+    ]);
+    const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+    const bucket = new FakeR2Bucket();
+    const response = await worker.fetch(
+      adminRequest("/api/admin/episodes/status", { feed_id: "feed", local_episode_id: "episode", action: "restore" }),
+      { DB: fakeD1({ episodesByKey, tombstoneChanges }), MEDIA_BUCKET: bucket as unknown as R2Bucket },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.text()).resolves.toBe("media object not found");
+    expect(bucket.headKeys).toEqual(["audio/feed/episode.mp3"]);
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "episode"))).toMatchObject({
+      status: "delete_pending",
+      deleted_at: "2026-07-06 00:00:00",
+      purge_after: "2026-07-13 00:00:00",
+    });
+    expect(tombstoneChanges).toHaveLength(0);
+  });
+
+  it("rejects delete_pending restore when media bucket is unavailable", async () => {
+    const episodesByKey = new Map([
+      [fakeEpisodeKey("feed", "episode"), episode("delete_pending", { deleted_at: "2026-07-06 00:00:00", purge_after: "2026-07-13 00:00:00" })],
+    ]);
+    const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+    const response = await worker.fetch(
+      adminRequest("/api/admin/episodes/status", { feed_id: "feed", local_episode_id: "episode", action: "restore" }),
+      { DB: fakeD1({ episodesByKey, tombstoneChanges }) },
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.text()).resolves.toBe("media bucket unavailable");
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "episode"))).toMatchObject({
+      status: "delete_pending",
+      deleted_at: "2026-07-06 00:00:00",
+      purge_after: "2026-07-13 00:00:00",
+    });
+    expect(tombstoneChanges).toHaveLength(0);
+  });
+
+  it("rejects delete_pending restore when media head fails", async () => {
+    const episodesByKey = new Map([
+      [fakeEpisodeKey("feed", "episode"), episode("delete_pending", { deleted_at: "2026-07-06 00:00:00", purge_after: "2026-07-13 00:00:00" })],
+    ]);
+    const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+    const bucket = new FakeR2Bucket();
+    bucket.failKeys.add("audio/feed/episode.mp3");
+    const response = await worker.fetch(
+      adminRequest("/api/admin/episodes/status", { feed_id: "feed", local_episode_id: "episode", action: "restore" }),
+      { DB: fakeD1({ episodesByKey, tombstoneChanges }), MEDIA_BUCKET: bucket as unknown as R2Bucket },
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.text()).resolves.toBe("media object check failed");
+    expect(bucket.headKeys).toEqual(["audio/feed/episode.mp3"]);
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "episode"))).toMatchObject({
+      status: "delete_pending",
+      deleted_at: "2026-07-06 00:00:00",
+      purge_after: "2026-07-13 00:00:00",
+    });
+    expect(tombstoneChanges).toHaveLength(0);
+  });
+
+  it("restores hidden episodes without media bucket", async () => {
+    const episodesByKey = new Map([
+      [fakeEpisodeKey("feed", "episode"), episode("hidden")],
+    ]);
+    const tombstoneChanges: FakeTombstoneChangeRow[] = [];
     const response = await worker.fetch(
       adminRequest("/api/admin/episodes/status", { feed_id: "feed", local_episode_id: "episode", action: "restore" }),
       { DB: fakeD1({ episodesByKey, tombstoneChanges }) },
     );
 
     expect(response.status).toBe(200);
-    const got = episodesByKey.get(fakeEpisodeKey("feed", "episode"));
-    expect(got?.status).toBe("visible");
-    expect(got?.deleted_at).toBeNull();
-    expect(got?.purge_after).toBeNull();
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "episode"))?.status).toBe("visible");
     expect(tombstoneChanges[0]).toMatchObject({ status: "visible", action: "restore" });
+  });
+
+  it("does not head media for hidden or already visible restore", async () => {
+    for (const status of ["hidden", "visible"] as const) {
+      const episodesByKey = new Map([[fakeEpisodeKey("feed", "episode"), episode(status)]]);
+      const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+      const bucket = new FakeR2Bucket();
+      bucket.existingKeys.add("audio/feed/episode.mp3");
+      const response = await worker.fetch(
+        adminRequest("/api/admin/episodes/status", { feed_id: "feed", local_episode_id: "episode", action: "restore" }),
+        { DB: fakeD1({ episodesByKey, tombstoneChanges }), MEDIA_BUCKET: bucket as unknown as R2Bucket },
+      );
+
+      expect(response.status, status).toBe(200);
+      expect(bucket.headKeys).toEqual([]);
+    }
   });
 
   it("does not duplicate tombstones for repeated restore", async () => {
@@ -374,6 +507,55 @@ describe("admin actions", () => {
 
     expect(response.status).toBe(409);
     expect(episodesByKey.get(fakeEpisodeKey("feed", "episode"))?.status).toBe("delete_pending");
+    expect(tombstoneChanges).toHaveLength(0);
+  });
+
+  it("does not restore when hidden episode becomes delete_pending before update", async () => {
+    const episodesByKey = new Map([[fakeEpisodeKey("feed", "episode"), episode("hidden")]]);
+    const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+    const response = await worker.fetch(
+      adminRequest("/api/admin/episodes/status", { feed_id: "feed", local_episode_id: "episode", action: "restore" }),
+      {
+        DB: fakeD1({
+          episodesByKey,
+          tombstoneChanges,
+          beforeEpisodeStatusUpdate(_key, row) {
+            if (row) row.status = "delete_pending";
+          },
+        }),
+      },
+    );
+
+    expect(response.status).toBe(409);
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "episode"))?.status).toBe("delete_pending");
+    expect(tombstoneChanges).toHaveLength(0);
+  });
+
+  it("does not restore when delete_pending r2 key changes after head succeeds", async () => {
+    const episodesByKey = new Map([[fakeEpisodeKey("feed", "episode"), episode("delete_pending")]]);
+    const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+    const bucket = new FakeR2Bucket();
+    bucket.existingKeys.add("audio/feed/episode.mp3");
+    const response = await worker.fetch(
+      adminRequest("/api/admin/episodes/status", { feed_id: "feed", local_episode_id: "episode", action: "restore" }),
+      {
+        DB: fakeD1({
+          episodesByKey,
+          tombstoneChanges,
+          beforeEpisodeStatusUpdate(_key, row) {
+            if (row) row.r2_key = "audio/feed/changed.mp3";
+          },
+        }),
+        MEDIA_BUCKET: bucket as unknown as R2Bucket,
+      },
+    );
+
+    expect(response.status).toBe(409);
+    expect(bucket.headKeys).toEqual(["audio/feed/episode.mp3"]);
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "episode"))).toMatchObject({
+      status: "delete_pending",
+      r2_key: "audio/feed/changed.mp3",
+    });
     expect(tombstoneChanges).toHaveLength(0);
   });
 

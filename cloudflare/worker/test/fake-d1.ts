@@ -615,19 +615,27 @@ class FakeStatement {
     const current = options.episodesByKey?.get(key);
     if (!current) return 0;
     const query = this.query;
+    if (query.includes("status = 'visible'")) {
+      if (query.includes("status = 'hidden'")) {
+        if (current.status !== "hidden") return 0;
+      } else if (query.includes("r2_key = ?")) {
+        if (current.status !== "delete_pending" || current.r2_key !== nullableString(this.params[2])) return 0;
+      } else if (query.includes("r2_key IS NULL")) {
+        if (current.status !== "delete_pending" || (current.r2_key !== null && current.r2_key !== "")) return 0;
+      } else if (current.status !== "hidden" && current.status !== "delete_pending") {
+        return 0;
+      }
+      current.status = "visible";
+      current.deleted_at = null;
+      current.purge_after = null;
+      current.updated_at = "2026-07-06 00:00:00";
+      return 1;
+    }
     if (query.includes("status = 'delete_pending'")) {
       if (current.status !== "pending" && current.status !== "visible" && current.status !== "hidden") return 0;
       current.status = "delete_pending";
       current.deleted_at = "2026-07-06 00:00:00";
       current.purge_after = "2026-07-13 00:00:00";
-      current.updated_at = "2026-07-06 00:00:00";
-      return 1;
-    }
-    if (query.includes("status = 'visible'")) {
-      if (current.status !== "hidden" && current.status !== "delete_pending") return 0;
-      current.status = "visible";
-      current.deleted_at = null;
-      current.purge_after = null;
       current.updated_at = "2026-07-06 00:00:00";
       return 1;
     }
