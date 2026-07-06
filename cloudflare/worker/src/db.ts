@@ -48,6 +48,45 @@ export interface PublicFeedRow {
 
 export type EpisodeStatus = "pending" | "visible" | "hidden" | "delete_pending" | "purged";
 
+export interface AdminFeedStatusRequest {
+  feed_id: string;
+  enabled?: boolean;
+  include_in_opml?: boolean;
+}
+
+export interface FeedStatusRow {
+  feed_id: string;
+  enabled: number;
+  include_in_opml: number;
+}
+
+export type AdminEpisodeAction = "hide" | "delete" | "restore";
+
+export interface AdminEpisodeStatusRequest {
+  feed_id: string;
+  local_episode_id: string;
+  action: AdminEpisodeAction;
+}
+
+export interface EpisodeAdminRow {
+  feed_id: string;
+  local_episode_id: string;
+  status: EpisodeStatus;
+}
+
+export interface TombstoneChangeRow {
+  sequence: number;
+  feed_id: string;
+  local_episode_id: string;
+  status: EpisodeStatus;
+  action: "hide" | "delete" | "purge" | "restore";
+  created_at: string;
+}
+
+export interface MaxSequenceRow {
+  max_sequence: number | null;
+}
+
 export interface EpisodeUpsertRequest {
   feed_id: string;
   provider: "youtube" | "bilibili";

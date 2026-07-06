@@ -36,6 +36,9 @@ function visibleEpisode(overrides: Partial<FakeEpisodeRow> = {}): FakeEpisodeRow
     size: 456,
     mime_type: "audio/mpeg",
     asset_token: "asset",
+    deleted_at: null,
+    purge_after: null,
+    updated_at: "2026-07-06 00:00:00",
     ...overrides,
   };
 }

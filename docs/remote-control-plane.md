@@ -616,7 +616,7 @@ Authorization: Bearer <NAS_TOKEN>
 - `sequence` 单调递增。
 - 返回按 `sequence ASC` 排序。
 - NAS 只有成功应用并持久化后才能推进本地 cursor。
-- `cursor=0` 返回当前所有非 `visible` episode 的快照，作为首次同步或 cursor 丢失兜底。
+- `cursor=0` 返回当前所有 tombstoned episode 的快照，也就是 `hidden`、`delete_pending`、`purged`，作为首次同步或 cursor 丢失兜底。`pending` 是发布流程状态，不作为 tombstone 下发。
 - 如果服务端未来设置 tombstone change 保留期，必须提供快照兜底，不能让 NAS 漏删。
 
 ```http
