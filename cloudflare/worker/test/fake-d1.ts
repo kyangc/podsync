@@ -31,8 +31,12 @@ interface FakeD1Options {
   syncRunsByID?: Map<string, FakeSyncRunRow> | undefined;
   eventsByKey?: Map<string, FakeEventRow> | undefined;
   sqlLog?: string[] | undefined;
-  beforeEpisodeUpsert?: ((key: string, episode: FakeEpisodeRow | undefined) => void) | undefined;
-  beforeEpisodeStatusUpdate?: ((key: string, episode: FakeEpisodeRow | undefined) => void) | undefined;
+  beforeEpisodeUpsert?: ((key: string, episode: FakeEpisodeRow | undefined, options: FakeD1Options) => void) | undefined;
+  beforeEpisodeStatusUpdate?: ((key: string, episode: FakeEpisodeRow | undefined, options: FakeD1Options) => void) | undefined;
+  beforeFeedConfigUpdate?: ((feedID: string, options: FakeD1Options) => void) | undefined;
+  beforeFeedMetadataUpsert?: ((feedID: string, options: FakeD1Options) => void) | undefined;
+  beforeFeedStatusUpdate?: ((feedID: string, options: FakeD1Options) => void) | undefined;
+  beforeFeedDeleteTombstoneInsert?: ((episodesByKey: Map<string, FakeEpisodeRow> | undefined) => void) | undefined;
   beforeTombstoneSnapshot?: (() => void) | undefined;
   failTombstoneInsert?: boolean | undefined;
   failPurgeUpdateKeys?: Set<string> | undefined;
@@ -56,6 +60,7 @@ export interface FakeFeedRow {
   cookie_profile?: string | null | undefined;
   feed_token_hash?: string | undefined;
   public_path?: string | null | undefined;
+  deleted_at?: string | null | undefined;
   metadata_title?: string | null | undefined;
   metadata_description?: string | null | undefined;
   title?: string | null | undefined;
@@ -105,6 +110,7 @@ interface FakeReadableFeed {
   cookie_profile: string | null;
   feed_token_hash: string;
   public_path: string | null;
+  deleted_at: string | null;
   metadata_title: string | null;
   metadata_description: string | null;
   metadata_link: string | null;
@@ -209,8 +215,21 @@ class FakeStatement {
     if (this.query.includes("FROM feeds") && this.query.includes("WHERE feed_id = ?")) {
       const feedID = String(this.params[0] ?? "");
       const feed = this.options.feedsByID?.get(feedID);
-      if (feed) return feed as T;
-      return (this.options.tomlFeeds?.find((row) => row.feed_id === feedID) ?? null) as T | null;
+      if (feed) {
+        if (this.query.includes("deleted_at IS NULL") && feed.deleted_at) return null;
+        return feed as T;
+      }
+      const tomlFeed = this.options.tomlFeeds?.find((row) => row.feed_id === feedID);
+      if (tomlFeed && this.query.includes("deleted_at IS NULL") && (tomlFeed as FeedTomlRow & { deleted_at?: string | null }).deleted_at) return null;
+      return (tomlFeed ?? null) as T | null;
+    }
+
+    if (this.query.includes("COUNT(*) AS candidate_count") && this.query.includes("FROM episodes")) {
+      const feedID = String(this.params[0] ?? "");
+      const candidateCount = [...(this.options.episodesByKey?.values() ?? [])]
+        .filter((episode) => episode.feed_id === feedID && feedDeleteCandidateStatus(episode.status))
+        .length;
+      return { candidate_count: candidateCount } as T;
     }
 
     if (this.query.includes("FROM episodes") && this.query.includes("WHERE feed_id = ? AND local_episode_id = ?")) {
@@ -249,7 +268,7 @@ class FakeStatement {
 
   private allRows(): unknown[] {
     if (this.query.includes("FROM feeds f") && this.query.includes("LEFT JOIN feed_filters") && this.query.includes("WHERE f.enabled = 1")) {
-      return fakeFeedRows(this.options).filter((feed) => feed.enabled === 1);
+      return fakeFeedRows(this.options).filter((feed) => feed.enabled === 1 && !feedDeleted(feed));
     }
 
     if (
@@ -259,7 +278,7 @@ class FakeStatement {
       this.query.includes("f.include_in_opml = 1")
     ) {
       return fakeFeedRows(this.options)
-        .filter((feed) => feed.enabled === 1 && feed.include_in_opml === 1 && fakePublicPath(feed) !== null)
+        .filter((feed) => !feedDeleted(feed) && feed.enabled === 1 && feed.include_in_opml === 1 && fakePublicPath(feed) !== null)
         .sort(compareFeedIDAsc)
         .map(publicOpmlFeedRow);
     }
@@ -270,7 +289,7 @@ class FakeStatement {
       this.query.includes("f.public_path IS NOT NULL")
     ) {
       return fakeFeedRows(this.options)
-        .filter((feed) => fakePublicPath(feed) !== null)
+        .filter((feed) => !feedDeleted(feed) && fakePublicPath(feed) !== null)
         .sort(compareFeedIDAsc)
         .map(adminSubscriptionFeedRow);
     }
@@ -280,7 +299,7 @@ class FakeStatement {
       this.query.includes("LEFT JOIN feed_metadata") &&
       this.query.includes("m.title AS metadata_title")
     ) {
-      return fakeFeedRows(this.options).sort(compareFeedIDAsc).map(adminFeedListRow);
+      return fakeFeedRows(this.options).filter((feed) => !feedDeleted(feed)).sort(compareFeedIDAsc).map(adminFeedListRow);
     }
 
     if (this.query.includes("FROM opml_tokens") && this.query.includes("public_path IS NOT NULL")) {
@@ -385,17 +404,19 @@ class FakeStatement {
       this.runFeedFiltersUpsert(options);
       changes = 1;
     } else if (this.query.includes("INSERT INTO episodes") && this.query.includes("ON CONFLICT")) {
-      this.runEpisodeUpsert(options);
-      changes = 1;
+      changes = this.runEpisodeUpsert(options);
     } else if (this.query.includes("INSERT INTO feed_metadata") && this.query.includes("ON CONFLICT")) {
-      this.runFeedMetadataUpsert(options);
-      changes = 1;
+      changes = this.runFeedMetadataUpsert(options);
     } else if (this.query.includes("DELETE FROM events")) {
       changes = this.runEventRetentionDelete(options);
     } else if (this.query.includes("DELETE FROM sync_runs")) {
       changes = this.runSyncRunRetentionDelete(options);
+    } else if (this.query.includes("UPDATE feeds") && this.query.includes("deleted_at = CURRENT_TIMESTAMP")) {
+      changes = this.runFeedDeleteUpdate(options);
     } else if (this.query.includes("UPDATE feeds") && this.query.includes("include_in_opml")) {
       changes = this.runFeedStatusUpdate(options);
+    } else if (this.query.includes("UPDATE episodes") && this.query.includes("status = 'delete_pending'") && !this.query.includes("local_episode_id")) {
+      changes = this.runFeedDeleteEpisodeUpdate(options);
     } else if (this.query.includes("UPDATE episodes") && this.query.includes("SET status")) {
       changes = this.runEpisodeStatusUpdate(options);
     } else if (this.query.includes("INSERT INTO tombstone_changes")) {
@@ -473,8 +494,10 @@ class FakeStatement {
       feedID,
     ] = this.params;
     const id = String(feedID);
+    options.beforeFeedConfigUpdate?.(id, options);
     const feed = options.feedsByID?.get(id) ?? options.tomlFeeds?.find((row) => row.feed_id === id);
     if (!feed) return 0;
+    if (this.query.includes("deleted_at IS NULL") && (feed as FakeFeedRow | (FeedTomlRow & { deleted_at?: string | null })).deleted_at) return 0;
     feed.url = String(url);
     feed.title_override = nullableString(titleOverride);
     feed.description_override = nullableString(descriptionOverride);
@@ -506,7 +529,7 @@ class FakeStatement {
     });
   }
 
-  private runEpisodeUpsert(options: FakeD1Options): void {
+  private runEpisodeUpsert(options: FakeD1Options): number {
     const [
       feedID,
       provider,
@@ -526,7 +549,8 @@ class FakeStatement {
     const key = fakeEpisodeKey(String(feedID), String(localEpisodeID));
     const episodes = options.episodesByKey ?? new Map<string, FakeEpisodeRow>();
     options.episodesByKey = episodes;
-    options.beforeEpisodeUpsert?.(key, episodes.get(key));
+    options.beforeEpisodeUpsert?.(key, episodes.get(key), options);
+    if (this.query.includes("feeds.deleted_at IS NULL") && feedIsDeleted(options, String(feedID))) return 0;
     const existing = episodes.get(key);
     const nextStatus: EpisodeStatus = existing
       ? (existing.status === "pending" || existing.status === "visible" ? "visible" : existing.status)
@@ -551,9 +575,10 @@ class FakeStatement {
       purge_after: existing?.purge_after ?? null,
       updated_at: "2026-07-06 00:00:00",
     });
+    return 1;
   }
 
-  private runFeedMetadataUpsert(options: FakeD1Options): void {
+  private runFeedMetadataUpsert(options: FakeD1Options): number {
     const [
       feedID,
       provider,
@@ -569,6 +594,8 @@ class FakeStatement {
       lastSourceUpdateAt,
       reportedAt,
     ] = this.params;
+    options.beforeFeedMetadataUpsert?.(String(feedID), options);
+    if (this.query.includes("feeds.deleted_at IS NULL") && feedIsDeleted(options, String(feedID))) return 0;
     const metadata = options.feedMetadataByID ?? new Map<string, FakeFeedMetadataRow>();
     options.feedMetadataByID = metadata;
     metadata.set(String(feedID), {
@@ -586,22 +613,52 @@ class FakeStatement {
       last_source_update_at: nullableString(lastSourceUpdateAt),
       reported_at: String(reportedAt),
     });
+    return 1;
+  }
+
+  private runFeedDeleteUpdate(options: FakeD1Options): number {
+    const [feedID] = this.params;
+    const id = String(feedID);
+    const feed = options.feedsByID?.get(id) ?? options.tomlFeeds?.find((row) => row.feed_id === id);
+    if (!feed || (feed as FakeFeedRow | FeedTomlRow).deleted_at) return 0;
+    feed.enabled = 0;
+    feed.include_in_opml = 0;
+    (feed as FakeFeedRow | (FeedTomlRow & { public_path?: string | null })).public_path = null;
+    (feed as FakeFeedRow | (FeedTomlRow & { deleted_at?: string | null })).deleted_at = "2026-07-06 00:00:00";
+    return 1;
   }
 
   private runFeedStatusUpdate(options: FakeD1Options): number {
     const [enabled, includeInOpml, feedID] = this.params;
     const id = String(feedID);
+    options.beforeFeedStatusUpdate?.(id, options);
     const feed = options.feedsByID?.get(id);
     if (feed) {
+      if (this.query.includes("deleted_at IS NULL") && feed.deleted_at) return 0;
       feed.enabled = Number(enabled);
       feed.include_in_opml = Number(includeInOpml);
     }
     const tomlFeed = options.tomlFeeds?.find((row) => row.feed_id === id);
     if (tomlFeed) {
+      if (this.query.includes("deleted_at IS NULL") && (tomlFeed as FeedTomlRow & { deleted_at?: string | null }).deleted_at) return 0;
       tomlFeed.enabled = Number(enabled);
       tomlFeed.include_in_opml = Number(includeInOpml);
     }
     return feed || tomlFeed ? 1 : 0;
+  }
+
+  private runFeedDeleteEpisodeUpdate(options: FakeD1Options): number {
+    const [feedID] = this.params;
+    let changes = 0;
+    for (const episode of options.episodesByKey?.values() ?? []) {
+      if (episode.feed_id !== String(feedID) || !feedDeleteCandidateStatus(episode.status)) continue;
+      episode.status = "delete_pending";
+      episode.deleted_at = "2026-07-06 00:00:00";
+      episode.purge_after = "2026-07-13 00:00:00";
+      episode.updated_at = "2026-07-06 00:00:00";
+      changes++;
+    }
+    return changes;
   }
 
   private runEpisodeStatusUpdate(options: FakeD1Options): number {
@@ -611,9 +668,10 @@ class FakeStatement {
     const [feedID, localEpisodeID] = this.params;
     const key = fakeEpisodeKey(String(feedID), String(localEpisodeID));
     const episode = options.episodesByKey?.get(key);
-    options.beforeEpisodeStatusUpdate?.(key, episode);
+    options.beforeEpisodeStatusUpdate?.(key, episode, options);
     const current = options.episodesByKey?.get(key);
     if (!current) return 0;
+    if (this.query.includes("feeds.deleted_at IS NULL") && feedIsDeleted(options, current.feed_id)) return 0;
     const query = this.query;
     if (query.includes("status = 'visible'")) {
       if (query.includes("status = 'hidden'")) {
@@ -669,6 +727,12 @@ class FakeStatement {
   }
 
   private runTombstoneInsert(options: FakeD1Options): number {
+    if (this.query.includes("SELECT NULL")) {
+      return this.runAssertPreviousChanges(options);
+    }
+    if (this.query.includes("FROM episodes") && this.query.includes("'delete_pending'") && this.query.includes("'delete'")) {
+      return this.runFeedDeleteTombstoneInsert(options);
+    }
     if (options.failTombstoneInsert) {
       throw new Error("tombstone insert failed");
     }
@@ -692,6 +756,40 @@ class FakeStatement {
       created_at: createdAt ?? "2026-07-06 00:00:00",
     });
     return 1;
+  }
+
+  private runAssertPreviousChanges(options: FakeD1Options): number {
+    const [expected] = this.params;
+    if ((options.lastChanges ?? 0) !== Number(expected)) {
+      throw new Error("NOT NULL constraint failed: tombstone_changes.feed_id");
+    }
+    return 0;
+  }
+
+  private runFeedDeleteTombstoneInsert(options: FakeD1Options): number {
+    if (options.failTombstoneInsert) {
+      throw new Error("tombstone insert failed");
+    }
+    const [feedID] = this.params;
+    options.beforeFeedDeleteTombstoneInsert?.(options.episodesByKey);
+    const changes = options.tombstoneChanges ?? [];
+    options.tombstoneChanges = changes;
+    let sequence = changes.reduce((max, change) => Math.max(max, change.sequence), 0);
+    let inserted = 0;
+    for (const episode of options.episodesByKey?.values() ?? []) {
+      if (episode.feed_id !== String(feedID) || !feedDeleteCandidateStatus(episode.status)) continue;
+      sequence++;
+      inserted++;
+      changes.push({
+        sequence,
+        feed_id: episode.feed_id,
+        local_episode_id: episode.local_episode_id,
+        status: "delete_pending",
+        action: "delete",
+        created_at: "2026-07-06 00:00:00",
+      });
+    }
+    return inserted;
   }
 
   private runEventRetentionDelete(options: FakeD1Options): number {
@@ -862,6 +960,7 @@ function publicFeedRow(feed: FakeReadableFeed): PublicFeedRow {
     title: feed.metadata_title,
     description: feed.metadata_description,
     link: feed.metadata_link,
+    deleted_at: feed.deleted_at,
   };
 }
 
@@ -884,6 +983,7 @@ function fakeReadableFeedFromToml(feed: FeedTomlRow, options: FakeD1Options): Fa
     public_path?: string | null;
     metadata_title?: string | null;
     metadata_description?: string | null;
+    deleted_at?: string | null;
   };
   const metadata = options.feedMetadataByID?.get(feed.feed_id);
   return {
@@ -901,6 +1001,7 @@ function fakeReadableFeedFromToml(feed: FeedTomlRow, options: FakeD1Options): Fa
     cookie_profile: feed.cookie_profile,
     feed_token_hash: feed.feed_token_hash,
     public_path: extras.public_path ?? null,
+    deleted_at: extras.deleted_at ?? null,
     metadata_title: metadata?.title ?? extras.metadata_title ?? null,
     metadata_description: metadata?.description ?? extras.metadata_description ?? null,
     metadata_link: metadata?.link ?? null,
@@ -932,6 +1033,7 @@ function fakeReadableFeedFromPartial(feed: FakeFeedRow, options: FakeD1Options):
     cookie_profile: feed.cookie_profile ?? null,
     feed_token_hash: feed.feed_token_hash ?? "",
     public_path: feed.public_path ?? null,
+    deleted_at: feed.deleted_at ?? null,
     metadata_title: metadata?.title ?? feed.metadata_title ?? null,
     metadata_description: metadata?.description ?? feed.metadata_description ?? null,
     metadata_link: metadata?.link ?? null,
@@ -948,6 +1050,19 @@ function fakeReadableFeedFromPartial(feed: FakeFeedRow, options: FakeD1Options):
 
 function fakePublicPath(feed: FakeReadableFeed): string | null {
   return feed.public_path && feed.public_path !== "" ? feed.public_path : null;
+}
+
+function feedDeleted(feed: FakeReadableFeed): boolean {
+  return feed.deleted_at !== null && feed.deleted_at !== "";
+}
+
+function feedIsDeleted(options: FakeD1Options, feedID: string): boolean {
+  const feed = options.feedsByID?.get(feedID) ?? options.tomlFeeds?.find((row) => row.feed_id === feedID);
+  return Boolean((feed as FakeFeedRow | (FeedTomlRow & { deleted_at?: string | null }) | undefined)?.deleted_at);
+}
+
+function feedDeleteCandidateStatus(status: EpisodeStatus): boolean {
+  return status === "pending" || status === "visible" || status === "hidden";
 }
 
 function compareFeedIDAsc(left: FakeReadableFeed, right: FakeReadableFeed): number {

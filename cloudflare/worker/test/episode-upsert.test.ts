@@ -234,4 +234,37 @@ describe("episode upsert NAS API", () => {
 
     expect(response.status).toBe(404);
   });
+
+  it("returns 404 for deleted feeds without writing episode state", async () => {
+    const episodesByKey = new Map<string, FakeEpisodeRow>();
+    const response = await worker.fetch(
+      upsertRequest(upsertBody()),
+      env({
+        feedsByID: new Map([["feed", { feed_id: "feed", provider: "youtube", deleted_at: "2026-07-06 00:00:00" }]]),
+        episodesByKey,
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(episodesByKey.size).toBe(0);
+  });
+
+  it("returns 404 when a feed is deleted after the episode upsert precheck", async () => {
+    const episodesByKey = new Map<string, FakeEpisodeRow>();
+    const feedsByID = new Map([["feed", { feed_id: "feed", provider: "youtube" as const }]]);
+    const response = await worker.fetch(
+      upsertRequest(upsertBody()),
+      env({
+        feedsByID,
+        episodesByKey,
+        beforeEpisodeUpsert(_key, _episode, options) {
+          const feed = options.feedsByID?.get("feed");
+          if (feed) feed.deleted_at = "2026-07-06 00:00:00";
+        },
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(episodesByKey.size).toBe(0);
+  });
 });

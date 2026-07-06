@@ -19,7 +19,7 @@
 - 不迁移历史 episode，不批量上传已有本地 mp3。
 - 不兼容旧 NAS RSS 的 GUID 或播放历史。
 - 不做 feed_id rename。
-- 不做真正的 feed delete；第一期只做 disable。
+- 不做 feed 硬删除；delete feed 采用保留 tombstone 证据的 soft delete。
 - 不让 dashboard 管理 cookie 明文或 cookie 文件。
 - 不开放任意 `youtube_dl_args`、headers、server/storage/tokens/R2 secret 编辑。
 - 不把 Cloudflare Access 用在 podcast feed 或音频 URL 上。
@@ -369,8 +369,6 @@ episode.status = purged:
 
 ## Feed disable 与 delete
 
-第一期只做 disable，不做真正 delete feed。
-
 Disable feed：
 
 - `enabled=false` 时不下发给 NAS，不再抓新集。
@@ -379,13 +377,14 @@ Disable feed：
 - feed XML 可以继续访问，只是不再更新。
 - NAS 本地内容不动。
 
-第二期再做 delete feed：
+Delete feed 使用 soft delete，不硬删 `feeds` / `episodes` / `tombstone_changes`：
 
 - 批量 episode 进入 `delete_pending`。
-- OPML 移除。
-- feed token 失效或返回 410。
+- OPML / NAS TOML / admin feed 列表移除。
+- 旧 feed token 返回 410。
 - R2 延迟 purge。
 - tombstone 下发给 NAS，防止重新发布。
+- 保留 D1 里的 feed/episode/tombstone 记录，保证 `cursor=0` tombstone 快照不会漏删。
 
 ## R2 发布
 

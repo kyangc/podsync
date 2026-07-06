@@ -35,4 +35,9 @@ describe("D1 schema contract", () => {
     expect(schema).toContain("CREATE UNIQUE INDEX idx_feeds_public_path ON feeds(public_path)");
     expect(schema).toContain("CREATE UNIQUE INDEX idx_opml_tokens_public_path ON opml_tokens(public_path)");
   });
+
+  it("models logical feed deletion without cascading tombstones away", () => {
+    expect(schema).toContain("ALTER TABLE feeds ADD COLUMN deleted_at TEXT");
+    expect(schema).toContain("CREATE INDEX idx_feeds_deleted_enabled_opml ON feeds(deleted_at, enabled, include_in_opml)");
+  });
 });

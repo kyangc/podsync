@@ -19,10 +19,12 @@ function feedRow(overrides: Partial<FeedTomlRow & {
   public_path: string | null;
   metadata_title: string | null;
   metadata_description: string | null;
+  deleted_at: string | null;
 }> = {}): FeedTomlRow & {
   public_path?: string | null;
   metadata_title?: string | null;
   metadata_description?: string | null;
+  deleted_at?: string | null;
 } {
   return {
     feed_id: "feed",
@@ -41,6 +43,7 @@ function feedRow(overrides: Partial<FeedTomlRow & {
     public_path: "/f/feed-secret.xml",
     metadata_title: "Feed Metadata",
     metadata_description: "Metadata description",
+    deleted_at: null,
     ...overrides,
   };
 }
@@ -184,6 +187,21 @@ describe("admin read APIs", () => {
     expect(response.status).toBe(405);
   });
 
+  it("omits deleted feeds from admin feed list", async () => {
+    const response = await worker.fetch(adminGet("/api/admin/feeds"), {
+      DB: fakeD1({
+        tomlFeeds: [
+          feedRow({ feed_id: "visible", metadata_title: "Visible" }),
+          feedRow({ feed_id: "deleted", metadata_title: "Deleted", deleted_at: "2026-07-06 00:00:00" }),
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { feeds: Array<{ feed_id: string }> };
+    expect(body.feeds.map((feed) => feed.feed_id)).toEqual(["visible"]);
+  });
+
   it("lists admin episodes for one feed", async () => {
     const episodesByKey = new Map([
       [fakeEpisodeKey("feed", "episode"), episode()],
@@ -317,6 +335,14 @@ describe("admin read APIs", () => {
     expect(response.status).toBe(404);
   });
 
+  it("returns 404 for deleted admin episode feed", async () => {
+    const response = await worker.fetch(adminGet("/api/admin/episodes?feed_id=feed"), {
+      DB: fakeD1({ tomlFeeds: [feedRow({ deleted_at: "2026-07-06 00:00:00" })] }),
+    });
+
+    expect(response.status).toBe(404);
+  });
+
   it("lists subscription feed and OPML URLs", async () => {
     const response = await worker.fetch(adminGet("/api/admin/subscriptions"), {
       DB: fakeD1({
@@ -374,6 +400,23 @@ describe("admin read APIs", () => {
     ]);
     expect(body.opml).toEqual([
       { label: "valid", xml_url: "https://podcast.example.com/opml/valid.xml" },
+    ]);
+  });
+
+  it("omits deleted feeds from subscriptions", async () => {
+    const response = await worker.fetch(adminGet("/api/admin/subscriptions"), {
+      DB: fakeD1({
+        tomlFeeds: [
+          feedRow({ feed_id: "visible", metadata_title: "Visible", public_path: "/f/visible.xml" }),
+          feedRow({ feed_id: "deleted", metadata_title: "Deleted", deleted_at: "2026-07-06 00:00:00", public_path: "/f/deleted.xml" }),
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { feeds: Array<{ feed_id: string }> };
+    expect(body.feeds).toEqual([
+      expect.objectContaining({ feed_id: "visible" }),
     ]);
   });
 

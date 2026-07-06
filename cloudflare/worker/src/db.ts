@@ -12,6 +12,7 @@ export interface FeedRow {
   keep_last: number;
   cookie_profile: string | null;
   feed_token_hash: string;
+  deleted_at?: string | null;
 }
 
 export interface FeedFilterRow {
@@ -44,6 +45,7 @@ export interface PublicFeedRow {
   title: string | null;
   description: string | null;
   link: string | null;
+  deleted_at?: string | null;
 }
 
 export interface AdminFeedListRow {
@@ -208,6 +210,10 @@ export interface AdminFeedStatusRequest {
   include_in_opml?: boolean;
 }
 
+export interface AdminFeedDeleteRequest {
+  feed_id: string;
+}
+
 export interface AdminFeedFilters {
   title: string | null;
   not_title: string | null;
@@ -239,6 +245,7 @@ export interface FeedStatusRow {
   feed_id: string;
   enabled: number;
   include_in_opml: number;
+  deleted_at?: string | null;
 }
 
 export type AdminEpisodeAction = "hide" | "delete" | "restore";

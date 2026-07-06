@@ -362,4 +362,78 @@ describe("admin feed config upsert API", () => {
       url: "https://www.youtube.com/channel/old",
     });
   });
+
+  it("rejects updates for deleted feeds without resurrecting them", async () => {
+    const feedsByID = new Map<string, FakeFeedRow>([
+      ["new-feed", {
+        feed_id: "new-feed",
+        provider: "youtube",
+        url: "https://www.youtube.com/channel/old",
+        enabled: 0,
+        include_in_opml: 0,
+        feed_token_hash: "existing-hash",
+        public_path: null,
+        deleted_at: "2026-07-06 00:00:00",
+      }],
+    ]);
+
+    const response = await worker.fetch(
+      adminRequest("/api/admin/feeds/upsert", feedBody({
+        provider: "bilibili",
+        url: "https://space.bilibili.com/10835521",
+        enabled: true,
+        include_in_opml: true,
+      })),
+      { DB: fakeD1({ feedsByID }) },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.text()).resolves.toBe("feed is deleted");
+    expect(feedsByID.get("new-feed")).toMatchObject({
+      enabled: 0,
+      include_in_opml: 0,
+      public_path: null,
+      deleted_at: "2026-07-06 00:00:00",
+    });
+  });
+
+  it("rolls back feed config updates when the feed is deleted after precheck", async () => {
+    const feedsByID = new Map<string, FakeFeedRow>([
+      ["new-feed", {
+        feed_id: "new-feed",
+        provider: "youtube",
+        url: "https://www.youtube.com/channel/old",
+        enabled: 1,
+        include_in_opml: 1,
+        feed_token_hash: "existing-hash",
+        public_path: "/f/existing.xml",
+        not_title: "old",
+      }],
+    ]);
+
+    const response = await worker.fetch(
+      adminRequest("/api/admin/feeds/upsert", feedBody({
+        url: "https://www.youtube.com/channel/new",
+        enabled: false,
+        filters: { not_title: "new" },
+      })),
+      {
+        DB: fakeD1({
+          feedsByID,
+          beforeFeedConfigUpdate(_feedID, options) {
+            const feed = options.feedsByID?.get("new-feed");
+            if (feed) feed.deleted_at = "2026-07-06 00:00:00";
+          },
+        }),
+      },
+    );
+
+    expect(response.status).toBe(409);
+    expect(feedsByID.get("new-feed")).toMatchObject({
+      url: "https://www.youtube.com/channel/old",
+      enabled: 1,
+      not_title: "old",
+    });
+    expect(feedsByID.get("new-feed")?.deleted_at).toBeUndefined();
+  });
 });

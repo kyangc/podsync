@@ -110,6 +110,45 @@ describe("NAS feed metadata upsert API", () => {
     expect(response.status).toBe(404);
   });
 
+  it("returns 404 when feed is deleted", async () => {
+    const feedMetadataByID = new Map<string, FakeFeedMetadataRow>();
+    const response = await worker.fetch(
+      request(body()),
+      {
+        DB: fakeD1({
+          feedsByID: new Map([["feed", { ...feedRow(), deleted_at: "2026-07-06 00:00:00" }]]),
+          feedMetadataByID,
+        }),
+        NAS_TOKEN: token,
+      },
+    );
+
+    expect(response.status).toBe(404);
+    expect(feedMetadataByID.size).toBe(0);
+  });
+
+  it("returns 404 when feed is deleted after metadata precheck", async () => {
+    const feedMetadataByID = new Map<string, FakeFeedMetadataRow>();
+    const feedsByID = new Map([["feed", feedRow()]]);
+    const response = await worker.fetch(
+      request(body()),
+      {
+        DB: fakeD1({
+          feedsByID,
+          feedMetadataByID,
+          beforeFeedMetadataUpsert(_feedID, options) {
+            const feed = options.feedsByID?.get("feed");
+            if (feed) feed.deleted_at = "2026-07-06 00:00:00";
+          },
+        }),
+        NAS_TOKEN: token,
+      },
+    );
+
+    expect(response.status).toBe(404);
+    expect(feedMetadataByID.size).toBe(0);
+  });
+
   it("rejects provider mismatch", async () => {
     const response = await worker.fetch(
       request(body({ provider: "bilibili" })),

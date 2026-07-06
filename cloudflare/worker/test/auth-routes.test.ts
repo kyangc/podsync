@@ -139,6 +139,7 @@ describe("route auth boundaries", () => {
     expect(body).toContain("/api/admin/episodes");
     expect(body).toContain("/api/admin/feeds/upsert");
     expect(body).toContain("/api/admin/feeds/status");
+    expect(body).toContain("/api/admin/feeds/delete");
     expect(body).toContain("/api/admin/episodes/status");
     expect(body).toContain("/api/admin/sync-runs?limit=10");
     expect(body).toContain("/api/admin/events?limit=25");
@@ -147,6 +148,13 @@ describe("route auth boundaries", () => {
     expect(body).toContain("function openEditFeedForm");
     expect(body).toContain("function submitFeedForm");
     expect(body).toContain("function readFeedFormValues");
+    expect(body).toContain("function deleteFeed");
+    expect(body).toContain("el(\"button\", \"danger\", \"Delete\")");
+    expect(body).toContain("window.confirm(\"Delete feed \" + feedID");
+    expect(body).toContain("postJSON(paths.feedDelete, { feed_id: feedID })");
+    expect(body).toContain("state.selectedFeedID = \"\"");
+    expect(body).toContain("await loadDashboard()");
+    expect(body).toContain("showError(error)");
     expect(body).toContain("postJSON(paths.feedUpsert, payload)");
     expect(body).toContain("feedID = state.editingFeedID");
     expect(body).toContain("provider = original.provider");

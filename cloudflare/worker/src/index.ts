@@ -5,6 +5,7 @@ import type {
   AdminEpisodeStatusRequest,
   AdminEventRow,
   AdminFeedConfigUpsertRequest,
+  AdminFeedDeleteRequest,
   AdminFeedFilters,
   AdminFeedListRow,
   AdminFeedStatusRequest,
@@ -109,6 +110,20 @@ interface ExistingAdminFeedRow {
   provider: AdminFeedConfigUpsertRequest["provider"];
   feed_token_hash: string;
   public_path: string | null;
+  deleted_at: string | null;
+}
+
+interface FeedDeleteRow {
+  feed_id: string;
+  deleted_at: string | null;
+}
+
+interface FeedDeleteCandidateCountRow {
+  candidate_count: number;
+}
+
+interface FeedDeletionStateRow {
+  deleted_at: string | null;
 }
 
 function text(body: string, status = 200, contentType = "text/plain; charset=utf-8"): Response {
@@ -619,6 +634,7 @@ function dashboardHTML(): string {
         episodes: "/api/admin/episodes",
         feedUpsert: "/api/admin/feeds/upsert",
         feedStatus: "/api/admin/feeds/status",
+        feedDelete: "/api/admin/feeds/delete",
         episodeStatus: "/api/admin/episodes/status",
         syncRuns: "/api/admin/sync-runs?limit=10",
         events: "/api/admin/events?limit=25"
@@ -1062,6 +1078,14 @@ function dashboardHTML(): string {
             openEditFeedForm(feed.feed_id);
           });
           actions.appendChild(edit);
+          var del = el("button", "danger", "Delete");
+          del.type = "button";
+          del.disabled = state.busy;
+          del.title = "Remove this feed from remote subscriptions and mark remote episodes for delayed deletion.";
+          del.addEventListener("click", function () {
+            deleteFeed(feed.feed_id);
+          });
+          actions.appendChild(del);
           appendCell(row, actions);
           body.appendChild(row);
         });
@@ -1301,6 +1325,25 @@ function dashboardHTML(): string {
         try {
           await postJSON(paths.feedStatus, Object.assign({ feed_id: feedID }, patch));
           await loadDashboard();
+        } catch (error) {
+          showError(error);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function deleteFeed(feedID) {
+        var ok = window.confirm("Delete feed " + feedID + "? This removes it from remote subscriptions and marks remote episodes for delayed R2 purge. NAS local files are not deleted. Continue?");
+        if (!ok) return;
+        setBusy(true);
+        try {
+          await postJSON(paths.feedDelete, { feed_id: feedID });
+          if (state.selectedFeedID === feedID) {
+            state.selectedFeedID = "";
+            state.episodes = [];
+          }
+          await loadDashboard();
+          setStatus("Deleted feed " + feedID, "ok");
         } catch (error) {
           showError(error);
         } finally {
@@ -1828,6 +1871,13 @@ function parseAdminFeedStatus(body: unknown): AdminFeedStatusRequest | Response 
   return request;
 }
 
+function parseAdminFeedDelete(body: unknown): AdminFeedDeleteRequest | Response {
+  if (!body || typeof body !== "object") return badRequest("invalid feed delete body");
+  const value = body as Record<string, unknown>;
+  if (!nonEmptyString(value.feed_id)) return badRequest("feed_id is required");
+  return { feed_id: value.feed_id };
+}
+
 function isAdminEpisodeAction(value: unknown): value is AdminEpisodeAction {
   return value === "hide" || value === "delete" || value === "restore";
 }
@@ -1899,7 +1949,12 @@ function episodeStatusUpdateSQL(action: AdminEpisodeAction, episode?: EpisodeAdm
                    updated_at = CURRENT_TIMESTAMP
              WHERE feed_id = ?
                AND local_episode_id = ?
-               AND status IN ('pending', 'visible', 'hidden')`;
+               AND status IN ('pending', 'visible', 'hidden')
+               AND EXISTS (
+                 SELECT 1 FROM feeds
+                  WHERE feeds.feed_id = episodes.feed_id
+                    AND feeds.deleted_at IS NULL
+               )`;
   }
   if (action === "restore") {
     const statusPredicate = episode?.status === "hidden"
@@ -1914,14 +1969,24 @@ function episodeStatusUpdateSQL(action: AdminEpisodeAction, episode?: EpisodeAdm
                    updated_at = CURRENT_TIMESTAMP
              WHERE feed_id = ?
                AND local_episode_id = ?
-               AND ${statusPredicate}`;
+               AND ${statusPredicate}
+               AND EXISTS (
+                 SELECT 1 FROM feeds
+                  WHERE feeds.feed_id = episodes.feed_id
+                    AND feeds.deleted_at IS NULL
+               )`;
   }
   return `UPDATE episodes
              SET status = 'hidden',
                  updated_at = CURRENT_TIMESTAMP
            WHERE feed_id = ?
              AND local_episode_id = ?
-             AND status IN ('pending', 'visible')`;
+             AND status IN ('pending', 'visible')
+             AND EXISTS (
+               SELECT 1 FROM feeds
+                WHERE feeds.feed_id = episodes.feed_id
+                  AND feeds.deleted_at IS NULL
+             )`;
 }
 
 function episodeStatusUpdateBindings(action: AdminEpisodeAction, episode: EpisodeAdminRow, feedID: string, localEpisodeID: string): unknown[] {
@@ -2010,7 +2075,13 @@ function feedMetadataUpsertSQL(): string {
   return `INSERT INTO feed_metadata (
             feed_id, provider, source_url, title, description, image_url, link,
             author, category, language, explicit, last_source_update_at, reported_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          )
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+           WHERE EXISTS (
+             SELECT 1 FROM feeds
+              WHERE feed_id = ?
+                AND deleted_at IS NULL
+           )
           ON CONFLICT(feed_id) DO UPDATE SET
             provider = excluded.provider,
             source_url = excluded.source_url,
@@ -2023,7 +2094,12 @@ function feedMetadataUpsertSQL(): string {
             language = excluded.language,
             explicit = excluded.explicit,
             last_source_update_at = excluded.last_source_update_at,
-            reported_at = excluded.reported_at`;
+            reported_at = excluded.reported_at
+           WHERE EXISTS (
+             SELECT 1 FROM feeds
+              WHERE feeds.feed_id = feed_metadata.feed_id
+                AND feeds.deleted_at IS NULL
+           )`;
 }
 
 function feedConfigInsertSQL(): string {
@@ -2047,7 +2123,8 @@ function feedConfigUpdateSQL(): string {
                  keep_last = ?,
                  cookie_profile = ?,
                  updated_at = CURRENT_TIMESTAMP
-           WHERE feed_id = ?`;
+           WHERE feed_id = ?
+             AND deleted_at IS NULL`;
 }
 
 function feedFiltersUpsertSQL(): string {
@@ -2064,6 +2141,48 @@ function feedFiltersUpsertSQL(): string {
             max_duration = excluded.max_duration,
             min_age = excluded.min_age,
             max_age = excluded.max_age`;
+}
+
+function feedDeleteCandidateCountSQL(): string {
+  return `SELECT COUNT(*) AS candidate_count
+            FROM episodes
+           WHERE feed_id = ?
+             AND status IN ('pending', 'visible', 'hidden')`;
+}
+
+function feedDeleteTombstoneInsertSQL(): string {
+  return `INSERT INTO tombstone_changes (feed_id, local_episode_id, status, action, created_at)
+          SELECT feed_id, local_episode_id, 'delete_pending', 'delete', CURRENT_TIMESTAMP
+            FROM episodes
+           WHERE feed_id = ?
+             AND status IN ('pending', 'visible', 'hidden')`;
+}
+
+function assertPreviousChangesSQL(): string {
+  return `INSERT INTO tombstone_changes (feed_id, local_episode_id, status, action, created_at)
+          SELECT NULL, NULL, 'delete_pending', 'delete', CURRENT_TIMESTAMP
+           WHERE changes() <> ?`;
+}
+
+function feedDeleteEpisodeUpdateSQL(): string {
+  return `UPDATE episodes
+             SET status = 'delete_pending',
+                 deleted_at = CURRENT_TIMESTAMP,
+                 purge_after = datetime(CURRENT_TIMESTAMP, '+7 days'),
+                 updated_at = CURRENT_TIMESTAMP
+           WHERE feed_id = ?
+             AND status IN ('pending', 'visible', 'hidden')`;
+}
+
+function feedDeleteUpdateSQL(): string {
+  return `UPDATE feeds
+             SET deleted_at = CURRENT_TIMESTAMP,
+                 enabled = 0,
+                 include_in_opml = 0,
+                 public_path = NULL,
+                 updated_at = CURRENT_TIMESTAMP
+           WHERE feed_id = ?
+             AND deleted_at IS NULL`;
 }
 
 function parseIntegerParam(value: string | null, fallback: number, name: string): number | Response {
@@ -2146,6 +2265,11 @@ function isFeedIDConstraintError(error: unknown): boolean {
   return uniqueConstraintMessage(error).includes("feeds.feed_id");
 }
 
+function isFeedDeleteAssertionError(error: unknown): boolean {
+  const message = uniqueConstraintMessage(error);
+  return message.includes("not null") && message.includes("tombstone_changes");
+}
+
 function parseEpisodeStatusParam(value: string | null): EpisodeStatus | Response | null {
   if (value === null || value === "") return null;
   if (value === "pending" || value === "visible" || value === "hidden" || value === "delete_pending" || value === "purged") {
@@ -2202,6 +2326,7 @@ async function handleNasConfig(request: Request, env: Env): Promise<Response> {
        FROM feeds f
        LEFT JOIN feed_filters ff ON ff.feed_id = f.feed_id
       WHERE f.enabled = 1
+        AND f.deleted_at IS NULL
       ORDER BY f.feed_id ASC`,
   ).all<FeedTomlRow>();
 
@@ -2226,6 +2351,7 @@ async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
        FROM feeds f
        LEFT JOIN feed_metadata m ON m.feed_id = f.feed_id
        LEFT JOIN feed_filters ff ON ff.feed_id = f.feed_id
+      WHERE f.deleted_at IS NULL
       ORDER BY f.feed_id ASC`,
   ).all<AdminFeedListRow>();
 
@@ -2268,10 +2394,11 @@ async function handleAdminFeedUpsert(request: Request, env: Env): Promise<Respon
   if (parsed instanceof Response) return parsed;
 
   const existing = await env.DB.prepare(
-    `SELECT feed_id, provider, feed_token_hash, public_path
+    `SELECT feed_id, provider, feed_token_hash, public_path, deleted_at
        FROM feeds
       WHERE feed_id = ?`,
   ).bind(parsed.feed_id).first<ExistingAdminFeedRow>();
+  if (existing?.deleted_at) return text("feed is deleted", 409);
   if (existing && existing.provider !== parsed.provider) {
     return badRequest("provider cannot be changed");
   }
@@ -2295,9 +2422,10 @@ async function handleAdminFeedUpsert(request: Request, env: Env): Promise<Respon
   );
   const filters = env.DB.prepare(feedFiltersUpsertSQL()).bind(...feedFilterBindings(parsed));
   try {
-    const [feedResult] = await env.DB.batch([update, filters]);
+    const [feedResult] = await env.DB.batch([update, env.DB.prepare(assertPreviousChangesSQL()).bind(1), filters]);
     if (feedResult?.meta.changes !== 1) return text("feed update failed", 500);
-  } catch {
+  } catch (error) {
+    if (isFeedDeleteAssertionError(error)) return text("feed changed concurrently", 409);
     return text("feed config upsert failed", 500);
   }
 
@@ -2353,26 +2481,75 @@ async function handleAdminFeedStatus(request: Request, env: Env): Promise<Respon
   if (parsed instanceof Response) return parsed;
 
   const feed = await env.DB.prepare(
-    `SELECT feed_id, enabled, include_in_opml
+    `SELECT feed_id, enabled, include_in_opml, deleted_at
        FROM feeds
-      WHERE feed_id = ?`,
+      WHERE feed_id = ? AND deleted_at IS NULL`,
   ).bind(parsed.feed_id).first<FeedStatusRow>();
   if (!feed) return text("feed not found", 404);
 
   const enabled = parsed.enabled === undefined ? feed.enabled : parsed.enabled ? 1 : 0;
   const includeInOpml = parsed.include_in_opml === undefined ? feed.include_in_opml : parsed.include_in_opml ? 1 : 0;
 
-  await env.DB.prepare(
+  const result = await env.DB.prepare(
     `UPDATE feeds
         SET enabled = ?, include_in_opml = ?
-      WHERE feed_id = ?`,
+      WHERE feed_id = ? AND deleted_at IS NULL`,
   ).bind(enabled, includeInOpml, parsed.feed_id).run();
+  if (result.meta.changes !== 1) return text("feed changed concurrently", 409);
 
   return Response.json({
     ok: true,
     feed_id: parsed.feed_id,
     enabled: enabled === 1,
     include_in_opml: includeInOpml === 1,
+  });
+}
+
+async function handleAdminFeedDelete(request: Request, env: Env): Promise<Response> {
+  const body = await readBoundedJson(request);
+  if (body instanceof Response) return body;
+
+  const parsed = parseAdminFeedDelete(body);
+  if (parsed instanceof Response) return parsed;
+
+  const feed = await env.DB.prepare(
+    `SELECT feed_id, deleted_at
+       FROM feeds
+      WHERE feed_id = ?`,
+  ).bind(parsed.feed_id).first<FeedDeleteRow>();
+  if (!feed) return text("feed not found", 404);
+  if (feed.deleted_at) {
+    return Response.json({
+      ok: true,
+      feed_id: parsed.feed_id,
+      deleted: false,
+      episodes_marked: 0,
+    });
+  }
+
+  const count = await env.DB.prepare(feedDeleteCandidateCountSQL()).bind(parsed.feed_id).first<FeedDeleteCandidateCountRow>();
+  const candidateCount = count?.candidate_count ?? 0;
+  const statements = [
+    env.DB.prepare(feedDeleteTombstoneInsertSQL()).bind(parsed.feed_id),
+    env.DB.prepare(assertPreviousChangesSQL()).bind(candidateCount),
+    env.DB.prepare(feedDeleteEpisodeUpdateSQL()).bind(parsed.feed_id),
+    env.DB.prepare(assertPreviousChangesSQL()).bind(candidateCount),
+    env.DB.prepare(feedDeleteUpdateSQL()).bind(parsed.feed_id),
+    env.DB.prepare(assertPreviousChangesSQL()).bind(1),
+  ];
+
+  try {
+    await env.DB.batch(statements);
+  } catch (error) {
+    if (isFeedDeleteAssertionError(error)) return text("feed delete changed concurrently", 409);
+    return text("feed delete failed", 500);
+  }
+
+  return Response.json({
+    ok: true,
+    feed_id: parsed.feed_id,
+    deleted: true,
+    episodes_marked: candidateCount,
   });
 }
 
@@ -2384,12 +2561,25 @@ async function selectEpisodeAdminRow(env: Env, feedID: string, localEpisodeID: s
   ).bind(feedID, localEpisodeID).first<EpisodeAdminRow>();
 }
 
+async function deletedFeedMutationGuard(env: Env, feedID: string): Promise<Response | null> {
+  const feed = await env.DB.prepare(
+    `SELECT deleted_at
+       FROM feeds
+      WHERE feed_id = ?`,
+  ).bind(feedID).first<FeedDeletionStateRow>();
+  if (feed?.deleted_at) return text("feed not found", 404);
+  return null;
+}
+
 async function handleAdminEpisodeStatus(request: Request, env: Env): Promise<Response> {
   const body = await readBoundedJson(request);
   if (body instanceof Response) return body;
 
   const parsed = parseAdminEpisodeStatus(body);
   if (parsed instanceof Response) return parsed;
+
+  const deletedFeed = await deletedFeedMutationGuard(env, parsed.feed_id);
+  if (deletedFeed) return deletedFeed;
 
   const episode = await selectEpisodeAdminRow(env, parsed.feed_id, parsed.local_episode_id);
   if (!episode) return text("episode not found", 404);
@@ -2460,7 +2650,7 @@ async function handleAdminEpisodes(url: URL, env: Env): Promise<Response> {
   const exists = await env.DB.prepare(
     `SELECT feed_id
        FROM feeds
-      WHERE feed_id = ?`,
+      WHERE feed_id = ? AND deleted_at IS NULL`,
   ).bind(feedID).first<{ feed_id: string }>();
   if (!exists) return text("feed not found", 404);
 
@@ -2498,9 +2688,10 @@ async function handleAdminEpisodes(url: URL, env: Env): Promise<Response> {
 async function handleAdminSubscriptions(request: Request, env: Env): Promise<Response> {
   const { results: feeds } = await env.DB.prepare(
     `SELECT f.feed_id, f.title_override, f.public_path, m.title
-       FROM feeds f
+      FROM feeds f
        LEFT JOIN feed_metadata m ON m.feed_id = f.feed_id
       WHERE f.public_path IS NOT NULL
+        AND f.deleted_at IS NULL
       ORDER BY f.feed_id ASC`,
   ).all<AdminSubscriptionFeedRow>();
 
@@ -2622,12 +2813,12 @@ async function handleFeedMetadataUpsert(request: Request, env: Env): Promise<Res
   const feed = await env.DB.prepare(
     `SELECT feed_id, provider
        FROM feeds
-      WHERE feed_id = ?`,
+      WHERE feed_id = ? AND deleted_at IS NULL`,
   ).bind(parsed.feed_id).first<{ feed_id: string; provider: FeedMetadataUpsertRequest["provider"] }>();
   if (!feed) return text("feed not found", 404);
   if (feed.provider !== parsed.provider) return badRequest("provider mismatch");
 
-  await env.DB.prepare(feedMetadataUpsertSQL()).bind(
+  const upsertResult = await env.DB.prepare(feedMetadataUpsertSQL()).bind(
     parsed.feed_id,
     parsed.provider,
     parsed.source_url,
@@ -2641,7 +2832,9 @@ async function handleFeedMetadataUpsert(request: Request, env: Env): Promise<Res
     optionalDBBoolean(parsed.explicit),
     parsed.last_source_update_at ?? null,
     parsed.reported_at,
+    parsed.feed_id,
   ).run();
+  if (upsertResult.meta.changes !== 1) return text("feed not found", 404);
 
   return Response.json({ ok: true, feed_id: parsed.feed_id });
 }
@@ -2717,18 +2910,24 @@ async function handleEpisodeUpsert(request: Request, env: Env): Promise<Response
 	const feed = await env.DB.prepare(
 		`SELECT feed_id, provider
 		   FROM feeds
-		  WHERE feed_id = ?`,
+		  WHERE feed_id = ? AND deleted_at IS NULL`,
 	).bind(parsed.feed_id).first<{ feed_id: string; provider: EpisodeUpsertRequest["provider"] }>();
 
 	if (!feed) return text("feed not found", 404);
 	if (feed.provider !== parsed.provider) return badRequest("provider mismatch");
 
-	await env.DB.prepare(
+	const upsertResult = await env.DB.prepare(
 		`INSERT INTO episodes (
 		    feed_id, provider, source_episode_id, local_episode_id, source_url, thumbnail,
 		    title, description, published_at, duration, status, r2_key, size, mime_type,
 		    asset_token, created_at, updated_at
-		  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'visible', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		  )
+		  SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'visible', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+		   WHERE EXISTS (
+		     SELECT 1 FROM feeds
+		      WHERE feed_id = ?
+		        AND deleted_at IS NULL
+		   )
 		  ON CONFLICT(feed_id, local_episode_id) DO UPDATE SET
 		    provider = excluded.provider,
 		    source_episode_id = excluded.source_episode_id,
@@ -2746,7 +2945,12 @@ async function handleEpisodeUpsert(request: Request, env: Env): Promise<Response
 		    size = excluded.size,
 		    mime_type = excluded.mime_type,
 		    asset_token = excluded.asset_token,
-		    updated_at = CURRENT_TIMESTAMP`,
+		    updated_at = CURRENT_TIMESTAMP
+		   WHERE EXISTS (
+		     SELECT 1 FROM feeds
+		      WHERE feeds.feed_id = episodes.feed_id
+		        AND feeds.deleted_at IS NULL
+		   )`,
 	).bind(
 		parsed.feed_id,
 		parsed.provider,
@@ -2762,7 +2966,9 @@ async function handleEpisodeUpsert(request: Request, env: Env): Promise<Response
 		parsed.size,
 		parsed.mime_type,
 		parsed.asset_token,
+		parsed.feed_id,
 	).run();
+	if (upsertResult.meta.changes !== 1) return text("feed not found", 404);
 
 	const status = await env.DB.prepare(
 		`SELECT status
@@ -2844,13 +3050,14 @@ async function handleFeedXml(pathname: string, request: Request, env: Env): Prom
   const tokenHash = await sha256Hex(token);
   const feed = await env.DB.prepare(
     `SELECT f.feed_id, f.provider, f.url, f.title_override, f.description_override, f.page_size,
-            m.title, m.description, m.link
+            f.deleted_at, m.title, m.description, m.link
        FROM feeds f
        LEFT JOIN feed_metadata m ON m.feed_id = f.feed_id
       WHERE f.feed_token_hash = ?`,
   ).bind(tokenHash).first<PublicFeedRow>();
 
   if (!feed) return text("not found", 404);
+  if (feed.deleted_at) return text("feed deleted", 410);
 
   const limit = feed.page_size > 0 ? feed.page_size : 25;
   const { results: episodes } = await env.DB.prepare(
@@ -2903,6 +3110,7 @@ async function handleOpml(pathname: string, request: Request, env: Env): Promise
        FROM feeds f
        LEFT JOIN feed_metadata m ON m.feed_id = f.feed_id
       WHERE f.enabled = 1
+        AND f.deleted_at IS NULL
         AND f.include_in_opml = 1
         AND f.public_path IS NOT NULL
       ORDER BY f.feed_id ASC`,
@@ -2983,6 +3191,10 @@ export default {
       if (url.pathname === "/api/admin/feeds/status") {
         if (request.method !== "POST") return methodNotAllowed();
         return handleAdminFeedStatus(request, env);
+      }
+      if (url.pathname === "/api/admin/feeds/delete") {
+        if (request.method !== "POST") return methodNotAllowed();
+        return handleAdminFeedDelete(request, env);
       }
       if (url.pathname === "/api/admin/episodes/status") {
         if (request.method !== "POST") return methodNotAllowed();

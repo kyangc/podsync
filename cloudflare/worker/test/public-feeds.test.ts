@@ -15,11 +15,12 @@ function publicFeed(overrides: Partial<PublicFeedRow> = {}): PublicFeedRow {
     title: "Bilibili Feed",
     description: "A feed",
     link: "https://space.bilibili.com/10835521",
+    deleted_at: null,
     ...overrides,
   };
 }
 
-function tomlFeed(overrides: Partial<FeedTomlRow & { public_path: string | null; metadata_title: string | null }> = {}): FeedTomlRow & { public_path?: string | null; metadata_title?: string | null } {
+function tomlFeed(overrides: Partial<FeedTomlRow & { public_path: string | null; metadata_title: string | null; deleted_at: string | null }> = {}): FeedTomlRow & { public_path?: string | null; metadata_title?: string | null; deleted_at?: string | null } {
   return {
     feed_id: "bili",
     provider: "bilibili",
@@ -36,6 +37,7 @@ function tomlFeed(overrides: Partial<FeedTomlRow & { public_path: string | null;
     feed_token_hash: "feed-token-hash",
     public_path: "/f/feed-secret.xml",
     metadata_title: "Bilibili Feed",
+    deleted_at: null,
     ...overrides,
   };
 }
@@ -215,6 +217,21 @@ describe("public feed contracts", () => {
     expect(response.status).toBe(404);
   });
 
+  it("returns gone for a deleted feed old RSS token", async () => {
+    const tokenHash = await sha256Hex("feed-secret");
+    const response = await worker.fetch(
+      new Request("https://podcast.example.com/f/feed-secret.xml"),
+      {
+        DB: fakeD1({
+          publicFeedsByHash: new Map([[tokenHash, publicFeed({ deleted_at: "2026-07-06 00:00:00" })]]),
+        }),
+      },
+    );
+
+    expect(response.status).toBe(410);
+    await expect(response.text()).resolves.toBe("feed deleted");
+  });
+
   it("rejects a malformed feed token", async () => {
     const response = await worker.fetch(new Request("https://podcast.example.com/f/%E0%A4%A.xml"), {
       DB: fakeD1(),
@@ -271,7 +288,7 @@ describe("public feed contracts", () => {
     expect(body).toContain('xmlUrl="https://podcast.example.com/f/youtube_feed.xml"');
   });
 
-  it("omits disabled non-opml and missing-public-path feeds from OPML", async () => {
+  it("omits disabled deleted non-opml and missing-public-path feeds from OPML", async () => {
     const tokenHash = await sha256Hex("opml-secret");
     const response = await worker.fetch(
       new Request("https://podcast.example.com/opml/opml-secret.xml"),
@@ -281,6 +298,7 @@ describe("public feed contracts", () => {
           tomlFeeds: [
             tomlFeed({ feed_id: "visible", metadata_title: "Visible", public_path: "/f/visible.xml" }),
             tomlFeed({ feed_id: "disabled", metadata_title: "Disabled", enabled: 0, public_path: "/f/disabled.xml" }),
+            tomlFeed({ feed_id: "deleted", metadata_title: "Deleted", deleted_at: "2026-07-06 00:00:00", public_path: "/f/deleted.xml" }),
             tomlFeed({ feed_id: "excluded", metadata_title: "Excluded", include_in_opml: 0, public_path: "/f/excluded.xml" }),
             tomlFeed({ feed_id: "missing", metadata_title: "Missing", public_path: null }),
           ],
@@ -292,6 +310,7 @@ describe("public feed contracts", () => {
     const body = await response.text();
     expect(body).toContain("Visible");
     expect(body).not.toContain("Disabled");
+    expect(body).not.toContain("Deleted");
     expect(body).not.toContain("Excluded");
     expect(body).not.toContain("Missing");
   });
