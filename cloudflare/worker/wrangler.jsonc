@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "podsync-control-plane",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-06",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "podsync-control-plane",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}

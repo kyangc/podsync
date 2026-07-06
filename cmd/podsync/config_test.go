@@ -109,6 +109,67 @@ timeout = 15
 	assert.EqualValues(t, 15, config.Downloader.Timeout)
 }
 
+func TestRemoteDisabledDoesNotChangeLocalConfig(t *testing.T) {
+	const base = `
+[server]
+port = 8080
+data_dir = "/data"
+
+[feeds]
+  [feeds.local]
+  url = "https://youtube.com/watch?v=ygIUF678y40"
+  page_size = 12
+  update_period = "2h"
+  format = "audio"
+  quality = "low"
+  opml = false
+  filters = { not_title = "直播", min_duration = 0, max_age = 30 }
+  clean = { keep_last = 7 }
+`
+	const remoteDisabled = base + `
+[remote]
+enabled = false
+base_url = "http://127.0.0.1:1"
+token = "unused"
+cache_path = "/tmp/podsync-remote-cache.toml"
+config_refresh_interval = "5m"
+`
+
+	basePath := setup(t, base)
+	defer os.Remove(basePath)
+	remotePath := setup(t, remoteDisabled)
+	defer os.Remove(remotePath)
+
+	baseConfig, err := LoadConfig(basePath)
+	require.NoError(t, err)
+	remoteConfig, err := LoadConfig(remotePath)
+	require.NoError(t, err)
+
+	assert.Equal(t, baseConfig.Server.Hostname, remoteConfig.Server.Hostname)
+	assert.Equal(t, baseConfig.Server.Port, remoteConfig.Server.Port)
+	assert.Equal(t, baseConfig.Storage, remoteConfig.Storage)
+	assert.Equal(t, baseConfig.Database, remoteConfig.Database)
+
+	require.Len(t, baseConfig.Feeds, 1)
+	require.Len(t, remoteConfig.Feeds, 1)
+	baseFeed := baseConfig.Feeds["local"]
+	remoteFeed := remoteConfig.Feeds["local"]
+	require.NotNil(t, baseFeed)
+	require.NotNil(t, remoteFeed)
+
+	assert.Equal(t, baseFeed.ID, remoteFeed.ID)
+	assert.Equal(t, baseFeed.URL, remoteFeed.URL)
+	assert.Equal(t, baseFeed.Format, remoteFeed.Format)
+	assert.Equal(t, baseFeed.Quality, remoteFeed.Quality)
+	assert.Equal(t, baseFeed.PageSize, remoteFeed.PageSize)
+	assert.Equal(t, baseFeed.UpdatePeriod, remoteFeed.UpdatePeriod)
+	assert.Equal(t, baseFeed.OPML, remoteFeed.OPML)
+	assert.Equal(t, baseFeed.Filters, remoteFeed.Filters)
+	require.NotNil(t, baseFeed.Clean)
+	require.NotNil(t, remoteFeed.Clean)
+	assert.Equal(t, baseFeed.Clean.KeepLast, remoteFeed.Clean.KeepLast)
+}
+
 func TestFilenameTemplateValidation(t *testing.T) {
 	const file = `
 [server]

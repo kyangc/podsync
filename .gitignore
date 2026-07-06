@@ -27,6 +27,7 @@ _testmain.go
 bin/
 node_modules/
 dist/
+.wrangler/
 venv/
 
 .DS_Store

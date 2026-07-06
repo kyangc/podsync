@@ -1,0 +1,20 @@
+{
+  "name": "podsync-control-plane-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test",
+    "d1:reset": "node scripts/reset-d1-check.mjs",
+    "d1:check": "npm run d1:reset && wrangler d1 migrations apply podsync-control-plane --local --persist-to .wrangler/d1-check && wrangler d1 execute podsync-control-plane --local --persist-to .wrangler/d1-check --command \"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'feeds'\"",
+    "wrangler:check": "wrangler deploy --dry-run --outdir dist/dry-run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260702.1",
+    "@types/node": "^26.1.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.107.0"
+  }
+}
