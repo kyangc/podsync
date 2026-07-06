@@ -32,7 +32,7 @@ func TestBuildRemoteTombstoneSyncerSkipsDisabledConfig(t *testing.T) {
 	syncer, err := buildRemoteTombstoneSyncer(&Config{}, &cmdFakeTombstoneStore{}, func(string, string) (remotepublish.TombstoneFetcher, error) {
 		called = true
 		return &cmdFakeTombstoneFetcher{}, nil
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	assert.Nil(t, syncer)
@@ -43,17 +43,21 @@ func TestBuildRemoteTombstoneSyncerBuildsWithRemoteOnlyConfig(t *testing.T) {
 	cfg := &Config{Remote: RemoteConfig{Enabled: true, BaseURL: "https://podcast.example.com", Token: "secret"}}
 	var gotBaseURL string
 	var gotToken string
+	events := &cmdFakeEventRecorder{}
 
 	syncer, err := buildRemoteTombstoneSyncer(cfg, &cmdFakeTombstoneStore{}, func(baseURL string, token string) (remotepublish.TombstoneFetcher, error) {
 		gotBaseURL = baseURL
 		gotToken = token
 		return &cmdFakeTombstoneFetcher{}, nil
-	})
+	}, events)
 
 	require.NoError(t, err)
 	assert.NotNil(t, syncer)
 	assert.Equal(t, "https://podcast.example.com", gotBaseURL)
 	assert.Equal(t, "secret", gotToken)
+	remoteSyncer, ok := syncer.(*remotepublish.TombstoneSyncer)
+	require.True(t, ok)
+	assert.Equal(t, events, remoteSyncer.Events)
 }
 
 func TestSyncRemoteTombstonesOnceCallsSyncer(t *testing.T) {

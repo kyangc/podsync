@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/mxpv/podsync/pkg/feed"
@@ -199,6 +200,105 @@ func TestDownloadEpisodesDoesNotEnqueueWhenLocalUpdateFails(t *testing.T) {
 	require.Zero(t, outbox.calls)
 }
 
+func TestUpdateRecordsFeedUpdateFailureEvent(t *testing.T) {
+	sink := &recordingEventSink{}
+	manager := &Manager{remoteEventSink: sink}
+	feedConfig := testFeedConfig()
+	feedConfig.URL = "://bad"
+
+	err := manager.Update(context.Background(), feedConfig)
+
+	require.Error(t, err)
+	require.Len(t, sink.events, 2)
+	assert.Equal(t, model.RemoteEventFeedUpdateStarted, sink.events[0].Type)
+	assert.Equal(t, model.RemoteEventFeedUpdateFailed, sink.events[1].Type)
+	assert.Equal(t, model.RemoteEventError, sink.events[1].Level)
+	assert.Contains(t, sink.events[1].ErrorDetail, "update failed")
+}
+
+func TestUpdateRecordsFeedUpdateStartedAndFinishedEvents(t *testing.T) {
+	sink := &recordingEventSink{}
+	manager := &Manager{remoteEventSink: sink}
+
+	manager.recordFeedUpdateStarted("feed")
+	manager.recordFeedUpdateDone("feed", nil)
+
+	require.Len(t, sink.events, 2)
+	assert.Equal(t, model.RemoteEventFeedUpdateStarted, sink.events[0].Type)
+	assert.Equal(t, model.RemoteEventFeedUpdateFinished, sink.events[1].Type)
+	assert.Equal(t, "feed", sink.events[0].FeedID)
+	assert.Equal(t, "feed", sink.events[1].FeedID)
+}
+
+func TestFetchEpisodesRecordsDiscoveredEvents(t *testing.T) {
+	sink := &recordingEventSink{}
+	manager := &Manager{
+		db:              &hookDB{episodes: []*model.Episode{testEpisode()}},
+		remoteEventSink: sink,
+	}
+	feedConfig := testFeedConfig()
+	feedConfig.PageSize = 1
+
+	episodes, err := manager.fetchEpisodes(context.Background(), feedConfig)
+
+	require.NoError(t, err)
+	require.Len(t, episodes, 1)
+	require.Len(t, sink.events, 1)
+	assert.Equal(t, model.RemoteEventEpisodeDiscovered, sink.events[0].Type)
+	assert.Equal(t, "feed", sink.events[0].FeedID)
+	assert.Equal(t, "episode", sink.events[0].LocalEpisodeID)
+}
+
+func TestDownloadEpisodesRecordsDownloadFinishedEvent(t *testing.T) {
+	sink := &recordingEventSink{}
+	manager := &Manager{
+		downloader:      hookDownloader{body: "audio"},
+		db:              &hookDB{},
+		fs:              &hookFS{},
+		remoteEventSink: sink,
+	}
+
+	err := manager.downloadEpisodes(context.Background(), testFeedConfig(), []*model.Episode{testEpisode()})
+
+	require.NoError(t, err)
+	require.Len(t, sink.events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFinished, sink.events[0].Type)
+	assert.Equal(t, "episode", sink.events[0].LocalEpisodeID)
+}
+
+func TestDownloadEpisodesRecordsDownloadFailedEvent(t *testing.T) {
+	wantErr := errors.New("download Authorization: Bearer secret-token failed")
+	sink := &recordingEventSink{}
+	manager := &Manager{
+		downloader:      hookDownloader{err: wantErr},
+		db:              &hookDB{},
+		fs:              &hookFS{},
+		remoteEventSink: sink,
+	}
+
+	err := manager.downloadEpisodes(context.Background(), testFeedConfig(), []*model.Episode{testEpisode()})
+
+	require.NoError(t, err)
+	require.Len(t, sink.events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFailed, sink.events[0].Type)
+	assert.Equal(t, model.RemoteEventError, sink.events[0].Level)
+	assert.Equal(t, wantErr.Error(), sink.events[0].ErrorDetail)
+}
+
+func TestDownloadEpisodesDoesNotRecordFinishedForExistingMedia(t *testing.T) {
+	sink := &recordingEventSink{}
+	manager := &Manager{
+		db:              &hookDB{},
+		fs:              &hookFS{existingSize: 321},
+		remoteEventSink: sink,
+	}
+
+	err := manager.downloadEpisodes(context.Background(), testFeedConfig(), []*model.Episode{testEpisode()})
+
+	require.NoError(t, err)
+	assert.Empty(t, sink.events)
+}
+
 type recordingRemoteOutbox struct {
 	tasks         []*model.RemotePublishTask
 	err           error
@@ -219,9 +319,18 @@ func (r *recordingRemoteOutbox) EnqueueRemotePublishTask(_ context.Context, task
 	return nil
 }
 
+type recordingEventSink struct {
+	events []model.RemoteEventDraft
+}
+
+func (r *recordingEventSink) RecordRemoteEvent(event model.RemoteEventDraft) {
+	r.events = append(r.events, event)
+}
+
 type hookDB struct {
-	updated bool
-	fail    error
+	updated  bool
+	fail     error
+	episodes []*model.Episode
 }
 
 func (h *hookDB) Close() error          { return nil }
@@ -240,8 +349,13 @@ func (h *hookDB) GetEpisode(context.Context, string, string) (*model.Episode, er
 	return nil, errors.New("not implemented")
 }
 func (h *hookDB) DeleteEpisode(string, string) error { return errors.New("not implemented") }
-func (h *hookDB) WalkEpisodes(context.Context, string, func(*model.Episode) error) error {
-	return errors.New("not implemented")
+func (h *hookDB) WalkEpisodes(_ context.Context, _ string, cb func(*model.Episode) error) error {
+	for _, episode := range h.episodes {
+		if err := cb(episode); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *hookDB) UpdateEpisode(_ string, episodeID string, cb func(*model.Episode) error) error {
@@ -280,9 +394,13 @@ func (h *hookFS) Create(_ context.Context, name string, reader io.Reader) (int64
 
 type hookDownloader struct {
 	body string
+	err  error
 }
 
 func (h hookDownloader) Download(context.Context, *feed.Config, *model.Episode) (io.ReadCloser, error) {
+	if h.err != nil {
+		return nil, h.err
+	}
 	return io.NopCloser(strings.NewReader(h.body)), nil
 }
 
@@ -307,5 +425,6 @@ func testEpisode() *model.Episode {
 		Duration:    123,
 		VideoURL:    "https://www.youtube.com/watch?v=episode",
 		PubDate:     time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
+		Status:      model.EpisodeNew,
 	}
 }

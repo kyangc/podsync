@@ -34,6 +34,7 @@ type Processor struct {
 	Publisher Publisher
 	Upserter  EpisodeUpserter
 	Store     MediaStore
+	Events    EventSink
 	Prefix    string
 	Limit     int
 	Now       func() time.Time
@@ -62,6 +63,12 @@ func (p *Processor) now() time.Time {
 		return p.Now()
 	}
 	return time.Now().UTC()
+}
+
+func (p *Processor) recordEvent(event model.RemoteEventDraft) {
+	if p.Events != nil {
+		p.Events.RecordRemoteEvent(event)
+	}
 }
 
 func (p *Processor) processOne(ctx context.Context, task *model.RemotePublishTask, now time.Time) error {
@@ -98,15 +105,37 @@ func (p *Processor) processOne(ctx context.Context, task *model.RemotePublishTas
 		return err
 	}
 	if err := p.Publisher.Upload(ctx, prepared, reader); err != nil {
+		p.recordEvent(model.RemoteEventDraft{
+			Level:          model.RemoteEventError,
+			Type:           model.RemoteEventUploadFailed,
+			FeedID:         task.FeedID,
+			LocalEpisodeID: task.LocalEpisodeID,
+			ErrorCode:      "episode_upload_failed",
+			ErrorDetail:    err.Error(),
+		})
 		if retryErr := p.Outbox.RetryRemotePublishTask(ctx, task.ID, err, now); retryErr != nil {
 			return retryErr
 		}
 		return err
 	}
+	p.recordEvent(model.RemoteEventDraft{
+		Level:          model.RemoteEventInfo,
+		Type:           model.RemoteEventUploadFinished,
+		FeedID:         task.FeedID,
+		LocalEpisodeID: task.LocalEpisodeID,
+	})
 	serverStatus := ""
 	if p.Upserter != nil {
 		result, err := p.Upserter.UpsertEpisode(ctx, prepared)
 		if err != nil {
+			p.recordEvent(model.RemoteEventDraft{
+				Level:          model.RemoteEventError,
+				Type:           model.RemoteEventReportFailed,
+				FeedID:         task.FeedID,
+				LocalEpisodeID: task.LocalEpisodeID,
+				ErrorCode:      "episode_report_failed",
+				ErrorDetail:    err.Error(),
+			})
 			if IsNonRetryable(err) {
 				return p.Outbox.FailRemotePublishTask(ctx, task.ID, err, now)
 			}
@@ -116,6 +145,12 @@ func (p *Processor) processOne(ctx context.Context, task *model.RemotePublishTas
 			return err
 		}
 		serverStatus = result.Status
+		p.recordEvent(model.RemoteEventDraft{
+			Level:          model.RemoteEventInfo,
+			Type:           model.RemoteEventReportFinished,
+			FeedID:         task.FeedID,
+			LocalEpisodeID: task.LocalEpisodeID,
+		})
 	}
 	return p.Outbox.CompleteRemotePublishTask(ctx, task.ID, serverStatus, now)
 }

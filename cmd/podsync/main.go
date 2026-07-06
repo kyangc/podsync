@@ -139,7 +139,14 @@ func main() {
 		log.WithError(err).Fatal("failed to open storage")
 	}
 
+	remoteEvents, err := buildRemoteEventRecorder(cfg, newRemoteEventReporter)
+	if err != nil {
+		log.WithError(err).Warn("remote event reporting disabled")
+	}
+	recordRemoteRunStarted(remoteEvents)
+
 	resolved, err := resolveFeeds(ctx, cfg, remoteClient)
+	recordRemoteConfigEvent(remoteEvents, resolved, err)
 	if err != nil {
 		log.WithError(err).Error("failed to resolve remote feeds")
 	}
@@ -185,17 +192,20 @@ func main() {
 
 	log.Debug("creating update manager")
 	updateOptions := remotePublishOptions(cfg, database)
+	if remoteEvents != nil {
+		updateOptions = append(updateOptions, update.WithRemoteEventSink(remoteEvents))
+	}
 	manager, err := update.NewUpdater(activeFeeds, keys, cfg.Server.Hostname, downloader, database, storage, updateOptions...)
 	if err != nil {
 		log.WithError(err).Fatal("failed to create updater")
 	}
-	remoteProcessor, err := buildRemoteProcessor(cfg, database, newRemoteR2Publisher, newRemoteNASUpserter)
+	remoteProcessor, err := buildRemoteProcessor(cfg, database, newRemoteR2Publisher, newRemoteNASUpserter, remoteEvents)
 	if err != nil {
 		log.WithError(err).Warn("remote publish disabled")
 	} else if remoteProcessor == nil && cfg.Remote.Enabled {
 		log.Warn("remote publish disabled: R2 requires local storage and complete [r2] config")
 	}
-	remoteTombstoneSyncer, err := buildRemoteTombstoneSyncer(cfg, database, newRemoteTombstoneFetcher)
+	remoteTombstoneSyncer, err := buildRemoteTombstoneSyncer(cfg, database, newRemoteTombstoneFetcher, remoteEvents)
 	if err != nil {
 		log.WithError(err).Warn("remote tombstone sync disabled")
 	}
@@ -209,6 +219,9 @@ func main() {
 			}
 		}
 		processRemotePublishOnce(ctx, remoteProcessor)
+		eventFlushCtx, eventFlushCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer eventFlushCancel()
+		recordRemoteRunFinishedAndFlush(eventFlushCtx, remoteEvents)
 		return
 	}
 
@@ -237,6 +250,11 @@ func main() {
 	if remoteTombstoneSyncer != nil {
 		group.Go(func() error {
 			return runRemoteTombstoneLoop(ctx, remoteTombstoneSyncer, defaultRemoteTombstoneInterval)
+		})
+	}
+	if remoteEvents != nil {
+		group.Go(func() error {
+			return runRemoteEventLoop(ctx, remoteEvents, defaultRemoteEventInterval)
 		})
 	}
 
@@ -293,6 +311,7 @@ func main() {
 			select {
 			case <-refresh:
 				resolved, apply, err := refreshFeeds(ctx, cfg, remoteClient)
+				recordRemoteConfigEvent(remoteEvents, resolved, err)
 				if err != nil {
 					log.WithError(err).Error("failed to refresh remote feeds")
 				}

@@ -31,11 +31,21 @@ type RemotePublishOutbox interface {
 	EnqueueRemotePublishTask(ctx context.Context, task *model.RemotePublishTask) error
 }
 
+type RemoteEventSink interface {
+	RecordRemoteEvent(event model.RemoteEventDraft)
+}
+
 type Option func(*Manager)
 
 func WithRemotePublishOutbox(outbox RemotePublishOutbox) Option {
 	return func(u *Manager) {
 		u.remotePublishOutbox = outbox
+	}
+}
+
+func WithRemoteEventSink(sink RemoteEventSink) Option {
+	return func(u *Manager) {
+		u.remoteEventSink = sink
 	}
 }
 
@@ -50,6 +60,7 @@ type Manager struct {
 	feeds               map[string]*feed.Config
 	keys                map[model.Provider]feed.KeyProvider
 	remotePublishOutbox RemotePublishOutbox
+	remoteEventSink     RemoteEventSink
 }
 
 func NewUpdater(
@@ -122,12 +133,48 @@ func (u *Manager) enqueueRemotePublishTask(ctx context.Context, feedConfig *feed
 	})
 }
 
-func (u *Manager) Update(ctx context.Context, feedConfig *feed.Config) error {
+func (u *Manager) recordRemoteEvent(event model.RemoteEventDraft) {
+	if u.remoteEventSink != nil {
+		u.remoteEventSink.RecordRemoteEvent(event)
+	}
+}
+
+func (u *Manager) recordFeedUpdateStarted(feedID string) {
+	u.recordRemoteEvent(model.RemoteEventDraft{
+		Level:  model.RemoteEventInfo,
+		Type:   model.RemoteEventFeedUpdateStarted,
+		FeedID: feedID,
+	})
+}
+
+func (u *Manager) recordFeedUpdateDone(feedID string, err error) {
+	if err != nil {
+		u.recordRemoteEvent(model.RemoteEventDraft{
+			Level:       model.RemoteEventError,
+			Type:        model.RemoteEventFeedUpdateFailed,
+			FeedID:      feedID,
+			ErrorCode:   "feed_update_failed",
+			ErrorDetail: err.Error(),
+		})
+		return
+	}
+	u.recordRemoteEvent(model.RemoteEventDraft{
+		Level:  model.RemoteEventInfo,
+		Type:   model.RemoteEventFeedUpdateFinished,
+		FeedID: feedID,
+	})
+}
+
+func (u *Manager) Update(ctx context.Context, feedConfig *feed.Config) (err error) {
 	log.WithFields(log.Fields{
 		"feed_id": feedConfig.ID,
 		"format":  feedConfig.Format,
 		"quality": feedConfig.Quality,
 	}).Infof("-> updating %s", feedConfig.URL)
+	u.recordFeedUpdateStarted(feedConfig.ID)
+	defer func() {
+		u.recordFeedUpdateDone(feedConfig.ID, err)
+	}()
 
 	started := time.Now()
 
@@ -264,6 +311,13 @@ func (u *Manager) fetchEpisodes(ctx context.Context, feedConfig *feed.Config) ([
 		}
 
 		log.Debugf("adding %s (%q) to queue", episode.ID, episode.Title)
+		u.recordRemoteEvent(model.RemoteEventDraft{
+			Level:          model.RemoteEventInfo,
+			Type:           model.RemoteEventEpisodeDiscovered,
+			FeedID:         feedID,
+			LocalEpisodeID: episode.ID,
+			Message:        episode.Title,
+		})
 		downloadList = append(downloadList, episode)
 		return nil
 	})
@@ -339,6 +393,14 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 				logger.Warn("server responded with a 'Too Many Requests' error")
 				break
 			}
+			u.recordRemoteEvent(model.RemoteEventDraft{
+				Level:          model.RemoteEventError,
+				Type:           model.RemoteEventDownloadFailed,
+				FeedID:         feedID,
+				LocalEpisodeID: episode.ID,
+				ErrorCode:      "download_failed",
+				ErrorDetail:    err.Error(),
+			})
 
 			// Execute episode download error hooks
 			if len(feedConfig.OnEpisodeDownloadError) > 0 {
@@ -402,6 +464,13 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 		}); err != nil {
 			return err
 		}
+		u.recordRemoteEvent(model.RemoteEventDraft{
+			Level:          model.RemoteEventInfo,
+			Type:           model.RemoteEventDownloadFinished,
+			FeedID:         feedID,
+			LocalEpisodeID: episode.ID,
+			Message:        episode.Title,
+		})
 
 		if err := u.enqueueRemotePublishTask(ctx, feedConfig, episode, mediaPath, fileSize); err != nil {
 			logger.WithError(err).Warn("failed to enqueue remote publish task")

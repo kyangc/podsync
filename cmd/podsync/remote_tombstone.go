@@ -27,7 +27,7 @@ func newRemoteTombstoneFetcher(baseURL string, token string) (remotepublish.Tomb
 	return remotepublish.NewNASClient(baseURL, token, nil)
 }
 
-func buildRemoteTombstoneSyncer(cfg *Config, store remotepublish.TombstoneStore, newFetcher remoteTombstoneFetcherFactory) (remoteTombstoneSyncer, error) {
+func buildRemoteTombstoneSyncer(cfg *Config, store remotepublish.TombstoneStore, newFetcher remoteTombstoneFetcherFactory, events remotepublish.EventSink) (remoteTombstoneSyncer, error) {
 	if !remoteTombstoneSyncEnabled(cfg) {
 		return nil, nil
 	}
@@ -38,6 +38,7 @@ func buildRemoteTombstoneSyncer(cfg *Config, store remotepublish.TombstoneStore,
 	return &remotepublish.TombstoneSyncer{
 		Fetcher: fetcher,
 		Store:   store,
+		Events:  events,
 	}, nil
 }
 

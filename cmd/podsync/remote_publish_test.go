@@ -87,7 +87,7 @@ func TestBuildRemoteProcessorSkipsDisabledOrIncompleteConfig(t *testing.T) {
 			}, func(string, string) (remotepublish.EpisodeUpserter, error) {
 				called = true
 				return &cmdFakeUpserter{}, nil
-			})
+			}, nil)
 
 			require.NoError(t, err)
 			assert.Nil(t, processor)
@@ -102,6 +102,7 @@ func TestBuildRemoteProcessorBuildsLocalR2Processor(t *testing.T) {
 	var gotBaseURL string
 	var gotToken string
 
+	events := &cmdFakeEventRecorder{}
 	processor, err := buildRemoteProcessor(cfg, &cmdFakeOutbox{}, func(cfg remotepublish.R2Config) (remotepublish.Publisher, error) {
 		gotCfg = cfg
 		return &cmdFakePublisher{}, nil
@@ -109,7 +110,7 @@ func TestBuildRemoteProcessorBuildsLocalR2Processor(t *testing.T) {
 		gotBaseURL = baseURL
 		gotToken = token
 		return &cmdFakeUpserter{}, nil
-	})
+	}, events)
 
 	require.NoError(t, err)
 	require.NotNil(t, processor)
@@ -121,6 +122,7 @@ func TestBuildRemoteProcessorBuildsLocalR2Processor(t *testing.T) {
 	assert.Equal(t, defaultRemotePublishBatchSize, remoteProcessor.Limit)
 	assert.Equal(t, "podcasts/audio", remoteProcessor.Prefix)
 	assert.NotNil(t, remoteProcessor.Upserter)
+	assert.Equal(t, events, remoteProcessor.Events)
 	store, ok := remoteProcessor.Store.(remotepublish.LocalMediaStore)
 	require.True(t, ok)
 	assert.Equal(t, "/data", store.Root)

@@ -420,6 +420,80 @@ func TestProcessorWithBadgerLocalStoreAndMockPublisher(t *testing.T) {
 	assert.NotZero(t, got.CompletedAt)
 }
 
+func TestProcessorRecordsUploadAndReportFinishedEvents(t *testing.T) {
+	root := t.TempDir()
+	task := newProcessorTask("feed", "episode")
+	writeProcessorMedia(t, root, task.MediaPath, []byte("audio bytes"))
+	events := &recordingRemoteEventSink{}
+	processor := &Processor{
+		Outbox:    &fakeOutbox{due: []*model.RemotePublishTask{task}},
+		Publisher: &fakeProcessorPublisher{},
+		Upserter:  &fakeEpisodeUpserter{status: "visible"},
+		Store:     LocalMediaStore{Root: root},
+		Events:    events,
+	}
+
+	err := processor.ProcessDue(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, events.events, 2)
+	assert.Equal(t, model.RemoteEventUploadFinished, events.events[0].Type)
+	assert.Equal(t, model.RemoteEventReportFinished, events.events[1].Type)
+	for _, event := range events.events {
+		assert.Equal(t, "feed", event.FeedID)
+		assert.Equal(t, "episode", event.LocalEpisodeID)
+	}
+}
+
+func TestProcessorRecordsUploadFailedEvent(t *testing.T) {
+	root := t.TempDir()
+	task := newProcessorTask("feed", "episode")
+	writeProcessorMedia(t, root, task.MediaPath, []byte("audio bytes"))
+	events := &recordingRemoteEventSink{}
+	outbox := &fakeOutbox{due: []*model.RemotePublishTask{task}}
+	processor := &Processor{
+		Outbox:    outbox,
+		Publisher: &fakeProcessorPublisher{failIDs: map[string]error{task.ID: errors.New("put failed")}},
+		Store:     LocalMediaStore{Root: root},
+		Events:    events,
+	}
+
+	err := processor.ProcessDue(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, events.events, 1)
+	assert.Equal(t, model.RemoteEventUploadFailed, events.events[0].Type)
+	assert.Equal(t, model.RemoteEventError, events.events[0].Level)
+	assert.Equal(t, "episode_upload_failed", events.events[0].ErrorCode)
+	assert.Equal(t, []string{task.ID}, outbox.retried)
+}
+
+func TestProcessorRecordsReportFailedEvent(t *testing.T) {
+	root := t.TempDir()
+	task := newProcessorTask("feed", "episode")
+	writeProcessorMedia(t, root, task.MediaPath, []byte("audio bytes"))
+	events := &recordingRemoteEventSink{}
+	upsertErr := errors.New("worker unavailable")
+	outbox := &fakeOutbox{due: []*model.RemotePublishTask{task}}
+	processor := &Processor{
+		Outbox:    outbox,
+		Publisher: &fakeProcessorPublisher{},
+		Upserter:  &fakeEpisodeUpserter{err: upsertErr},
+		Store:     LocalMediaStore{Root: root},
+		Events:    events,
+	}
+
+	err := processor.ProcessDue(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, events.events, 2)
+	assert.Equal(t, model.RemoteEventUploadFinished, events.events[0].Type)
+	assert.Equal(t, model.RemoteEventReportFailed, events.events[1].Type)
+	assert.Equal(t, model.RemoteEventError, events.events[1].Level)
+	assert.Equal(t, "episode_report_failed", events.events[1].ErrorCode)
+	assert.Equal(t, []string{task.ID}, outbox.retried)
+}
+
 type fakeOutbox struct {
 	due               []*model.RemotePublishTask
 	prepared          []*model.RemotePublishTask
@@ -480,6 +554,14 @@ func (o *fakeOutbox) FailRemotePublishTask(_ context.Context, id string, cause e
 	o.failed = append(o.failed, id)
 	o.failErrors = append(o.failErrors, cause)
 	return nil
+}
+
+type recordingRemoteEventSink struct {
+	events []model.RemoteEventDraft
+}
+
+func (r *recordingRemoteEventSink) RecordRemoteEvent(event model.RemoteEventDraft) {
+	r.events = append(r.events, event)
 }
 
 type fakeEpisodeUpserter struct {

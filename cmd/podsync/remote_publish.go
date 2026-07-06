@@ -56,7 +56,7 @@ func newRemoteNASUpserter(baseURL string, token string) (remotepublish.EpisodeUp
 	return remotepublish.NewNASClient(baseURL, token, nil)
 }
 
-func buildRemoteProcessor(cfg *Config, outbox remotepublish.Outbox, newPublisher remotePublisherFactory, newUpserter remoteUpserterFactory) (remotePublishProcessor, error) {
+func buildRemoteProcessor(cfg *Config, outbox remotepublish.Outbox, newPublisher remotePublisherFactory, newUpserter remoteUpserterFactory, events remotepublish.EventSink) (remotePublishProcessor, error) {
 	if !remotePublishEnabled(cfg) {
 		return nil, nil
 	}
@@ -73,6 +73,7 @@ func buildRemoteProcessor(cfg *Config, outbox remotepublish.Outbox, newPublisher
 		Publisher: publisher,
 		Upserter:  upserter,
 		Store:     remotepublish.LocalMediaStore{Root: cfg.Storage.Local.DataDir},
+		Events:    events,
 		Prefix:    cfg.R2.Prefix,
 		Limit:     defaultRemotePublishBatchSize,
 	}, nil

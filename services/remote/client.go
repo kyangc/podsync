@@ -34,6 +34,10 @@ type TombstoneFetcher interface {
 	FetchTombstones(ctx context.Context, cursor int64, limit int) (*model.RemoteTombstoneBatch, error)
 }
 
+type EventBatchReporter interface {
+	PostEventBatch(ctx context.Context, batch *model.RemoteEventBatch) (*model.RemoteEventBatchResult, error)
+}
+
 type NonRetryableError struct {
 	err error
 }
@@ -99,7 +103,7 @@ func (c *NASClient) UpsertEpisode(ctx context.Context, task *model.RemotePublish
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		message := strings.TrimSpace(readLimitedString(resp.Body, maxNASClientErrorBody))
-		message = strings.ReplaceAll(message, c.token, "[redacted]")
+		message = scrubSensitiveText(message, []string{c.token})
 		var err error
 		if message == "" {
 			err = fmt.Errorf("episode upsert returned HTTP %d", resp.StatusCode)
@@ -149,7 +153,7 @@ func (c *NASClient) FetchTombstones(ctx context.Context, cursor int64, limit int
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		message := strings.TrimSpace(readLimitedString(resp.Body, maxNASClientErrorBody))
-		message = strings.ReplaceAll(message, c.token, "[redacted]")
+		message = scrubSensitiveText(message, []string{c.token})
 		if message == "" {
 			return nil, fmt.Errorf("tombstones returned HTTP %d", resp.StatusCode)
 		}
@@ -175,6 +179,61 @@ func (c *NASClient) tombstonesURL(cursor int64, limit int) string {
 		query.Set("limit", fmt.Sprintf("%d", limit))
 	}
 	endpoint.RawQuery = query.Encode()
+	endpoint.Fragment = ""
+	return endpoint.String()
+}
+
+func (c *NASClient) PostEventBatch(ctx context.Context, batch *model.RemoteEventBatch) (*model.RemoteEventBatchResult, error) {
+	if batch == nil {
+		return nil, nonRetryable("remote event batch is required")
+	}
+	body, err := json.Marshal(batch)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.eventsBatchURL(), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		message := strings.TrimSpace(readLimitedString(resp.Body, maxNASClientErrorBody))
+		message = scrubSensitiveText(message, []string{c.token})
+		var responseErr error
+		if message == "" {
+			responseErr = fmt.Errorf("event batch returned HTTP %d", resp.StatusCode)
+		} else {
+			responseErr = fmt.Errorf("event batch returned HTTP %d: %s", resp.StatusCode, message)
+		}
+		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusNotFound {
+			return nil, &NonRetryableError{err: responseErr}
+		}
+		return nil, responseErr
+	}
+
+	var result model.RemoteEventBatchResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	if result.RunID == "" {
+		return nil, errors.New("event batch response run_id is required")
+	}
+	return &result, nil
+}
+
+func (c *NASClient) eventsBatchURL() string {
+	endpoint := *c.baseURL
+	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/api/nas/events/batch"
+	endpoint.RawQuery = ""
 	endpoint.Fragment = ""
 	return endpoint.String()
 }

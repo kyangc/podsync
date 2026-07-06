@@ -78,6 +78,50 @@ func TestTombstoneSyncerRejectsHasMoreWithoutCursorAdvance(t *testing.T) {
 	assert.Empty(t, store.applied)
 }
 
+func TestTombstoneSyncerRecordsFetchedAndAppliedEvents(t *testing.T) {
+	events := &recordingRemoteEventSink{}
+	fetcher := &fakeTombstoneFetcher{batches: []*model.RemoteTombstoneBatch{{
+		Cursor:     5,
+		NextCursor: 6,
+		Changes: []model.RemoteTombstoneChange{{
+			Sequence:       6,
+			FeedID:         "feed",
+			LocalEpisodeID: "episode",
+			Status:         model.RemoteEpisodeStatusHidden,
+			Action:         model.RemoteTombstoneActionHide,
+		}},
+	}}}
+	store := &fakeTombstoneStore{cursor: 5}
+	syncer := &TombstoneSyncer{Fetcher: fetcher, Store: store, Events: events}
+
+	err := syncer.SyncOnce(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, events.events, 2)
+	assert.Equal(t, model.RemoteEventTombstoneFetched, events.events[0].Type)
+	assert.Equal(t, "changes=1", events.events[0].Message)
+	assert.Equal(t, model.RemoteEventTombstoneApplied, events.events[1].Type)
+	assert.Equal(t, "next_cursor=6", events.events[1].Message)
+	assert.Equal(t, int64(6), store.cursor)
+}
+
+func TestTombstoneSyncerRecordsFailedEvent(t *testing.T) {
+	events := &recordingRemoteEventSink{}
+	fetchErr := errors.New("worker unavailable")
+	fetcher := &fakeTombstoneFetcher{err: fetchErr}
+	store := &fakeTombstoneStore{cursor: 5}
+	syncer := &TombstoneSyncer{Fetcher: fetcher, Store: store, Events: events}
+
+	err := syncer.SyncOnce(context.Background())
+
+	require.ErrorIs(t, err, fetchErr)
+	require.Len(t, events.events, 1)
+	assert.Equal(t, model.RemoteEventTombstoneApplyFailed, events.events[0].Type)
+	assert.Equal(t, model.RemoteEventError, events.events[0].Level)
+	assert.Equal(t, "tombstone_sync_failed", events.events[0].ErrorCode)
+	assert.Equal(t, int64(5), store.cursor)
+}
+
 type fakeTombstoneFetcher struct {
 	batches []*model.RemoteTombstoneBatch
 	err     error
