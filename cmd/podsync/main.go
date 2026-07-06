@@ -195,6 +195,11 @@ func main() {
 	} else if remoteProcessor == nil && cfg.Remote.Enabled {
 		log.Warn("remote publish disabled: R2 requires local storage and complete [r2] config")
 	}
+	remoteTombstoneSyncer, err := buildRemoteTombstoneSyncer(cfg, database, newRemoteTombstoneFetcher)
+	if err != nil {
+		log.WithError(err).Warn("remote tombstone sync disabled")
+	}
+	syncRemoteTombstonesOnce(ctx, remoteTombstoneSyncer)
 
 	// In Headless mode, do one round of feed updates and quit
 	if opts.Headless {
@@ -227,6 +232,11 @@ func main() {
 	if remoteProcessor != nil {
 		group.Go(func() error {
 			return runRemotePublishLoop(ctx, remoteProcessor, defaultRemotePublishInterval)
+		})
+	}
+	if remoteTombstoneSyncer != nil {
+		group.Go(func() error {
+			return runRemoteTombstoneLoop(ctx, remoteTombstoneSyncer, defaultRemoteTombstoneInterval)
 		})
 	}
 
@@ -302,6 +312,7 @@ func main() {
 				activeFeeds = resolved.Feeds
 				entriesMu.Unlock()
 
+				syncRemoteTombstonesOnce(ctx, remoteTombstoneSyncer)
 				if err := writeAcceptedRemoteConfigCache(cfg, resolved); err != nil {
 					log.WithError(err).Warn("failed to write accepted remote config cache")
 				}

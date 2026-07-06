@@ -13,6 +13,73 @@ const (
 	RemotePublishFailed    = RemotePublishStatus("failed")
 )
 
+type RemoteEpisodeStatus string
+
+const (
+	RemoteEpisodeStatusPending       = RemoteEpisodeStatus("pending")
+	RemoteEpisodeStatusVisible       = RemoteEpisodeStatus("visible")
+	RemoteEpisodeStatusHidden        = RemoteEpisodeStatus("hidden")
+	RemoteEpisodeStatusDeletePending = RemoteEpisodeStatus("delete_pending")
+	RemoteEpisodeStatusPurged        = RemoteEpisodeStatus("purged")
+)
+
+type RemoteTombstoneAction string
+
+const (
+	RemoteTombstoneActionHide    = RemoteTombstoneAction("hide")
+	RemoteTombstoneActionDelete  = RemoteTombstoneAction("delete")
+	RemoteTombstoneActionPurge   = RemoteTombstoneAction("purge")
+	RemoteTombstoneActionRestore = RemoteTombstoneAction("restore")
+)
+
+type RemoteTombstoneChange struct {
+	Sequence       int64                 `json:"sequence"`
+	FeedID         string                `json:"feed_id"`
+	LocalEpisodeID string                `json:"local_episode_id"`
+	Status         RemoteEpisodeStatus   `json:"status"`
+	Action         RemoteTombstoneAction `json:"action"`
+	CreatedAt      string                `json:"created_at"`
+}
+
+type RemoteTombstoneBatch struct {
+	Cursor     int64                   `json:"cursor"`
+	NextCursor int64                   `json:"next_cursor"`
+	HasMore    bool                    `json:"has_more"`
+	Changes    []RemoteTombstoneChange `json:"changes"`
+}
+
+func (s RemoteEpisodeStatus) IsTombstoned() bool {
+	return s == RemoteEpisodeStatusHidden ||
+		s == RemoteEpisodeStatusDeletePending ||
+		s == RemoteEpisodeStatusPurged
+}
+
+func (s RemoteEpisodeStatus) IsValidTombstoneResponseStatus() bool {
+	return s == RemoteEpisodeStatusVisible || s.IsTombstoned()
+}
+
+func (a RemoteTombstoneAction) IsValid() bool {
+	return a == RemoteTombstoneActionHide ||
+		a == RemoteTombstoneActionDelete ||
+		a == RemoteTombstoneActionPurge ||
+		a == RemoteTombstoneActionRestore
+}
+
+func (c RemoteTombstoneChange) HasConsistentStatusAction() bool {
+	switch c.Status {
+	case RemoteEpisodeStatusVisible:
+		return c.Action == RemoteTombstoneActionRestore
+	case RemoteEpisodeStatusHidden:
+		return c.Action == RemoteTombstoneActionHide
+	case RemoteEpisodeStatusDeletePending:
+		return c.Action == RemoteTombstoneActionDelete
+	case RemoteEpisodeStatusPurged:
+		return c.Action == RemoteTombstoneActionPurge
+	default:
+		return false
+	}
+}
+
 type RemotePublishTask struct {
 	ID              string              `json:"id"`
 	FeedID          string              `json:"feed_id"`

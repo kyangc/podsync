@@ -23,6 +23,9 @@ const (
 
 	remotePublishTaskPrefix = "remote/publish/"
 	remotePublishTaskPath   = "remote/publish/%s"
+
+	remoteTombstoneCursorPath  = "remote/tombstone/cursor"
+	remoteTombstoneEpisodePath = "remote/tombstone/episode/%s"
 )
 
 // BadgerConfig represents BadgerDB configuration parameters

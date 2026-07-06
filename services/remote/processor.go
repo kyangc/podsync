@@ -92,6 +92,9 @@ func (p *Processor) processOne(ctx context.Context, task *model.RemotePublishTas
 
 	prepared, err := p.Outbox.PrepareRemotePublishAttempt(ctx, task.ID, r2Key, assetToken, mimeType, now)
 	if err != nil {
+		if errors.Is(err, model.ErrRemoteEpisodeTombstoned) {
+			return nil
+		}
 		return err
 	}
 	if err := p.Publisher.Upload(ctx, prepared, reader); err != nil {

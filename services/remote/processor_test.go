@@ -199,6 +199,75 @@ func TestProcessorMarksUnsafeMediaPathAsFailed(t *testing.T) {
 	}
 }
 
+func TestProcessorDoesNotUploadWhenPrepareFindsTombstone(t *testing.T) {
+	root := t.TempDir()
+	task := newProcessorTask("feed", "episode")
+	writeProcessorMedia(t, root, task.MediaPath, []byte("audio bytes"))
+	outbox := &fakeOutbox{
+		due:        []*model.RemotePublishTask{task},
+		prepareErr: model.ErrRemoteEpisodeTombstoned,
+	}
+	publisher := &fakeProcessorPublisher{}
+	processor := &Processor{
+		Outbox:    outbox,
+		Publisher: publisher,
+		Store:     LocalMediaStore{Root: root},
+	}
+
+	err := processor.ProcessDue(context.Background())
+
+	require.NoError(t, err)
+	assert.Empty(t, publisher.uploads)
+	assert.Empty(t, outbox.completed)
+	assert.Empty(t, outbox.retried)
+	assert.Empty(t, outbox.deferred)
+	assert.Empty(t, outbox.failed)
+}
+
+func TestProcessorPreservesTombstoneFailureWhenMediaMissingAfterDue(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	database, err := poddb.NewBadger(&poddb.Config{Dir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, database.Close())
+	})
+	task := newProcessorTask("feed", "episode")
+	require.NoError(t, database.EnqueueRemotePublishTask(ctx, task))
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	store := hookMediaStore{
+		store: LocalMediaStore{Root: root},
+		beforeOpen: func() {
+			require.NoError(t, database.ApplyRemoteTombstones(ctx, &model.RemoteTombstoneBatch{
+				Cursor:     0,
+				NextCursor: 1,
+				Changes: []model.RemoteTombstoneChange{{
+					Sequence:       1,
+					FeedID:         "feed",
+					LocalEpisodeID: "episode",
+					Status:         model.RemoteEpisodeStatusHidden,
+					Action:         model.RemoteTombstoneActionHide,
+				}},
+			}, now))
+		},
+	}
+	processor := &Processor{
+		Outbox:    database,
+		Publisher: &fakeProcessorPublisher{},
+		Store:     store,
+		Limit:     10,
+		Now:       func() time.Time { return now },
+	}
+
+	err = processor.ProcessDue(ctx)
+
+	require.NoError(t, err)
+	got, err := database.GetRemotePublishTask(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, model.RemotePublishFailed, got.Status)
+	assert.Equal(t, model.ErrRemoteEpisodeTombstoned.Error(), got.LastError)
+}
+
 func TestProcessorRecordsOpenErrorAsRetryable(t *testing.T) {
 	task := newProcessorTask("feed", "episode")
 	outbox := &fakeOutbox{due: []*model.RemotePublishTask{task}}
@@ -362,6 +431,7 @@ type fakeOutbox struct {
 	deferErrors       []error
 	failed            []string
 	failErrors        []error
+	prepareErr        error
 }
 
 func (o *fakeOutbox) DueRemotePublishTasks(_ context.Context, _ time.Time, _ int) ([]*model.RemotePublishTask, error) {
@@ -369,6 +439,9 @@ func (o *fakeOutbox) DueRemotePublishTasks(_ context.Context, _ time.Time, _ int
 }
 
 func (o *fakeOutbox) PrepareRemotePublishAttempt(_ context.Context, id string, r2Key string, assetToken string, mimeType string, now time.Time) (*model.RemotePublishTask, error) {
+	if o.prepareErr != nil {
+		return nil, o.prepareErr
+	}
 	for _, task := range o.due {
 		if task.ID != id {
 			continue
@@ -448,6 +521,18 @@ type staticMediaStore struct {
 
 func (s staticMediaStore) Open(string) (ReadSeekCloser, error) {
 	return s.reader, nil
+}
+
+type hookMediaStore struct {
+	store      MediaStore
+	beforeOpen func()
+}
+
+func (s hookMediaStore) Open(name string) (ReadSeekCloser, error) {
+	if s.beforeOpen != nil {
+		s.beforeOpen()
+	}
+	return s.store.Open(name)
 }
 
 type errorReadSeekCloser struct {

@@ -5,7 +5,8 @@ import (
 )
 
 var (
-	ErrAlreadyExists = errors.New("object already exists")
-	ErrNotFound      = errors.New("not found")
-	ErrQuotaExceeded = errors.New("query limit is exceeded")
+	ErrAlreadyExists           = errors.New("object already exists")
+	ErrNotFound                = errors.New("not found")
+	ErrQuotaExceeded           = errors.New("query limit is exceeded")
+	ErrRemoteEpisodeTombstoned = errors.New("remote episode tombstoned")
 )

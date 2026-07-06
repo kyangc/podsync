@@ -33,10 +33,30 @@ func (b *Badger) EnqueueRemotePublishTask(_ context.Context, task *model.RemoteP
 
 	key := b.getKey(remotePublishTaskPath, newTask.ID)
 	return b.db.Update(func(txn *badger.Txn) error {
+		tombstoned, err := b.remoteEpisodeTombstoned(txn, task.FeedID, task.LocalEpisodeID)
+		if err != nil {
+			return err
+		}
+		if tombstoned {
+			return nil
+		}
+
 		var existing model.RemotePublishTask
-		err := b.getObj(txn, key, &existing)
+		err = b.getObj(txn, key, &existing)
 		switch err {
 		case nil:
+			if existing.Status == model.RemotePublishFailed && existing.LastError == model.ErrRemoteEpisodeTombstoned.Error() {
+				existing.Status = model.RemotePublishPending
+				existing.Attempts = 0
+				existing.NextAttemptAt = now
+				existing.LastError = ""
+				existing.R2Key = ""
+				existing.AssetToken = ""
+				existing.MimeType = ""
+				existing.ServerStatus = ""
+				existing.UpsertedAt = time.Time{}
+				existing.CompletedAt = time.Time{}
+			}
 			existing.Provider = task.Provider
 			existing.SourceEpisodeID = task.SourceEpisodeID
 			existing.MediaPath = task.MediaPath
@@ -89,6 +109,13 @@ func (b *Badger) DueRemotePublishTasks(_ context.Context, now time.Time, limit i
 			if !task.NextAttemptAt.IsZero() && task.NextAttemptAt.After(now) {
 				return nil
 			}
+			tombstoned, err := b.remoteEpisodeTombstoned(txn, task.FeedID, task.LocalEpisodeID)
+			if err != nil {
+				return err
+			}
+			if tombstoned {
+				return nil
+			}
 			tasks = append(tasks, task)
 			return nil
 		})
@@ -98,9 +125,21 @@ func (b *Badger) DueRemotePublishTasks(_ context.Context, now time.Time, limit i
 
 func (b *Badger) PrepareRemotePublishAttempt(_ context.Context, id string, r2Key string, assetToken string, mimeType string, now time.Time) (*model.RemotePublishTask, error) {
 	var task model.RemotePublishTask
+	tombstoned := false
 	err := b.db.Update(func(txn *badger.Txn) error {
 		if err := b.getRemotePublishTask(txn, id, &task); err != nil {
 			return err
+		}
+		isTombstoned, err := b.remoteEpisodeTombstoned(txn, task.FeedID, task.LocalEpisodeID)
+		if err != nil {
+			return err
+		}
+		if isTombstoned {
+			if err := b.failPendingRemotePublishTask(txn, id, now); err != nil {
+				return err
+			}
+			tombstoned = true
+			return nil
 		}
 		if task.Status != model.RemotePublishPending {
 			return model.ErrNotFound
@@ -113,14 +152,26 @@ func (b *Badger) PrepareRemotePublishAttempt(_ context.Context, id string, r2Key
 		task.UpdatedAt = now
 		return b.setObj(txn, b.getKey(remotePublishTaskPath, id), &task, true)
 	})
+	if err == nil && tombstoned {
+		return &task, model.ErrRemoteEpisodeTombstoned
+	}
 	return &task, err
 }
 
 func (b *Badger) CompleteRemotePublishTask(_ context.Context, id string, serverStatus string, now time.Time) error {
-	return b.db.Update(func(txn *badger.Txn) error {
+	tombstoned := false
+	err := b.db.Update(func(txn *badger.Txn) error {
 		var task model.RemotePublishTask
 		if err := b.getRemotePublishTask(txn, id, &task); err != nil {
 			return err
+		}
+		handled, err := b.keepRemotePublishTombstoned(txn, &task, now)
+		if err != nil {
+			return err
+		}
+		if handled {
+			tombstoned = true
+			return nil
 		}
 		task.Status = model.RemotePublishSucceeded
 		task.LastError = ""
@@ -133,13 +184,29 @@ func (b *Badger) CompleteRemotePublishTask(_ context.Context, id string, serverS
 		task.UpdatedAt = now
 		return b.setObj(txn, b.getKey(remotePublishTaskPath, id), &task, true)
 	})
+	if err != nil {
+		return err
+	}
+	if tombstoned {
+		return model.ErrRemoteEpisodeTombstoned
+	}
+	return nil
 }
 
 func (b *Badger) RetryRemotePublishTask(_ context.Context, id string, cause error, now time.Time) error {
-	return b.db.Update(func(txn *badger.Txn) error {
+	tombstoned := false
+	err := b.db.Update(func(txn *badger.Txn) error {
 		var task model.RemotePublishTask
 		if err := b.getRemotePublishTask(txn, id, &task); err != nil {
 			return err
+		}
+		handled, err := b.keepRemotePublishTombstoned(txn, &task, now)
+		if err != nil {
+			return err
+		}
+		if handled {
+			tombstoned = true
+			return nil
 		}
 		task.Status = model.RemotePublishPending
 		task.LastError = remotePublishErrorMessage(cause)
@@ -147,13 +214,29 @@ func (b *Badger) RetryRemotePublishTask(_ context.Context, id string, cause erro
 		task.UpdatedAt = now
 		return b.setObj(txn, b.getKey(remotePublishTaskPath, id), &task, true)
 	})
+	if err != nil {
+		return err
+	}
+	if tombstoned {
+		return model.ErrRemoteEpisodeTombstoned
+	}
+	return nil
 }
 
 func (b *Badger) DeferRemotePublishTask(_ context.Context, id string, cause error, now time.Time) error {
-	return b.db.Update(func(txn *badger.Txn) error {
+	tombstoned := false
+	err := b.db.Update(func(txn *badger.Txn) error {
 		var task model.RemotePublishTask
 		if err := b.getRemotePublishTask(txn, id, &task); err != nil {
 			return err
+		}
+		handled, err := b.keepRemotePublishTombstoned(txn, &task, now)
+		if err != nil {
+			return err
+		}
+		if handled {
+			tombstoned = true
+			return nil
 		}
 		if task.Status != model.RemotePublishPending {
 			return model.ErrNotFound
@@ -164,13 +247,32 @@ func (b *Badger) DeferRemotePublishTask(_ context.Context, id string, cause erro
 		task.UpdatedAt = now
 		return b.setObj(txn, b.getKey(remotePublishTaskPath, id), &task, true)
 	})
+	if err != nil {
+		return err
+	}
+	if tombstoned {
+		return model.ErrRemoteEpisodeTombstoned
+	}
+	return nil
 }
 
 func (b *Badger) FailRemotePublishTask(_ context.Context, id string, cause error, now time.Time) error {
-	return b.db.Update(func(txn *badger.Txn) error {
+	tombstoned := false
+	err := b.db.Update(func(txn *badger.Txn) error {
 		var task model.RemotePublishTask
 		if err := b.getRemotePublishTask(txn, id, &task); err != nil {
 			return err
+		}
+		handled, err := b.keepRemotePublishTombstoned(txn, &task, now)
+		if err != nil {
+			return err
+		}
+		if handled {
+			tombstoned = true
+			return nil
+		}
+		if task.Status != model.RemotePublishPending {
+			return model.ErrNotFound
 		}
 		task.Status = model.RemotePublishFailed
 		task.LastError = remotePublishErrorMessage(cause)
@@ -178,6 +280,13 @@ func (b *Badger) FailRemotePublishTask(_ context.Context, id string, cause error
 		task.UpdatedAt = now
 		return b.setObj(txn, b.getKey(remotePublishTaskPath, id), &task, true)
 	})
+	if err != nil {
+		return err
+	}
+	if tombstoned {
+		return model.ErrRemoteEpisodeTombstoned
+	}
+	return nil
 }
 
 func (b *Badger) WalkRemotePublishTasks(_ context.Context, status model.RemotePublishStatus, cb func(*model.RemotePublishTask) error) error {
@@ -200,6 +309,40 @@ func (b *Badger) WalkRemotePublishTasks(_ context.Context, status model.RemotePu
 
 func (b *Badger) getRemotePublishTask(txn *badger.Txn, id string, task *model.RemotePublishTask) error {
 	return b.getObj(txn, b.getKey(remotePublishTaskPath, id), task)
+}
+
+func (b *Badger) failPendingRemotePublishTask(txn *badger.Txn, id string, now time.Time) error {
+	var task model.RemotePublishTask
+	err := b.getRemotePublishTask(txn, id, &task)
+	if err == model.ErrNotFound {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if task.Status != model.RemotePublishPending {
+		return nil
+	}
+	task.Status = model.RemotePublishFailed
+	task.LastError = model.ErrRemoteEpisodeTombstoned.Error()
+	task.NextAttemptAt = time.Time{}
+	task.UpdatedAt = now
+	return b.setObj(txn, b.getKey(remotePublishTaskPath, id), &task, true)
+}
+
+func (b *Badger) keepRemotePublishTombstoned(txn *badger.Txn, task *model.RemotePublishTask, now time.Time) (bool, error) {
+	tombstoned, err := b.remoteEpisodeTombstoned(txn, task.FeedID, task.LocalEpisodeID)
+	if err != nil {
+		return false, err
+	}
+	if !tombstoned {
+		return false, nil
+	}
+	task.Status = model.RemotePublishFailed
+	task.LastError = model.ErrRemoteEpisodeTombstoned.Error()
+	task.NextAttemptAt = time.Time{}
+	task.UpdatedAt = now
+	return true, b.setObj(txn, b.getKey(remotePublishTaskPath, task.ID), task, true)
 }
 
 func remotePublishErrorMessage(cause error) string {

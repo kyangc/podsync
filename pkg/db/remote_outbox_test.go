@@ -422,6 +422,132 @@ func TestBadger_EnqueueRemotePublishTaskValidatesRequiredFields(t *testing.T) {
 	}
 }
 
+func TestBadgerEnqueueRemotePublishTaskSkipsTombstonedEpisode(t *testing.T) {
+	ctx := context.Background()
+	db := newTestBadger(t)
+	require.NoError(t, db.ApplyRemoteTombstones(ctx, remoteTombstoneBatch(0, 1, remoteTombstoneChange(1, "feed", "episode", model.RemoteEpisodeStatusHidden, model.RemoteTombstoneActionHide)), time.Now().UTC()))
+
+	task := newRemotePublishTask("feed", "episode")
+	require.NoError(t, db.EnqueueRemotePublishTask(ctx, task))
+
+	_, err := db.GetRemotePublishTask(ctx, model.RemotePublishTaskID("feed", "episode"))
+	require.Error(t, err)
+	assert.Equal(t, model.ErrNotFound, err)
+}
+
+func TestBadgerEnqueueRemotePublishTaskResetsRestoredTombstoneFailure(t *testing.T) {
+	ctx := context.Background()
+	db := newTestBadger(t)
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	task := newRemotePublishTask("feed", "episode")
+	require.NoError(t, db.EnqueueRemotePublishTask(ctx, task))
+	require.NoError(t, db.ApplyRemoteTombstones(ctx, remoteTombstoneBatch(0, 1, remoteTombstoneChange(1, "feed", "episode", model.RemoteEpisodeStatusHidden, model.RemoteTombstoneActionHide)), now))
+	require.NoError(t, db.ApplyRemoteTombstones(ctx, remoteTombstoneBatch(1, 2, remoteTombstoneChange(2, "feed", "episode", model.RemoteEpisodeStatusVisible, model.RemoteTombstoneActionRestore)), now))
+
+	updated := newRemotePublishTask("feed", "episode")
+	updated.Title = "Updated"
+	require.NoError(t, db.EnqueueRemotePublishTask(ctx, updated))
+
+	got, err := db.GetRemotePublishTask(ctx, model.RemotePublishTaskID("feed", "episode"))
+	require.NoError(t, err)
+	assert.Equal(t, model.RemotePublishPending, got.Status)
+	assert.Empty(t, got.LastError)
+	assert.Equal(t, 0, got.Attempts)
+	assert.Empty(t, got.R2Key)
+	assert.Equal(t, "Updated", got.Title)
+}
+
+func TestBadgerDueRemotePublishTasksSkipsTombstonedEpisodes(t *testing.T) {
+	ctx := context.Background()
+	db := newTestBadger(t)
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	task := seededRemotePublishTask("feed", "episode", model.RemotePublishPending, now)
+	require.NoError(t, db.seedRemotePublishTask(task))
+	require.NoError(t, db.ApplyRemoteTombstones(ctx, remoteTombstoneBatch(0, 1, remoteTombstoneChange(1, "feed", "episode", model.RemoteEpisodeStatusHidden, model.RemoteTombstoneActionHide)), now))
+	require.NoError(t, db.seedRemotePublishTask(task))
+
+	tasks, err := db.DueRemotePublishTasks(ctx, now, 10)
+
+	require.NoError(t, err)
+	assert.Empty(t, tasks)
+}
+
+func TestBadgerPrepareRemotePublishAttemptFailsTombstonedTask(t *testing.T) {
+	ctx := context.Background()
+	db := newTestBadger(t)
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	task := seededRemotePublishTask("feed", "episode", model.RemotePublishPending, now)
+	require.NoError(t, db.seedRemotePublishTask(task))
+	require.NoError(t, db.ApplyRemoteTombstones(ctx, remoteTombstoneBatch(0, 1, remoteTombstoneChange(1, "feed", "episode", model.RemoteEpisodeStatusHidden, model.RemoteTombstoneActionHide)), now))
+	require.NoError(t, db.seedRemotePublishTask(task))
+
+	_, err := db.PrepareRemotePublishAttempt(ctx, task.ID, "key", "token", "audio/mpeg", now)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, model.ErrRemoteEpisodeTombstoned)
+	got, err := db.GetRemotePublishTask(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, model.RemotePublishFailed, got.Status)
+	assert.Equal(t, model.ErrRemoteEpisodeTombstoned.Error(), got.LastError)
+}
+
+func TestBadgerRemotePublishTerminalMutationsPreserveTombstone(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(context.Context, *Badger, string, time.Time) error
+	}{
+		{
+			name: "complete",
+			run: func(ctx context.Context, db *Badger, id string, now time.Time) error {
+				return db.CompleteRemotePublishTask(ctx, id, "visible", now)
+			},
+		},
+		{
+			name: "retry",
+			run: func(ctx context.Context, db *Badger, id string, now time.Time) error {
+				return db.RetryRemotePublishTask(ctx, id, assert.AnError, now)
+			},
+		},
+		{
+			name: "defer",
+			run: func(ctx context.Context, db *Badger, id string, now time.Time) error {
+				return db.DeferRemotePublishTask(ctx, id, assert.AnError, now)
+			},
+		},
+		{
+			name: "fail",
+			run: func(ctx context.Context, db *Badger, id string, now time.Time) error {
+				return db.FailRemotePublishTask(ctx, id, assert.AnError, now)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := newTestBadger(t)
+			now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+			task := seededRemotePublishTask("feed", "episode", model.RemotePublishPending, now)
+			task.Attempts = 1
+			task.R2Key = "audio/feed/episode-token.mp3"
+			task.AssetToken = "token"
+			task.MimeType = "audio/mpeg"
+			require.NoError(t, db.seedRemotePublishTask(task))
+			require.NoError(t, db.ApplyRemoteTombstones(ctx, remoteTombstoneBatch(0, 1, remoteTombstoneChange(1, "feed", "episode", model.RemoteEpisodeStatusHidden, model.RemoteTombstoneActionHide)), now))
+
+			err := tt.run(ctx, db, task.ID, now)
+
+			require.ErrorIs(t, err, model.ErrRemoteEpisodeTombstoned)
+			got, err := db.GetRemotePublishTask(ctx, task.ID)
+			require.NoError(t, err)
+			assert.Equal(t, model.RemotePublishFailed, got.Status)
+			assert.Equal(t, model.ErrRemoteEpisodeTombstoned.Error(), got.LastError)
+			assert.Empty(t, got.ServerStatus)
+			assert.Zero(t, got.CompletedAt)
+		})
+	}
+}
+
 func newTestBadger(t *testing.T) *Badger {
 	t.Helper()
 
