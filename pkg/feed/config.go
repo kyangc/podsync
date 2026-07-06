@@ -38,6 +38,8 @@ type Config struct {
 	Custom Custom `toml:"custom"`
 	// List of additional youtube-dl arguments passed at download time
 	YouTubeDLArgs []string `toml:"youtube_dl_args"`
+	// CookieProfile references a local cookie profile from [cookie_profiles].
+	CookieProfile string `toml:"cookie_profile"`
 	// Bilibili-specific feed options
 	Bilibili BilibiliConfig `toml:"bilibili"`
 	// Post episode download hooks - executed after each episode is successfully downloaded

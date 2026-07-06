@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/pelletier/go-toml"
@@ -38,6 +40,41 @@ type Config struct {
 	Downloader ytdl.Config `toml:"downloader"`
 	// Global cleanup policy applied to feeds that don't specify their own cleanup policy
 	Cleanup *feed.Cleanup `toml:"cleanup"`
+	// Remote controls whether feed definitions are loaded from a remote control plane.
+	Remote RemoteConfig `toml:"remote"`
+	// R2 is parsed for later remote publish phases.
+	R2 R2Config `toml:"r2"`
+	// CookieProfiles maps remote feed cookie_profile references to local cookie files.
+	CookieProfiles map[string]CookieProfile `toml:"cookie_profiles"`
+	// LocalFeeds preserves original local feeds for remote-mode emergency fallback.
+	LocalFeeds map[string]*feed.Config `toml:"-"`
+}
+
+const (
+	defaultRemoteConfigRefreshInterval = 5 * time.Minute
+	defaultRemoteFetchTimeout          = 30 * time.Second
+)
+
+type RemoteConfig struct {
+	Enabled               bool          `toml:"enabled"`
+	BaseURL               string        `toml:"base_url"`
+	Token                 string        `toml:"token"`
+	CachePath             string        `toml:"cache_path"`
+	ConfigRefreshInterval time.Duration `toml:"config_refresh_interval"`
+}
+
+type R2Config struct {
+	Endpoint        string `toml:"endpoint"`
+	Bucket          string `toml:"bucket"`
+	Prefix          string `toml:"prefix"`
+	AccessKeyID     string `toml:"access_key_id"`
+	SecretAccessKey string `toml:"secret_access_key"`
+}
+
+type CookieProfile struct {
+	Provider model.Provider `toml:"provider"`
+	Path     string         `toml:"path"`
+	ReadOnly bool           `toml:"readonly"`
 }
 
 type Log struct {
@@ -67,21 +104,23 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, errors.Wrap(err, "failed to unmarshal toml")
 	}
 
-	for id, f := range config.Feeds {
-		f.ID = id
-	}
-
+	applyFeedIDs(config.Feeds)
 	config.applyDefaults(path)
 	config.applyEnv()
 
-	if err := config.validate(); err != nil {
+	if err := config.applyCookieProfiles(config.Feeds); err != nil {
 		return nil, err
 	}
+
+	if err := config.validate(path); err != nil {
+		return nil, err
+	}
+	config.LocalFeeds = cloneFeedMap(config.Feeds)
 
 	return &config, nil
 }
 
-func (c *Config) validate() error {
+func (c *Config) validate(configPath string) error {
 	var result *multierror.Error
 
 	if c.Server.DataDir != "" {
@@ -117,11 +156,39 @@ func (c *Config) validate() error {
 		result = multierror.Append(result, errors.Errorf("unknown storage type: %s", c.Storage.Type))
 	}
 
-	if len(c.Feeds) == 0 {
+	if len(c.Feeds) == 0 && !c.Remote.Enabled {
 		result = multierror.Append(result, errors.New("at least one feed must be specified"))
 	}
 
-	for id, f := range c.Feeds {
+	if c.Remote.Enabled {
+		if c.Remote.BaseURL == "" {
+			result = multierror.Append(result, errors.New("remote.base_url is required when remote is enabled"))
+		} else if parsed, err := url.Parse(c.Remote.BaseURL); err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			result = multierror.Append(result, errors.New("remote.base_url must be an absolute URL"))
+		}
+		if c.Remote.Token == "" {
+			result = multierror.Append(result, errors.New("remote.token is required when remote is enabled"))
+		}
+		if c.Remote.CachePath == "" {
+			result = multierror.Append(result, errors.New("remote.cache_path is required when remote is enabled"))
+		} else if samePath(c.Remote.CachePath, configPath) {
+			result = multierror.Append(result, errors.New("remote.cache_path must not be the main config file"))
+		}
+		if c.Remote.ConfigRefreshInterval <= 0 {
+			result = multierror.Append(result, errors.New("remote.config_refresh_interval must be positive"))
+		}
+	}
+
+	if err := validateFeedMap(c.Feeds); err != nil {
+		result = multierror.Append(result, err)
+	}
+
+	return result.ErrorOrNil()
+}
+
+func validateFeedMap(feeds map[string]*feed.Config) error {
+	var result *multierror.Error
+	for id, f := range feeds {
 		if f.URL == "" {
 			result = multierror.Append(result, errors.Errorf("URL is required for %q", id))
 		}
@@ -134,7 +201,6 @@ func (c *Config) validate() error {
 			}
 		}
 	}
-
 	return result.ErrorOrNil()
 }
 
@@ -167,7 +233,15 @@ func (c *Config) applyDefaults(configPath string) {
 		c.Database.Dir = filepath.Join(filepath.Dir(configPath), "db")
 	}
 
-	for _, _feed := range c.Feeds {
+	if c.Remote.Enabled && c.Remote.ConfigRefreshInterval == 0 {
+		c.Remote.ConfigRefreshInterval = defaultRemoteConfigRefreshInterval
+	}
+
+	c.applyFeedDefaults(c.Feeds)
+}
+
+func (c *Config) applyFeedDefaults(feeds map[string]*feed.Config) {
+	for _, _feed := range feeds {
 		if _feed.UpdatePeriod == 0 {
 			_feed.UpdatePeriod = model.DefaultUpdatePeriod
 		}
@@ -197,6 +271,64 @@ func (c *Config) applyDefaults(configPath string) {
 			_feed.Clean = c.Cleanup
 		}
 	}
+}
+
+func applyFeedIDs(feeds map[string]*feed.Config) {
+	for id, f := range feeds {
+		f.ID = id
+	}
+}
+
+func cloneFeedMap(feeds map[string]*feed.Config) map[string]*feed.Config {
+	clone := make(map[string]*feed.Config, len(feeds))
+	for id, cfg := range feeds {
+		clone[id] = cfg
+	}
+	return clone
+}
+
+func (c *Config) finalizeFeeds(feeds map[string]*feed.Config) error {
+	if feeds == nil {
+		feeds = map[string]*feed.Config{}
+	}
+	applyFeedIDs(feeds)
+	c.applyFeedDefaults(feeds)
+	if err := c.applyCookieProfiles(feeds); err != nil {
+		return err
+	}
+	return validateFeedMap(feeds)
+}
+
+func (c *Config) applyCookieProfiles(feeds map[string]*feed.Config) error {
+	for id, f := range feeds {
+		if f.CookieProfile == "" {
+			continue
+		}
+		profile, ok := c.CookieProfiles[f.CookieProfile]
+		if !ok {
+			return errors.Errorf("cookie profile %q referenced by %q is not configured", f.CookieProfile, id)
+		}
+		if profile.Path == "" {
+			return errors.Errorf("cookie profile %q referenced by %q has empty path", f.CookieProfile, id)
+		}
+		if profile.Provider == model.ProviderBilibili {
+			if f.Bilibili.CookiesFile == "" {
+				f.Bilibili.CookiesFile = profile.Path
+			}
+			continue
+		}
+		return errors.Errorf("cookie profile %q for %q uses unsupported provider %q", f.CookieProfile, id, profile.Provider)
+	}
+	return nil
+}
+
+func samePath(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return filepath.Clean(absA) == filepath.Clean(absB)
 }
 
 func (c *Config) applyEnv() {

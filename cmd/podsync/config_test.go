@@ -170,6 +170,181 @@ config_refresh_interval = "5m"
 	assert.Equal(t, baseFeed.Clean.KeepLast, remoteFeed.Clean.KeepLast)
 }
 
+func TestLoadRemoteConfigAllowsNoLocalFeeds(t *testing.T) {
+	const file = `
+[server]
+data_dir = "/data"
+
+[remote]
+enabled = true
+base_url = "https://podcast.example.com"
+token = "secret"
+cache_path = "/tmp/podsync-remote.toml"
+`
+	path := setup(t, file)
+	defer os.Remove(path)
+
+	config, err := LoadConfig(path)
+	require.NoError(t, err)
+	require.NotNil(t, config)
+
+	assert.True(t, config.Remote.Enabled)
+	assert.Equal(t, "https://podcast.example.com", config.Remote.BaseURL)
+	assert.Equal(t, "secret", config.Remote.Token)
+	assert.Equal(t, "/tmp/podsync-remote.toml", config.Remote.CachePath)
+	assert.Equal(t, defaultRemoteConfigRefreshInterval, config.Remote.ConfigRefreshInterval)
+	assert.Empty(t, config.Feeds)
+	assert.Empty(t, config.LocalFeeds)
+}
+
+func TestLoadRemoteConfigRequiresConnectionFields(t *testing.T) {
+	const file = `
+[server]
+data_dir = "/data"
+
+[remote]
+enabled = true
+`
+	path := setup(t, file)
+	defer os.Remove(path)
+
+	_, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "remote.base_url is required")
+	assert.Contains(t, err.Error(), "remote.token is required")
+	assert.Contains(t, err.Error(), "remote.cache_path is required")
+}
+
+func TestLoadRemoteConfigRejectsRelativeBaseURL(t *testing.T) {
+	const file = `
+[server]
+data_dir = "/data"
+
+[remote]
+enabled = true
+base_url = "podcast.example.com"
+token = "secret"
+cache_path = "/tmp/podsync-remote.toml"
+`
+	path := setup(t, file)
+	defer os.Remove(path)
+
+	_, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "remote.base_url must be an absolute URL")
+}
+
+func TestLoadRemoteConfigRejectsCachePathEqualToConfigPath(t *testing.T) {
+	path := setup(t, "")
+	defer os.Remove(path)
+	file := `
+[server]
+data_dir = "/data"
+
+[remote]
+enabled = true
+base_url = "https://podcast.example.com"
+token = "secret"
+cache_path = "` + path + `"
+`
+	require.NoError(t, os.WriteFile(path, []byte(file), 0o600))
+
+	_, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "remote.cache_path must not be the main config file")
+}
+
+func TestCookieProfileMapsBilibiliCookiesFile(t *testing.T) {
+	const file = `
+[server]
+data_dir = "/data"
+
+[cookie_profiles.main]
+provider = "bilibili"
+path = "/app/config/bilibili-cookies.txt"
+readonly = true
+
+[feeds]
+  [feeds.bili]
+  url = "https://space.bilibili.com/10835521"
+  cookie_profile = "main"
+`
+	path := setup(t, file)
+	defer os.Remove(path)
+
+	config, err := LoadConfig(path)
+	require.NoError(t, err)
+	require.Equal(t, "/app/config/bilibili-cookies.txt", config.Feeds["bili"].Bilibili.CookiesFile)
+	assert.Equal(t, "main", config.Feeds["bili"].CookieProfile)
+}
+
+func TestCookieProfileMustExist(t *testing.T) {
+	const file = `
+[server]
+data_dir = "/data"
+
+[feeds]
+  [feeds.bili]
+  url = "https://space.bilibili.com/10835521"
+  cookie_profile = "missing"
+`
+	path := setup(t, file)
+	defer os.Remove(path)
+
+	_, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `cookie profile "missing"`)
+}
+
+func TestCookieProfilePathMustNotBeEmpty(t *testing.T) {
+	const file = `
+[server]
+data_dir = "/data"
+
+[cookie_profiles.main]
+provider = "bilibili"
+
+[feeds]
+  [feeds.bili]
+  url = "https://space.bilibili.com/10835521"
+  cookie_profile = "main"
+`
+	path := setup(t, file)
+	defer os.Remove(path)
+
+	_, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty path")
+}
+
+func TestLoadR2ConfigParseOnly(t *testing.T) {
+	const file = `
+[server]
+data_dir = "/data"
+
+[r2]
+endpoint = "https://account.r2.cloudflarestorage.com"
+bucket = "podcasts"
+prefix = "audio"
+access_key_id = "key-id"
+secret_access_key = "secret"
+
+[feeds]
+  [feeds.A]
+  url = "https://youtube.com/watch?v=ygIUF678y40"
+`
+	path := setup(t, file)
+	defer os.Remove(path)
+
+	config, err := LoadConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, "https://account.r2.cloudflarestorage.com", config.R2.Endpoint)
+	assert.Equal(t, "podcasts", config.R2.Bucket)
+	assert.Equal(t, "audio", config.R2.Prefix)
+	assert.Equal(t, "key-id", config.R2.AccessKeyID)
+	assert.Equal(t, "secret", config.R2.SecretAccessKey)
+}
+
 func TestFilenameTemplateValidation(t *testing.T) {
 	const file = `
 [server]

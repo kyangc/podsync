@@ -29,3 +29,45 @@ func TestProviderKeyStillRequiresTokenForOtherProviders(t *testing.T) {
 
 	require.Error(t, err)
 }
+
+func TestSetFeedsReplacesFeedSnapshot(t *testing.T) {
+	manager := &Manager{feeds: map[string]*feed.Config{
+		"old": {ID: "old"},
+	}}
+
+	manager.SetFeeds(map[string]*feed.Config{
+		"new": {ID: "new"},
+	})
+
+	snapshot := manager.feedSnapshot()
+	require.NotContains(t, snapshot, "old")
+	require.Contains(t, snapshot, "new")
+	require.Equal(t, "new", snapshot["new"].ID)
+}
+
+func TestFeedSnapshotDoesNotExposeInternalMap(t *testing.T) {
+	manager := &Manager{feeds: map[string]*feed.Config{
+		"feed": {ID: "feed"},
+	}}
+
+	snapshot := manager.feedSnapshot()
+	delete(snapshot, "feed")
+
+	_, ok := manager.Feed("feed")
+	require.True(t, ok)
+}
+
+func TestFeedReturnsCurrentFeedAndRejectsRemovedFeed(t *testing.T) {
+	manager := &Manager{feeds: map[string]*feed.Config{
+		"old": {ID: "old"},
+	}}
+	manager.SetFeeds(map[string]*feed.Config{
+		"new": {ID: "new"},
+	})
+
+	_, ok := manager.Feed("old")
+	require.False(t, ok)
+	feedConfig, ok := manager.Feed("new")
+	require.True(t, ok)
+	require.Equal(t, "new", feedConfig.ID)
+}

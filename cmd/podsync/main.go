@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -113,6 +114,8 @@ func main() {
 		}
 	}
 
+	remoteClient := &http.Client{Timeout: defaultRemoteFetchTimeout + 5*time.Second}
+
 	database, err := db.NewBadger(&cfg.Database)
 	if err != nil {
 		log.WithError(err).Fatal("failed to open database")
@@ -136,12 +139,22 @@ func main() {
 		log.WithError(err).Fatal("failed to open storage")
 	}
 
+	resolved, err := resolveFeeds(ctx, cfg, remoteClient)
+	if err != nil {
+		log.WithError(err).Error("failed to resolve remote feeds")
+	}
+	activeFeeds := resolved.Feeds
+	if err := writeAcceptedRemoteConfigCache(cfg, resolved); err != nil {
+		log.WithError(err).Warn("failed to write accepted remote config cache")
+	}
+	log.WithField("source", resolved.Source).Info("resolved feed configuration")
+
 	if opts.MigrateFilenames {
 		if cfg.Storage.Type == "s3" && !opts.MigrateFilenamesDryRun {
 			log.Fatal("--migrate-filenames is not supported with storage.type = \"s3\"; use --migrate-filenames-dry-run or migrate with local storage")
 		}
 
-		migration := migrate.New(cfg.Feeds, database, storage, opts.MigrateFilenamesDryRun)
+		migration := migrate.New(activeFeeds, database, storage, opts.MigrateFilenamesDryRun)
 		result, err := migration.Run(ctx)
 		if err != nil {
 			log.WithError(err).Fatal("filename migration failed")
@@ -171,14 +184,14 @@ func main() {
 	}
 
 	log.Debug("creating update manager")
-	manager, err := update.NewUpdater(cfg.Feeds, keys, cfg.Server.Hostname, downloader, database, storage)
+	manager, err := update.NewUpdater(activeFeeds, keys, cfg.Server.Hostname, downloader, database, storage)
 	if err != nil {
 		log.WithError(err).Fatal("failed to create updater")
 	}
 
 	// In Headless mode, do one round of feed updates and quit
 	if opts.Headless {
-		for _, _feed := range cfg.Feeds {
+		for _, _feed := range activeFeeds {
 			if err := manager.Update(ctx, _feed); err != nil {
 				log.WithError(err).Errorf("failed to update feed: %s", _feed.URL)
 			}
@@ -200,17 +213,30 @@ func main() {
 
 	// Create Cron
 	c := cron.New(cron.WithChain(cron.SkipIfStillRunning(cron.DiscardLogger)))
-	m := make(map[string]cron.EntryID)
+	entries := make(map[string]scheduledFeed)
+	var entriesMu sync.RWMutex
 
 	// Run updates listener
 	group.Go(func() error {
 		for {
 			select {
 			case _feed := <-updates:
-				if err := manager.Update(ctx, _feed); err != nil {
-					log.WithError(err).Errorf("failed to update feed: %s", _feed.URL)
+				entriesMu.RLock()
+				currentFeed, ok := manager.Feed(_feed.ID)
+				entriesMu.RUnlock()
+				if !ok {
+					log.WithField("feed_id", _feed.ID).Info("skipping stale queued feed update")
+					continue
+				}
+				if err := manager.Update(ctx, currentFeed); err != nil {
+					log.WithError(err).Errorf("failed to update feed: %s", currentFeed.URL)
 				} else {
-					log.Infof("next update of %s: %s", _feed.ID, c.Entry(m[_feed.ID]).Next)
+					entriesMu.RLock()
+					entry, entryOK := entries[currentFeed.ID]
+					entriesMu.RUnlock()
+					if entryOK {
+						log.Infof("next update of %s: %s", currentFeed.ID, c.Entry(entry.entryID).Next)
+					}
 				}
 			case <-ctx.Done():
 				return ctx.Err()
@@ -220,42 +246,59 @@ func main() {
 
 	// Run cron scheduler
 	group.Go(func() error {
-		var cronID cron.EntryID
-
-		for _, _feed := range cfg.Feeds {
-			// Track if this feed has an explicit cron schedule
-			hasExplicitCronSchedule := _feed.CronSchedule != ""
-
-			if _feed.CronSchedule == "" {
-				_feed.CronSchedule = fmt.Sprintf("@every %s", _feed.UpdatePeriod.String())
-			}
-			cronFeed := _feed
-			if cronID, err = c.AddFunc(cronFeed.CronSchedule, func() {
-				log.Debugf("adding %q to update queue", cronFeed.ID)
-				updates <- cronFeed
-			}); err != nil {
-				log.WithError(err).Fatalf("can't create cron task for feed: %s", cronFeed.ID)
-			}
-
-			m[cronFeed.ID] = cronID
-			log.Debugf("-> %s (update '%s')", cronFeed.ID, cronFeed.CronSchedule)
-
-			// Only perform initial update if no explicit cron schedule is configured
-			// This prevents unwanted updates when using fixed schedules in Docker deployments
-			if !hasExplicitCronSchedule {
-				updates <- cronFeed
-			}
+		entriesMu.Lock()
+		feedsToQueue, err := reconcileFeedSchedules(c, entries, activeFeeds, updates)
+		if err != nil {
+			entriesMu.Unlock()
+			log.WithError(err).Fatal("can't reconcile cron tasks")
 		}
+		entriesMu.Unlock()
+		enqueueFeedUpdates(updates, feedsToQueue)
 
 		c.Start()
 
+		var refresh <-chan time.Time
+		var ticker *time.Ticker
+		if cfg.Remote.Enabled {
+			ticker = time.NewTicker(cfg.Remote.ConfigRefreshInterval)
+			refresh = ticker.C
+			defer ticker.Stop()
+		}
+
 		for {
-			<-ctx.Done()
+			select {
+			case <-refresh:
+				resolved, apply, err := refreshFeeds(ctx, cfg, remoteClient)
+				if err != nil {
+					log.WithError(err).Error("failed to refresh remote feeds")
+				}
+				if !apply {
+					log.Info("keeping current feed configuration")
+					continue
+				}
 
-			log.Info("shutting down cron")
-			c.Stop()
+				entriesMu.Lock()
+				feedsToQueue, err := reconcileFeedSchedules(c, entries, resolved.Feeds, updates)
+				if err != nil {
+					entriesMu.Unlock()
+					log.WithError(err).Error("failed to reconcile remote feed schedules")
+					continue
+				}
+				manager.SetFeeds(resolved.Feeds)
+				activeFeeds = resolved.Feeds
+				entriesMu.Unlock()
 
-			return ctx.Err()
+				if err := writeAcceptedRemoteConfigCache(cfg, resolved); err != nil {
+					log.WithError(err).Warn("failed to write accepted remote config cache")
+				}
+				enqueueFeedUpdates(updates, feedsToQueue)
+				log.WithField("source", resolved.Source).Info("refreshed feed configuration")
+			case <-ctx.Done():
+				log.Info("shutting down cron")
+				c.Stop()
+
+				return ctx.Err()
+			}
 		}
 	})
 

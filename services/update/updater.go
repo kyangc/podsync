@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/go-multierror"
@@ -29,6 +30,7 @@ type Downloader interface {
 type TokenList []string
 
 type Manager struct {
+	mu         sync.RWMutex
 	hostname   string
 	downloader Downloader
 	db         db.Storage
@@ -53,6 +55,29 @@ func NewUpdater(
 		feeds:      feeds,
 		keys:       keys,
 	}, nil
+}
+
+func (u *Manager) SetFeeds(feeds map[string]*feed.Config) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.feeds = feeds
+}
+
+func (u *Manager) Feed(id string) (*feed.Config, bool) {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	feedConfig, ok := u.feeds[id]
+	return feedConfig, ok
+}
+
+func (u *Manager) feedSnapshot() map[string]*feed.Config {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	feeds := make(map[string]*feed.Config, len(u.feeds))
+	for id, cfg := range u.feeds {
+		feeds[id] = cfg
+	}
+	return feeds
 }
 
 func (u *Manager) Update(ctx context.Context, feedConfig *feed.Config) error {
@@ -366,7 +391,7 @@ func (u *Manager) buildXML(ctx context.Context, feedConfig *feed.Config) error {
 func (u *Manager) buildOPML(ctx context.Context) error {
 	// Build OPML with data received from builder
 	log.Debug("building podcast OPML")
-	opml, err := feed.BuildOPML(ctx, u.feeds, u.db, u.hostname)
+	opml, err := feed.BuildOPML(ctx, u.feedSnapshot(), u.db, u.hostname)
 	if err != nil {
 		return err
 	}
