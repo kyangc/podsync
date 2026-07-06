@@ -189,6 +189,12 @@ func main() {
 	if err != nil {
 		log.WithError(err).Fatal("failed to create updater")
 	}
+	remoteProcessor, err := buildRemoteProcessor(cfg, database, newRemoteR2Publisher)
+	if err != nil {
+		log.WithError(err).Warn("remote publish disabled")
+	} else if remoteProcessor == nil && cfg.Remote.Enabled {
+		log.Warn("remote publish disabled: R2 requires local storage and complete [r2] config")
+	}
 
 	// In Headless mode, do one round of feed updates and quit
 	if opts.Headless {
@@ -197,6 +203,7 @@ func main() {
 				log.WithError(err).Errorf("failed to update feed: %s", _feed.URL)
 			}
 		}
+		processRemotePublishOnce(ctx, remoteProcessor)
 		return
 	}
 
@@ -216,6 +223,12 @@ func main() {
 	c := cron.New(cron.WithChain(cron.SkipIfStillRunning(cron.DiscardLogger)))
 	entries := make(map[string]scheduledFeed)
 	var entriesMu sync.RWMutex
+
+	if remoteProcessor != nil {
+		group.Go(func() error {
+			return runRemotePublishLoop(ctx, remoteProcessor, defaultRemotePublishInterval)
+		})
+	}
 
 	// Run updates listener
 	group.Go(func() error {
