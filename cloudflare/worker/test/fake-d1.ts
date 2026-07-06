@@ -33,6 +33,7 @@ interface FakeD1Options {
   beforeEpisodeStatusUpdate?: ((key: string, episode: FakeEpisodeRow | undefined) => void) | undefined;
   beforeTombstoneSnapshot?: (() => void) | undefined;
   failTombstoneInsert?: boolean | undefined;
+  failPurgeUpdateKeys?: Set<string> | undefined;
   lastChanges?: number | undefined;
 }
 
@@ -271,6 +272,22 @@ class FakeStatement {
         .map(publicEpisodeRow);
     }
 
+    if (this.query.includes("FROM episodes") && this.query.includes("status = 'delete_pending'") && this.query.includes("purge_after")) {
+      const now = sqliteDateTimeMillis(String(this.params[0] ?? ""));
+      const limit = Number(this.params[1] ?? 50);
+      return [...(this.options.episodesByKey?.values() ?? [])]
+        .filter((episode) => episode.status === "delete_pending"
+          && episode.purge_after !== null
+          && sqliteDateTimeMillis(episode.purge_after) <= now)
+        .sort(comparePurgeCandidateOrder)
+        .slice(0, limit)
+        .map((episode) => ({
+          feed_id: episode.feed_id,
+          local_episode_id: episode.local_episode_id,
+          r2_key: episode.r2_key,
+        }));
+    }
+
     if (this.query.includes("FROM episodes") && this.query.includes("status IN ('hidden', 'delete_pending', 'purged')")) {
       this.options.beforeTombstoneSnapshot?.();
       return [...(this.options.episodesByKey?.values() ?? [])]
@@ -321,6 +338,10 @@ class FakeStatement {
     if (this.query.includes("INSERT INTO episodes") && this.query.includes("ON CONFLICT")) {
       this.runEpisodeUpsert(options);
       changes = 1;
+    } else if (this.query.includes("DELETE FROM events")) {
+      changes = this.runEventRetentionDelete(options);
+    } else if (this.query.includes("DELETE FROM sync_runs")) {
+      changes = this.runSyncRunRetentionDelete(options);
     } else if (this.query.includes("UPDATE feeds") && this.query.includes("include_in_opml")) {
       changes = this.runFeedStatusUpdate(options);
     } else if (this.query.includes("UPDATE episodes") && this.query.includes("SET status")) {
@@ -400,6 +421,9 @@ class FakeStatement {
   }
 
   private runEpisodeStatusUpdate(options: FakeD1Options): number {
+    if (this.query.includes("status = 'purged'")) {
+      return this.runEpisodePurgeUpdate(options);
+    }
     const [feedID, localEpisodeID] = this.params;
     const key = fakeEpisodeKey(String(feedID), String(localEpisodeID));
     const episode = options.episodesByKey?.get(key);
@@ -432,6 +456,26 @@ class FakeStatement {
     return 0;
   }
 
+  private runEpisodePurgeUpdate(options: FakeD1Options): number {
+    const [now, feedID, localEpisodeID, nullKey, r2Key] = this.params;
+    const key = fakeEpisodeKey(String(feedID), String(localEpisodeID));
+    if (options.failPurgeUpdateKeys?.has(key)) return 0;
+    const episode = options.episodesByKey?.get(key);
+    if (!episode || episode.status !== "delete_pending" || episode.purge_after === null) return 0;
+    const expectedR2Key = nullableString(r2Key);
+    const expectedNullKey = nullableString(nullKey);
+    if (episode.r2_key === null) {
+      if (expectedNullKey !== null || expectedR2Key !== null) return 0;
+    } else if (episode.r2_key !== expectedR2Key) {
+      return 0;
+    }
+    if (sqliteDateTimeMillis(episode.purge_after) > sqliteDateTimeMillis(String(now))) return 0;
+    episode.status = "purged";
+    episode.purge_after = null;
+    episode.updated_at = String(now);
+    return 1;
+  }
+
   private runTombstoneInsert(options: FakeD1Options): number {
     if (options.failTombstoneInsert) {
       throw new Error("tombstone insert failed");
@@ -439,7 +483,11 @@ class FakeStatement {
     if ((options.lastChanges ?? 0) !== 1) {
       return 0;
     }
-    const [feedID, localEpisodeID, status, action] = this.params;
+    const literalPurge = this.query.includes("'purged'") && this.query.includes("'purge'");
+    const [feedID, localEpisodeID, statusParam, actionParam] = this.params;
+    const status = literalPurge ? "purged" : statusParam;
+    const action = literalPurge ? "purge" : actionParam;
+    const createdAt = literalPurge ? nullableString(statusParam) : "2026-07-06 00:00:00";
     const changes = options.tombstoneChanges ?? [];
     options.tombstoneChanges = changes;
     const sequence = changes.reduce((max, change) => Math.max(max, change.sequence), 0) + 1;
@@ -449,9 +497,37 @@ class FakeStatement {
       local_episode_id: String(localEpisodeID),
       status: status as EpisodeStatus,
       action: action as "hide" | "delete" | "purge" | "restore",
-      created_at: "2026-07-06 00:00:00",
+      created_at: createdAt ?? "2026-07-06 00:00:00",
     });
     return 1;
+  }
+
+  private runEventRetentionDelete(options: FakeD1Options): number {
+    const cutoff = sqliteDateTimeMillis(String(this.params[0] ?? "")) - 30 * 24 * 60 * 60 * 1000;
+    let changes = 0;
+    const events = options.eventsByKey;
+    if (!events) return 0;
+    for (const [key, event] of events) {
+      if (sqliteDateTimeMillis(event.event_time) < cutoff) {
+        events.delete(key);
+        changes++;
+      }
+    }
+    return changes;
+  }
+
+  private runSyncRunRetentionDelete(options: FakeD1Options): number {
+    const cutoff = sqliteDateTimeMillis(String(this.params[0] ?? "")) - 180 * 24 * 60 * 60 * 1000;
+    let changes = 0;
+    const runs = options.syncRunsByID;
+    if (!runs) return 0;
+    for (const [key, run] of runs) {
+      if (run.status !== "running" && coalesceSQLiteDateTimeMillis(run.finished_at, run.started_at) < cutoff) {
+        runs.delete(key);
+        changes++;
+      }
+    }
+    return changes;
   }
 
   private runSyncRunUpsert(options: FakeD1Options): number {
@@ -707,6 +783,14 @@ function compareAdminEpisodeOrder(left: FakeEpisodeRow, right: FakeEpisodeRow): 
   return left.local_episode_id.localeCompare(right.local_episode_id);
 }
 
+function comparePurgeCandidateOrder(left: FakeEpisodeRow, right: FakeEpisodeRow): number {
+  const timeCompare = sqliteDateTimeMillis(left.purge_after) - sqliteDateTimeMillis(right.purge_after);
+  if (timeCompare !== 0) return timeCompare;
+  const feedCompare = left.feed_id.localeCompare(right.feed_id);
+  if (feedCompare !== 0) return feedCompare;
+  return left.local_episode_id.localeCompare(right.local_episode_id);
+}
+
 function adminEpisodeListRow(episode: FakeEpisodeRow): AdminEpisodeListRow {
   return {
     local_episode_id: episode.local_episode_id,
@@ -773,6 +857,7 @@ function cloneOptions(options: FakeD1Options): FakeD1Options {
     tombstoneChanges: options.tombstoneChanges?.map((change) => ({ ...change })),
     syncRunsByID: cloneMap(options.syncRunsByID),
     eventsByKey: cloneMap(options.eventsByKey),
+    failPurgeUpdateKeys: options.failPurgeUpdateKeys ? new Set(options.failPurgeUpdateKeys) : undefined,
     lastChanges: undefined,
   };
 }

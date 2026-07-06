@@ -47,6 +47,9 @@ const maxEventMessageLength = 512;
 const maxEventCodeLength = 128;
 const maxEventDetailLength = 2048;
 const utcTimestampPattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/;
+const eventRetentionDays = 30;
+const syncRunRetentionDays = 180;
+const purgeBatchLimit = 50;
 
 const syncRunStatuses = new Set<SyncRunStatus>(["running", "success", "partial", "failed"]);
 const eventLevels = new Set<EventLevel>(["debug", "info", "warn", "error"]);
@@ -74,6 +77,20 @@ const remoteEventTypes = new Set<RemoteEventType>([
   "cookie_profile_missing",
   "cookie_profile_invalid",
 ]);
+
+interface PurgeCandidateRow {
+  feed_id: string;
+  local_episode_id: string;
+  r2_key: string | null;
+}
+
+export interface MaintenanceResult {
+  old_events_deleted: number;
+  old_sync_runs_deleted: number;
+  purge_candidates: number;
+  episodes_purged: number;
+  purge_errors: number;
+}
 
 function text(body: string, status = 200, contentType = "text/plain; charset=utf-8"): Response {
   return new Response(body, {
@@ -470,6 +487,49 @@ function eventInsertSQL(): string {
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 }
 
+function oldEventsDeleteSQL(): string {
+  return `DELETE FROM events
+           WHERE datetime(event_time) < datetime(?, '-${eventRetentionDays} days')`;
+}
+
+function oldSyncRunsDeleteSQL(): string {
+  return `DELETE FROM sync_runs
+           WHERE status <> 'running'
+             AND datetime(COALESCE(finished_at, started_at)) < datetime(?, '-${syncRunRetentionDays} days')`;
+}
+
+function purgeCandidatesSQL(): string {
+  return `SELECT feed_id, local_episode_id, r2_key
+            FROM episodes
+           WHERE status = 'delete_pending'
+             AND purge_after IS NOT NULL
+             AND datetime(purge_after) <= datetime(?)
+           ORDER BY datetime(purge_after) ASC, feed_id ASC, local_episode_id ASC
+           LIMIT ?`;
+}
+
+function purgeEpisodeUpdateSQL(): string {
+  return `UPDATE episodes
+             SET status = 'purged',
+                 purge_after = NULL,
+                 updated_at = ?
+           WHERE feed_id = ?
+             AND local_episode_id = ?
+             AND status = 'delete_pending'
+             AND (
+               (r2_key IS NULL AND ? IS NULL)
+               OR r2_key = ?
+             )
+             AND purge_after IS NOT NULL
+             AND datetime(purge_after) <= datetime(?)`;
+}
+
+function purgeTombstoneInsertSQL(): string {
+  return `INSERT INTO tombstone_changes (feed_id, local_episode_id, status, action, created_at)
+          SELECT ?, ?, 'purged', 'purge', ?
+           WHERE changes() = 1`;
+}
+
 function parseIntegerParam(value: string | null, fallback: number, name: string): number | Response {
   if (value === null) return fallback;
   if (!/^\d+$/.test(value)) return badRequest(`${name} is invalid`);
@@ -840,6 +900,64 @@ async function handleNasEventsBatch(request: Request, env: Env): Promise<Respons
   });
 }
 
+export async function runScheduledMaintenance(env: Env, now = new Date()): Promise<MaintenanceResult> {
+  const nowISO = now.toISOString();
+  const oldEvents = await env.DB.prepare(oldEventsDeleteSQL()).bind(nowISO).run();
+  const oldSyncRuns = await env.DB.prepare(oldSyncRunsDeleteSQL()).bind(nowISO).run();
+  const { results: candidates } = await env.DB.prepare(purgeCandidatesSQL()).bind(nowISO, purgeBatchLimit).all<PurgeCandidateRow>();
+
+  const result: MaintenanceResult = {
+    old_events_deleted: oldEvents.meta.changes ?? 0,
+    old_sync_runs_deleted: oldSyncRuns.meta.changes ?? 0,
+    purge_candidates: candidates.length,
+    episodes_purged: 0,
+    purge_errors: 0,
+  };
+
+  for (const candidate of candidates) {
+    try {
+      if (await purgeEpisodeCandidate(env, candidate, nowISO)) {
+        result.episodes_purged++;
+      } else {
+        result.purge_errors++;
+      }
+    } catch (error) {
+      result.purge_errors++;
+      console.warn("scheduled purge candidate failed", {
+        feed_id: candidate.feed_id,
+        local_episode_id: candidate.local_episode_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return result;
+}
+
+async function purgeEpisodeCandidate(env: Env, candidate: PurgeCandidateRow, nowISO: string): Promise<boolean> {
+  const bucket = env.MEDIA_BUCKET;
+  if (candidate.r2_key) {
+    if (!bucket) return false;
+    await bucket.delete(candidate.r2_key);
+  }
+
+  const update = env.DB.prepare(purgeEpisodeUpdateSQL()).bind(
+    nowISO,
+    candidate.feed_id,
+    candidate.local_episode_id,
+    candidate.r2_key,
+    candidate.r2_key,
+    nowISO,
+  );
+  const tombstone = env.DB.prepare(purgeTombstoneInsertSQL()).bind(
+    candidate.feed_id,
+    candidate.local_episode_id,
+    nowISO,
+  );
+  const [updateResult, tombstoneResult] = await env.DB.batch([update, tombstone]);
+  return updateResult?.meta.changes === 1 && tombstoneResult?.meta.changes === 1;
+}
+
 async function handleEpisodeUpsert(request: Request, env: Env): Promise<Response> {
 	if (!(await isAuthorizedNasRequest(request, env))) {
 		return text("unauthorized", 401);
@@ -1136,4 +1254,11 @@ export default {
 
     return text("not found", 404);
   },
-};
+
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(runScheduledMaintenance(env).then(
+      (result) => console.log("scheduled maintenance completed", result),
+      (error) => console.error("scheduled maintenance failed", error),
+    ));
+  },
+} satisfies ExportedHandler<Env>;

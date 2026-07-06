@@ -4,6 +4,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-06",
   "observability": { "enabled": true },
+  "triggers": {
+    "crons": ["17 */6 * * *"]
+  },
   "vars": {
     "MEDIA_PUBLIC_BASE_URL": "https://media.example.com"
   },
@@ -12,6 +15,12 @@
       "binding": "DB",
       "database_name": "podsync-control-plane",
       "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "podsync-media"
     }
   ]
 }
