@@ -135,6 +135,22 @@ type RemoteEventBatchResult struct {
 	DuplicateEvents int    `json:"duplicate_events"`
 }
 
+type RemoteFeedMetadata struct {
+	FeedID             string    `json:"feed_id"`
+	Provider           Provider  `json:"provider"`
+	SourceURL          string    `json:"source_url"`
+	Title              string    `json:"title,omitempty"`
+	Description        string    `json:"description,omitempty"`
+	ImageURL           string    `json:"image_url,omitempty"`
+	Link               string    `json:"link,omitempty"`
+	Author             string    `json:"author,omitempty"`
+	Category           string    `json:"category,omitempty"`
+	Language           string    `json:"language,omitempty"`
+	Explicit           *bool     `json:"explicit,omitempty"`
+	LastSourceUpdateAt time.Time `json:"last_source_update_at,omitempty"`
+	ReportedAt         time.Time `json:"reported_at"`
+}
+
 func (s RemoteEpisodeStatus) IsTombstoned() bool {
 	return s == RemoteEpisodeStatusHidden ||
 		s == RemoteEpisodeStatusDeletePending ||

@@ -17,6 +17,7 @@ import type {
   EventBatchRequest,
   EventLevel,
   FeedStatusRow,
+  FeedMetadataUpsertRequest,
   FeedTomlRow,
   MaxSequenceRow,
   PublicEpisodeRow,
@@ -366,6 +367,48 @@ function parseEventBatch(body: unknown): EventBatchRequest | Response {
   return { run, events };
 }
 
+function parseFeedMetadataUpsert(body: unknown): FeedMetadataUpsertRequest | Response {
+  if (!body || typeof body !== "object") return badRequest("invalid feed metadata body");
+  const value = body as Record<string, unknown>;
+  if (!nonEmptyString(value.feed_id)) return badRequest("feed_id is required");
+  if (!isProvider(value.provider)) return badRequest("provider is invalid");
+  if (!nonEmptyString(value.source_url)) return badRequest("source_url is required");
+  if (!nonEmptyString(value.reported_at) || !validDateString(value.reported_at)) {
+    return badRequest("reported_at is invalid");
+  }
+  if (value.last_source_update_at !== undefined && (!nonEmptyString(value.last_source_update_at) || !validDateString(value.last_source_update_at))) {
+    return badRequest("last_source_update_at is invalid");
+  }
+  if (value.explicit !== undefined && typeof value.explicit !== "boolean") {
+    return badRequest("explicit must be boolean");
+  }
+
+  const request: FeedMetadataUpsertRequest = {
+    feed_id: value.feed_id,
+    provider: value.provider,
+    source_url: value.source_url,
+    reported_at: value.reported_at,
+  };
+  const title = optionalString(value.title);
+  if (title !== undefined) request.title = title;
+  const description = optionalString(value.description);
+  if (description !== undefined) request.description = description;
+  const imageURL = optionalString(value.image_url);
+  if (imageURL !== undefined) request.image_url = imageURL;
+  const link = optionalString(value.link);
+  if (link !== undefined) request.link = link;
+  const author = optionalString(value.author);
+  if (author !== undefined) request.author = author;
+  const category = optionalString(value.category);
+  if (category !== undefined) request.category = category;
+  const language = optionalString(value.language);
+  if (language !== undefined) request.language = language;
+  if (typeof value.explicit === "boolean") request.explicit = value.explicit;
+  const lastSourceUpdateAt = optionalString(value.last_source_update_at);
+  if (lastSourceUpdateAt !== undefined) request.last_source_update_at = lastSourceUpdateAt;
+  return request;
+}
+
 function parseAdminFeedStatus(body: unknown): AdminFeedStatusRequest | Response {
   if (!body || typeof body !== "object") return badRequest("invalid feed status body");
   const value = body as Record<string, unknown>;
@@ -530,6 +573,26 @@ function purgeTombstoneInsertSQL(): string {
            WHERE changes() = 1`;
 }
 
+function feedMetadataUpsertSQL(): string {
+  return `INSERT INTO feed_metadata (
+            feed_id, provider, source_url, title, description, image_url, link,
+            author, category, language, explicit, last_source_update_at, reported_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(feed_id) DO UPDATE SET
+            provider = excluded.provider,
+            source_url = excluded.source_url,
+            title = excluded.title,
+            description = excluded.description,
+            image_url = excluded.image_url,
+            link = excluded.link,
+            author = excluded.author,
+            category = excluded.category,
+            language = excluded.language,
+            explicit = excluded.explicit,
+            last_source_update_at = excluded.last_source_update_at,
+            reported_at = excluded.reported_at`;
+}
+
 function parseIntegerParam(value: string | null, fallback: number, name: string): number | Response {
   if (value === null) return fallback;
   if (!/^\d+$/.test(value)) return badRequest(`${name} is invalid`);
@@ -540,6 +603,11 @@ function parseIntegerParam(value: string | null, fallback: number, name: string)
 
 function jsonBoolean(value: number): boolean {
   return value === 1;
+}
+
+function optionalDBBoolean(value: boolean | undefined): number | null {
+  if (value === undefined) return null;
+  return value ? 1 : 0;
 }
 
 function parseEpisodeStatusParam(value: string | null): EpisodeStatus | Response | null {
@@ -900,6 +968,43 @@ async function handleNasEventsBatch(request: Request, env: Env): Promise<Respons
   });
 }
 
+async function handleFeedMetadataUpsert(request: Request, env: Env): Promise<Response> {
+  if (!(await isAuthorizedNasRequest(request, env))) {
+    return text("unauthorized", 401);
+  }
+  const rawBody = await readBoundedJson(request);
+  if (rawBody instanceof Response) return rawBody;
+
+  const parsed = parseFeedMetadataUpsert(rawBody);
+  if (parsed instanceof Response) return parsed;
+
+  const feed = await env.DB.prepare(
+    `SELECT feed_id, provider
+       FROM feeds
+      WHERE feed_id = ?`,
+  ).bind(parsed.feed_id).first<{ feed_id: string; provider: FeedMetadataUpsertRequest["provider"] }>();
+  if (!feed) return text("feed not found", 404);
+  if (feed.provider !== parsed.provider) return badRequest("provider mismatch");
+
+  await env.DB.prepare(feedMetadataUpsertSQL()).bind(
+    parsed.feed_id,
+    parsed.provider,
+    parsed.source_url,
+    parsed.title ?? null,
+    parsed.description ?? null,
+    parsed.image_url ?? null,
+    parsed.link ?? null,
+    parsed.author ?? null,
+    parsed.category ?? null,
+    parsed.language ?? null,
+    optionalDBBoolean(parsed.explicit),
+    parsed.last_source_update_at ?? null,
+    parsed.reported_at,
+  ).run();
+
+  return Response.json({ ok: true, feed_id: parsed.feed_id });
+}
+
 export async function runScheduledMaintenance(env: Env, now = new Date()): Promise<MaintenanceResult> {
   const nowISO = now.toISOString();
   const oldEvents = await env.DB.prepare(oldEventsDeleteSQL()).bind(nowISO).run();
@@ -1191,6 +1296,11 @@ export default {
     if (url.pathname === "/api/nas/episodes/upsert") {
       if (request.method !== "POST") return methodNotAllowed();
       return handleEpisodeUpsert(request, env);
+    }
+
+    if (url.pathname === "/api/nas/feed-metadata/upsert") {
+      if (request.method !== "POST") return methodNotAllowed();
+      return handleFeedMetadataUpsert(request, env);
     }
 
     if (url.pathname === "/api/nas/tombstones") {

@@ -195,6 +195,12 @@ func main() {
 	if remoteEvents != nil {
 		updateOptions = append(updateOptions, update.WithRemoteEventSink(remoteEvents))
 	}
+	feedMetadataOptions, err := remoteFeedMetadataOptions(cfg, newRemoteFeedMetadataReporter)
+	if err != nil {
+		log.WithError(err).Warn("remote feed metadata reporting disabled")
+	} else {
+		updateOptions = append(updateOptions, feedMetadataOptions...)
+	}
 	manager, err := update.NewUpdater(activeFeeds, keys, cfg.Server.Hostname, downloader, database, storage, updateOptions...)
 	if err != nil {
 		log.WithError(err).Fatal("failed to create updater")

@@ -24,6 +24,7 @@ interface FakeD1Options {
   opmlTokenHashes?: Set<string> | undefined;
   opmlTokensByHash?: Map<string, FakeOpmlTokenRow> | undefined;
   feedsByID?: Map<string, FakeFeedRow> | undefined;
+  feedMetadataByID?: Map<string, FakeFeedMetadataRow> | undefined;
   episodesByKey?: Map<string, FakeEpisodeRow> | undefined;
   tombstoneChanges?: FakeTombstoneChangeRow[] | undefined;
   syncRunsByID?: Map<string, FakeSyncRunRow> | undefined;
@@ -62,6 +63,22 @@ interface FakeOpmlTokenRow {
   enabled?: number | undefined;
 }
 
+export interface FakeFeedMetadataRow {
+  feed_id: string;
+  provider: "youtube" | "bilibili";
+  source_url: string;
+  title: string | null;
+  description: string | null;
+  image_url: string | null;
+  link: string | null;
+  author: string | null;
+  category: string | null;
+  language: string | null;
+  explicit: number | null;
+  last_source_update_at: string | null;
+  reported_at: string;
+}
+
 interface FakeReadableFeed {
   feed_id: string;
   provider: "youtube" | "bilibili";
@@ -79,6 +96,7 @@ interface FakeReadableFeed {
   public_path: string | null;
   metadata_title: string | null;
   metadata_description: string | null;
+  metadata_link: string | null;
 }
 
 export interface FakeEpisodeRow {
@@ -162,7 +180,11 @@ class FakeStatement {
         const feedRow = this.options.feedsByID?.get(feed.feed_id);
         if ((tomlFeed?.enabled ?? feedRow?.enabled ?? 1) !== 1) return null;
       }
-      return feed as T | null;
+      if (feed) return feed as T;
+      const readable = fakeFeedRows(this.options).find((row) => row.feed_token_hash === tokenHash);
+      if (!readable) return null;
+      if (/f\.enabled\s*=\s*1/.test(this.query) && readable.enabled !== 1) return null;
+      return publicFeedRow(readable) as T;
     }
 
     if (this.query.includes("FROM feeds") && this.query.includes("WHERE feed_id = ?")) {
@@ -338,6 +360,9 @@ class FakeStatement {
     if (this.query.includes("INSERT INTO episodes") && this.query.includes("ON CONFLICT")) {
       this.runEpisodeUpsert(options);
       changes = 1;
+    } else if (this.query.includes("INSERT INTO feed_metadata") && this.query.includes("ON CONFLICT")) {
+      this.runFeedMetadataUpsert(options);
+      changes = 1;
     } else if (this.query.includes("DELETE FROM events")) {
       changes = this.runEventRetentionDelete(options);
     } else if (this.query.includes("DELETE FROM sync_runs")) {
@@ -401,6 +426,41 @@ class FakeStatement {
       deleted_at: existing?.deleted_at ?? null,
       purge_after: existing?.purge_after ?? null,
       updated_at: "2026-07-06 00:00:00",
+    });
+  }
+
+  private runFeedMetadataUpsert(options: FakeD1Options): void {
+    const [
+      feedID,
+      provider,
+      sourceURL,
+      title,
+      description,
+      imageURL,
+      link,
+      author,
+      category,
+      language,
+      explicit,
+      lastSourceUpdateAt,
+      reportedAt,
+    ] = this.params;
+    const metadata = options.feedMetadataByID ?? new Map<string, FakeFeedMetadataRow>();
+    options.feedMetadataByID = metadata;
+    metadata.set(String(feedID), {
+      feed_id: String(feedID),
+      provider: provider as "youtube" | "bilibili",
+      source_url: String(sourceURL),
+      title: nullableString(title),
+      description: nullableString(description),
+      image_url: nullableString(imageURL),
+      link: nullableString(link),
+      author: nullableString(author),
+      category: nullableString(category),
+      language: nullableString(language),
+      explicit: typeof explicit === "number" ? explicit : null,
+      last_source_update_at: nullableString(lastSourceUpdateAt),
+      reported_at: String(reportedAt),
     });
   }
 
@@ -644,26 +704,41 @@ function publicEpisodeRow(episode: FakeEpisodeRow): PublicEpisodeRow {
   };
 }
 
+function publicFeedRow(feed: FakeReadableFeed): PublicFeedRow {
+  return {
+    feed_id: feed.feed_id,
+    provider: feed.provider,
+    url: feed.url,
+    title_override: feed.title_override,
+    description_override: feed.description_override,
+    page_size: feed.page_size,
+    title: feed.metadata_title,
+    description: feed.metadata_description,
+    link: feed.metadata_link,
+  };
+}
+
 function fakeFeedRows(options: FakeD1Options): FakeReadableFeed[] {
   const rows: FakeReadableFeed[] = [];
   const seen = new Set<string>();
   for (const feed of options.tomlFeeds ?? []) {
-    rows.push(fakeReadableFeedFromToml(feed));
+    rows.push(fakeReadableFeedFromToml(feed, options));
     seen.add(feed.feed_id);
   }
   for (const feed of options.feedsByID?.values() ?? []) {
     if (seen.has(feed.feed_id)) continue;
-    rows.push(fakeReadableFeedFromPartial(feed));
+    rows.push(fakeReadableFeedFromPartial(feed, options));
   }
   return rows;
 }
 
-function fakeReadableFeedFromToml(feed: FeedTomlRow): FakeReadableFeed {
+function fakeReadableFeedFromToml(feed: FeedTomlRow, options: FakeD1Options): FakeReadableFeed {
   const extras = feed as FeedTomlRow & {
     public_path?: string | null;
     metadata_title?: string | null;
     metadata_description?: string | null;
   };
+  const metadata = options.feedMetadataByID?.get(feed.feed_id);
   return {
     feed_id: feed.feed_id,
     provider: feed.provider,
@@ -679,12 +754,14 @@ function fakeReadableFeedFromToml(feed: FeedTomlRow): FakeReadableFeed {
     cookie_profile: feed.cookie_profile,
     feed_token_hash: feed.feed_token_hash,
     public_path: extras.public_path ?? null,
-    metadata_title: extras.metadata_title ?? null,
-    metadata_description: extras.metadata_description ?? null,
+    metadata_title: metadata?.title ?? extras.metadata_title ?? null,
+    metadata_description: metadata?.description ?? extras.metadata_description ?? null,
+    metadata_link: metadata?.link ?? null,
   };
 }
 
-function fakeReadableFeedFromPartial(feed: FakeFeedRow): FakeReadableFeed {
+function fakeReadableFeedFromPartial(feed: FakeFeedRow, options: FakeD1Options): FakeReadableFeed {
+  const metadata = options.feedMetadataByID?.get(feed.feed_id);
   return {
     feed_id: feed.feed_id,
     provider: feed.provider,
@@ -700,8 +777,9 @@ function fakeReadableFeedFromPartial(feed: FakeFeedRow): FakeReadableFeed {
     cookie_profile: feed.cookie_profile ?? null,
     feed_token_hash: feed.feed_token_hash ?? "",
     public_path: feed.public_path ?? null,
-    metadata_title: feed.metadata_title ?? null,
-    metadata_description: feed.metadata_description ?? null,
+    metadata_title: metadata?.title ?? feed.metadata_title ?? null,
+    metadata_description: metadata?.description ?? feed.metadata_description ?? null,
+    metadata_link: metadata?.link ?? null,
   };
 }
 
@@ -853,6 +931,7 @@ function cloneOptions(options: FakeD1Options): FakeD1Options {
     opmlTokenHashes: options.opmlTokenHashes ? new Set(options.opmlTokenHashes) : undefined,
     opmlTokensByHash: cloneMap(options.opmlTokensByHash),
     feedsByID: cloneMap(options.feedsByID),
+    feedMetadataByID: cloneMap(options.feedMetadataByID),
     episodesByKey: cloneMap(options.episodesByKey),
     tombstoneChanges: options.tombstoneChanges?.map((change) => ({ ...change })),
     syncRunsByID: cloneMap(options.syncRunsByID),
@@ -878,6 +957,8 @@ function commitOptions(target: FakeD1Options, staged: FakeD1Options): void {
   if (!target.opmlTokensByHash) target.opmlTokensByHash = staged.opmlTokensByHash;
   commitMap(target.feedsByID, staged.feedsByID);
   if (!target.feedsByID) target.feedsByID = staged.feedsByID;
+  commitMap(target.feedMetadataByID, staged.feedMetadataByID);
+  if (!target.feedMetadataByID) target.feedMetadataByID = staged.feedMetadataByID;
   commitMap(target.episodesByKey, staged.episodesByKey);
   if (!target.episodesByKey) target.episodesByKey = staged.episodesByKey;
   commitArray(target.tombstoneChanges, staged.tombstoneChanges, (value) => ({ ...value }));

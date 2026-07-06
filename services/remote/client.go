@@ -38,6 +38,15 @@ type EventBatchReporter interface {
 	PostEventBatch(ctx context.Context, batch *model.RemoteEventBatch) (*model.RemoteEventBatchResult, error)
 }
 
+type FeedMetadataReporter interface {
+	UpsertFeedMetadata(ctx context.Context, metadata *model.RemoteFeedMetadata) error
+}
+
+type feedMetadataUpsertResult struct {
+	OK     bool   `json:"ok"`
+	FeedID string `json:"feed_id"`
+}
+
 type NonRetryableError struct {
 	err error
 }
@@ -238,6 +247,68 @@ func (c *NASClient) eventsBatchURL() string {
 	return endpoint.String()
 }
 
+func (c *NASClient) UpsertFeedMetadata(ctx context.Context, metadata *model.RemoteFeedMetadata) error {
+	payload, err := feedMetadataUpsertPayloadFromMetadata(metadata)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.feedMetadataUpsertURL(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		message := strings.TrimSpace(readLimitedString(resp.Body, maxNASClientErrorBody))
+		message = scrubSensitiveText(message, []string{c.token})
+		var responseErr error
+		if message == "" {
+			responseErr = fmt.Errorf("feed metadata upsert returned HTTP %d", resp.StatusCode)
+		} else {
+			responseErr = fmt.Errorf("feed metadata upsert returned HTTP %d: %s", resp.StatusCode, message)
+		}
+		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusNotFound {
+			return &NonRetryableError{err: responseErr}
+		}
+		return responseErr
+	}
+
+	var result feedMetadataUpsertResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
+	}
+	if !result.OK {
+		return errors.New("feed metadata upsert response ok must be true")
+	}
+	if result.FeedID == "" {
+		return errors.New("feed metadata upsert response feed_id is required")
+	}
+	if result.FeedID != payload.FeedID {
+		return fmt.Errorf("feed metadata upsert response feed_id mismatch: got %q want %q", result.FeedID, payload.FeedID)
+	}
+	return nil
+}
+
+func (c *NASClient) feedMetadataUpsertURL() string {
+	endpoint := *c.baseURL
+	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/api/nas/feed-metadata/upsert"
+	endpoint.RawQuery = ""
+	endpoint.Fragment = ""
+	return endpoint.String()
+}
+
 func validateTombstoneBatch(batch *model.RemoteTombstoneBatch, requestedCursor int64) error {
 	if batch == nil {
 		return errors.New("tombstone response is empty")
@@ -319,6 +390,22 @@ type episodeUpsertPayload struct {
 	AssetToken      string `json:"asset_token"`
 }
 
+type feedMetadataUpsertPayload struct {
+	FeedID             string `json:"feed_id"`
+	Provider           string `json:"provider"`
+	SourceURL          string `json:"source_url"`
+	Title              string `json:"title,omitempty"`
+	Description        string `json:"description,omitempty"`
+	ImageURL           string `json:"image_url,omitempty"`
+	Link               string `json:"link,omitempty"`
+	Author             string `json:"author,omitempty"`
+	Category           string `json:"category,omitempty"`
+	Language           string `json:"language,omitempty"`
+	Explicit           *bool  `json:"explicit,omitempty"`
+	LastSourceUpdateAt string `json:"last_source_update_at,omitempty"`
+	ReportedAt         string `json:"reported_at"`
+}
+
 func episodeUpsertPayloadFromTask(task *model.RemotePublishTask) (*episodeUpsertPayload, error) {
 	if task == nil {
 		return nil, nonRetryable("remote publish task is required")
@@ -356,6 +443,40 @@ func episodeUpsertPayloadFromTask(task *model.RemotePublishTask) (*episodeUpsert
 		payload.PublishedAt = task.PublishedAt.UTC().Format(time.RFC3339)
 	}
 	return payload, nil
+}
+
+func feedMetadataUpsertPayloadFromMetadata(metadata *model.RemoteFeedMetadata) (*feedMetadataUpsertPayload, error) {
+	if metadata == nil {
+		return nil, nonRetryable("remote feed metadata is required")
+	}
+	if metadata.Provider != model.ProviderYoutube && metadata.Provider != model.ProviderBilibili {
+		return nil, nonRetryable("remote feed metadata provider is unsupported")
+	}
+	if metadata.FeedID == "" || metadata.SourceURL == "" || metadata.ReportedAt.IsZero() {
+		return nil, nonRetryable("remote feed metadata is missing required fields")
+	}
+	payload := &feedMetadataUpsertPayload{
+		FeedID:      metadata.FeedID,
+		Provider:    string(metadata.Provider),
+		SourceURL:   metadata.SourceURL,
+		Title:       metadata.Title,
+		Description: metadata.Description,
+		ImageURL:    metadata.ImageURL,
+		Link:        metadata.Link,
+		Author:      metadata.Author,
+		Category:    metadata.Category,
+		Language:    metadata.Language,
+		Explicit:    metadata.Explicit,
+		ReportedAt:  formatRemoteTimestamp(metadata.ReportedAt),
+	}
+	if !metadata.LastSourceUpdateAt.IsZero() {
+		payload.LastSourceUpdateAt = formatRemoteTimestamp(metadata.LastSourceUpdateAt)
+	}
+	return payload, nil
+}
+
+func formatRemoteTimestamp(value time.Time) string {
+	return value.UTC().Truncate(time.Second).Format(time.RFC3339)
 }
 
 func inferProviderFromLegacyEpisodeURL(rawURL string) model.Provider {

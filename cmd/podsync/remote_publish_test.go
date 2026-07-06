@@ -27,6 +27,60 @@ func TestRemotePublishOptionsEnabledWhenRemoteOn(t *testing.T) {
 	require.Len(t, options, 1)
 }
 
+func TestRemoteFeedMetadataOptionsDisabledWhenRemoteIncomplete(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+	}{
+		{name: "remote off", cfg: &Config{}},
+		{name: "missing base url", cfg: &Config{Remote: RemoteConfig{Enabled: true, Token: "secret"}}},
+		{name: "missing token", cfg: &Config{Remote: RemoteConfig{Enabled: true, BaseURL: "https://podcast.example.com"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			options, err := remoteFeedMetadataOptions(tt.cfg, func(string, string) (remotepublish.FeedMetadataReporter, error) {
+				called = true
+				return &cmdFakeFeedMetadataReporter{}, nil
+			})
+
+			require.NoError(t, err)
+			assert.Empty(t, options)
+			assert.False(t, called)
+		})
+	}
+}
+
+func TestRemoteFeedMetadataOptionsEnabledWhenRemoteComplete(t *testing.T) {
+	cfg := &Config{Remote: RemoteConfig{Enabled: true, BaseURL: "https://podcast.example.com", Token: "secret"}}
+	var gotBaseURL string
+	var gotToken string
+
+	options, err := remoteFeedMetadataOptions(cfg, func(baseURL string, token string) (remotepublish.FeedMetadataReporter, error) {
+		gotBaseURL = baseURL
+		gotToken = token
+		return &cmdFakeFeedMetadataReporter{}, nil
+	})
+
+	require.NoError(t, err)
+	require.Len(t, options, 1)
+	assert.Equal(t, "https://podcast.example.com", gotBaseURL)
+	assert.Equal(t, "secret", gotToken)
+}
+
+func TestRemoteFeedMetadataOptionsReturnsFactoryError(t *testing.T) {
+	wantErr := errors.New("bad client")
+	cfg := &Config{Remote: RemoteConfig{Enabled: true, BaseURL: "https://podcast.example.com", Token: "secret"}}
+
+	options, err := remoteFeedMetadataOptions(cfg, func(string, string) (remotepublish.FeedMetadataReporter, error) {
+		return nil, wantErr
+	})
+
+	require.ErrorIs(t, err, wantErr)
+	assert.Empty(t, options)
+}
+
 func TestRemotePublishEnabledRequiresRemoteLocalStorageAndR2(t *testing.T) {
 	cfg := completeRemotePublishConfig()
 	assert.True(t, remotePublishEnabled(cfg))
@@ -179,6 +233,12 @@ type cmdFakeUpserter struct{}
 
 func (u *cmdFakeUpserter) UpsertEpisode(context.Context, *model.RemotePublishTask) (*remotepublish.EpisodeUpsertResult, error) {
 	return &remotepublish.EpisodeUpsertResult{Status: "visible"}, nil
+}
+
+type cmdFakeFeedMetadataReporter struct{}
+
+func (r *cmdFakeFeedMetadataReporter) UpsertFeedMetadata(context.Context, *model.RemoteFeedMetadata) error {
+	return nil
 }
 
 type cmdFakeProcessor struct {

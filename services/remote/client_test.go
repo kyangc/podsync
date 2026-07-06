@@ -528,6 +528,202 @@ func TestNASClientPostEventBatchRejectsMissingRunIDResponse(t *testing.T) {
 	assert.Contains(t, err.Error(), "run_id")
 }
 
+func TestNASClientUpsertFeedMetadataPostsExpectedPayload(t *testing.T) {
+	var gotAuth string
+	var gotAccept string
+	var gotContentType string
+	var gotPath string
+	var gotPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAccept = r.Header.Get("Accept")
+		gotContentType = r.Header.Get("Content-Type")
+		gotPath = r.URL.Path
+		require.Equal(t, http.MethodPost, r.Method)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotPayload))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"feed_id":"feed"}`))
+	}))
+	defer server.Close()
+	client, err := NewNASClient(server.URL, "secret", server.Client())
+	require.NoError(t, err)
+
+	err = client.UpsertFeedMetadata(context.Background(), newFeedMetadata())
+
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer secret", gotAuth)
+	assert.Equal(t, "application/json", gotAccept)
+	assert.Equal(t, "application/json", gotContentType)
+	assert.Equal(t, "/api/nas/feed-metadata/upsert", gotPath)
+	assert.Equal(t, "feed", gotPayload["feed_id"])
+	assert.Equal(t, "youtube", gotPayload["provider"])
+	assert.Equal(t, "https://www.youtube.com/channel/channel", gotPayload["source_url"])
+	assert.Equal(t, "Feed Title", gotPayload["title"])
+	assert.Equal(t, "Feed description", gotPayload["description"])
+	assert.Equal(t, "https://img.example.com/feed.jpg", gotPayload["image_url"])
+	assert.Equal(t, "https://example.com/feed", gotPayload["link"])
+	assert.Equal(t, "Creator", gotPayload["author"])
+	assert.Equal(t, "TV & Film", gotPayload["category"])
+	assert.Equal(t, "en", gotPayload["language"])
+	assert.Equal(t, true, gotPayload["explicit"])
+	assert.Equal(t, "2026-07-06T12:00:00Z", gotPayload["last_source_update_at"])
+	assert.Equal(t, "2026-07-06T12:05:00Z", gotPayload["reported_at"])
+}
+
+func TestNASClientUpsertFeedMetadataOmitsOptionalFields(t *testing.T) {
+	var gotPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotPayload))
+		_, _ = w.Write([]byte(`{"ok":true,"feed_id":"feed"}`))
+	}))
+	defer server.Close()
+	client, err := NewNASClient(server.URL, "secret", server.Client())
+	require.NoError(t, err)
+	metadata := &model.RemoteFeedMetadata{
+		FeedID:     "feed",
+		Provider:   model.ProviderBilibili,
+		SourceURL:  "https://space.bilibili.com/10835521",
+		ReportedAt: time.Date(2026, 7, 6, 12, 5, 0, 987000000, time.FixedZone("CST", 8*60*60)),
+	}
+
+	err = client.UpsertFeedMetadata(context.Background(), metadata)
+
+	require.NoError(t, err)
+	assert.Equal(t, "bilibili", gotPayload["provider"])
+	assert.Equal(t, "2026-07-06T04:05:00Z", gotPayload["reported_at"])
+	assert.NotContains(t, gotPayload, "explicit")
+	assert.NotContains(t, gotPayload, "last_source_update_at")
+	assert.NotContains(t, gotPayload, "title")
+}
+
+func TestNASClientUpsertFeedMetadataClearsBaseURLQuery(t *testing.T) {
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"ok":true,"feed_id":"feed"}`))
+	}))
+	defer server.Close()
+	client, err := NewNASClient(server.URL+"?stale=1", "secret", server.Client())
+	require.NoError(t, err)
+
+	err = client.UpsertFeedMetadata(context.Background(), newFeedMetadata())
+
+	require.NoError(t, err)
+	assert.Empty(t, gotQuery)
+}
+
+func TestNASClientUpsertFeedMetadataRejectsInvalidMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata *model.RemoteFeedMetadata
+	}{
+		{name: "nil", metadata: nil},
+		{name: "unsupported provider", metadata: func() *model.RemoteFeedMetadata {
+			metadata := newFeedMetadata()
+			metadata.Provider = model.ProviderVimeo
+			return metadata
+		}()},
+		{name: "missing feed", metadata: func() *model.RemoteFeedMetadata {
+			metadata := newFeedMetadata()
+			metadata.FeedID = ""
+			return metadata
+		}()},
+		{name: "missing source", metadata: func() *model.RemoteFeedMetadata {
+			metadata := newFeedMetadata()
+			metadata.SourceURL = ""
+			return metadata
+		}()},
+		{name: "missing reported at", metadata: func() *model.RemoteFeedMetadata {
+			metadata := newFeedMetadata()
+			metadata.ReportedAt = time.Time{}
+			return metadata
+		}()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, err := NewNASClient("https://podcast.example.com", "secret", nil)
+			require.NoError(t, err)
+
+			err = client.UpsertFeedMetadata(context.Background(), tt.metadata)
+
+			require.Error(t, err)
+			assert.True(t, IsNonRetryable(err))
+		})
+	}
+}
+
+func TestNASClientUpsertFeedMetadataRejectsNon2xx(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusBadGateway)
+	}))
+	defer server.Close()
+	client, err := NewNASClient(server.URL, "secret", server.Client())
+	require.NoError(t, err)
+
+	err = client.UpsertFeedMetadata(context.Background(), newFeedMetadata())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 502")
+	assert.Contains(t, err.Error(), "boom")
+	assert.False(t, IsNonRetryable(err))
+}
+
+func TestNASClientUpsertFeedMetadataMarksValidationHTTPStatusNonRetryable(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusNotFound} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "bad metadata", status)
+			}))
+			defer server.Close()
+			client, err := NewNASClient(server.URL, "secret", server.Client())
+			require.NoError(t, err)
+
+			err = client.UpsertFeedMetadata(context.Background(), newFeedMetadata())
+
+			require.Error(t, err)
+			assert.True(t, IsNonRetryable(err))
+			assert.Contains(t, err.Error(), "HTTP")
+		})
+	}
+}
+
+func TestNASClientUpsertFeedMetadataRedactsTokenInErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "bad secret-token", http.StatusForbidden)
+	}))
+	defer server.Close()
+	client, err := NewNASClient(server.URL, "secret-token", server.Client())
+	require.NoError(t, err)
+
+	err = client.UpsertFeedMetadata(context.Background(), newFeedMetadata())
+
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "secret-token")
+	assert.Contains(t, err.Error(), "[redacted]")
+}
+
+func TestNASClientUpsertFeedMetadataRejectsInvalidResponse(t *testing.T) {
+	for _, body := range []string{
+		`{"ok":false,"feed_id":"feed"}`,
+		`{"ok":true}`,
+		`{"ok":true,"feed_id":"other"}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+			client, err := NewNASClient(server.URL, "secret", server.Client())
+			require.NoError(t, err)
+
+			err = client.UpsertFeedMetadata(context.Background(), newFeedMetadata())
+
+			require.Error(t, err)
+		})
+	}
+}
+
 func newClientTask() *model.RemotePublishTask {
 	return &model.RemotePublishTask{
 		ID:              model.RemotePublishTaskID("feed", "episode"),
@@ -545,6 +741,25 @@ func newClientTask() *model.RemotePublishTask {
 		Size:            456,
 		MimeType:        "audio/mpeg",
 		AssetToken:      "asset-token",
+	}
+}
+
+func newFeedMetadata() *model.RemoteFeedMetadata {
+	explicit := true
+	return &model.RemoteFeedMetadata{
+		FeedID:             "feed",
+		Provider:           model.ProviderYoutube,
+		SourceURL:          "https://www.youtube.com/channel/channel",
+		Title:              "Feed Title",
+		Description:        "Feed description",
+		ImageURL:           "https://img.example.com/feed.jpg",
+		Link:               "https://example.com/feed",
+		Author:             "Creator",
+		Category:           "TV & Film",
+		Language:           "en",
+		Explicit:           &explicit,
+		LastSourceUpdateAt: time.Date(2026, 7, 6, 12, 0, 0, 123000000, time.UTC),
+		ReportedAt:         time.Date(2026, 7, 6, 12, 5, 0, 123000000, time.UTC),
 	}
 }
 

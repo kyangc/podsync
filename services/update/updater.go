@@ -35,6 +35,12 @@ type RemoteEventSink interface {
 	RecordRemoteEvent(event model.RemoteEventDraft)
 }
 
+type RemoteFeedMetadataReporter interface {
+	UpsertFeedMetadata(ctx context.Context, metadata *model.RemoteFeedMetadata) error
+}
+
+type feedBuilderFactory func(context.Context, model.Provider, string, Downloader) (builder.Builder, error)
+
 type Option func(*Manager)
 
 func WithRemotePublishOutbox(outbox RemotePublishOutbox) Option {
@@ -49,18 +55,26 @@ func WithRemoteEventSink(sink RemoteEventSink) Option {
 	}
 }
 
+func WithRemoteFeedMetadataReporter(reporter RemoteFeedMetadataReporter) Option {
+	return func(u *Manager) {
+		u.remoteFeedMetadataReporter = reporter
+	}
+}
+
 type TokenList []string
 
 type Manager struct {
-	mu                  sync.RWMutex
-	hostname            string
-	downloader          Downloader
-	db                  db.Storage
-	fs                  fs.Storage
-	feeds               map[string]*feed.Config
-	keys                map[model.Provider]feed.KeyProvider
-	remotePublishOutbox RemotePublishOutbox
-	remoteEventSink     RemoteEventSink
+	mu                         sync.RWMutex
+	hostname                   string
+	downloader                 Downloader
+	db                         db.Storage
+	fs                         fs.Storage
+	feeds                      map[string]*feed.Config
+	keys                       map[model.Provider]feed.KeyProvider
+	remotePublishOutbox        RemotePublishOutbox
+	remoteEventSink            RemoteEventSink
+	remoteFeedMetadataReporter RemoteFeedMetadataReporter
+	builderFactory             feedBuilderFactory
 }
 
 func NewUpdater(
@@ -73,17 +87,22 @@ func NewUpdater(
 	options ...Option,
 ) (*Manager, error) {
 	manager := &Manager{
-		hostname:   hostname,
-		downloader: downloader,
-		db:         db,
-		fs:         fs,
-		feeds:      feeds,
-		keys:       keys,
+		hostname:       hostname,
+		downloader:     downloader,
+		db:             db,
+		fs:             fs,
+		feeds:          feeds,
+		keys:           keys,
+		builderFactory: defaultFeedBuilderFactory,
 	}
 	for _, option := range options {
 		option(manager)
 	}
 	return manager, nil
+}
+
+func defaultFeedBuilderFactory(ctx context.Context, provider model.Provider, key string, downloader Downloader) (builder.Builder, error) {
+	return builder.New(ctx, provider, key, downloader)
 }
 
 func (u *Manager) SetFeeds(feeds map[string]*feed.Config) {
@@ -222,7 +241,11 @@ func (u *Manager) updateFeed(ctx context.Context, feedConfig *feed.Config) error
 	}
 
 	// Create an updater for this feed type
-	provider, err := builder.New(ctx, info.Provider, key, u.downloader)
+	factory := u.builderFactory
+	if factory == nil {
+		factory = defaultFeedBuilderFactory
+	}
+	provider, err := factory(ctx, info.Provider, key, u.downloader)
 	if err != nil {
 		return err
 	}
@@ -249,6 +272,7 @@ func (u *Manager) updateFeed(ctx context.Context, feedConfig *feed.Config) error
 	if err := u.db.AddFeed(ctx, feedConfig.ID, result); err != nil {
 		return err
 	}
+	u.reportRemoteFeedMetadata(ctx, feedConfig, result, time.Now().UTC())
 
 	for _, episode := range result.Episodes {
 		delete(episodeSet, episode.ID)
@@ -265,6 +289,70 @@ func (u *Manager) updateFeed(ctx context.Context, feedConfig *feed.Config) error
 
 	log.Debug("successfully saved updates to storage")
 	return nil
+}
+
+func (u *Manager) reportRemoteFeedMetadata(ctx context.Context, feedConfig *feed.Config, result *model.Feed, reportedAt time.Time) {
+	if u.remoteFeedMetadataReporter == nil {
+		return
+	}
+	metadata, err := remoteFeedMetadataFromResult(feedConfig, result, reportedAt)
+	if err != nil {
+		log.WithError(err).WithField("feed_id", feedConfig.ID).Warn("remote feed metadata skipped")
+		return
+	}
+	if metadata == nil {
+		return
+	}
+	if err := u.remoteFeedMetadataReporter.UpsertFeedMetadata(ctx, metadata); err != nil {
+		log.WithError(err).WithField("feed_id", feedConfig.ID).Warn("remote feed metadata upsert failed")
+	}
+}
+
+func remoteFeedMetadataFromResult(feedConfig *feed.Config, result *model.Feed, reportedAt time.Time) (*model.RemoteFeedMetadata, error) {
+	info, err := builder.ParseURL(feedConfig.URL)
+	if err != nil {
+		return nil, err
+	}
+	if info.Provider != model.ProviderYoutube && info.Provider != model.ProviderBilibili {
+		return nil, nil
+	}
+
+	metadata := &model.RemoteFeedMetadata{
+		FeedID:      feedConfig.ID,
+		Provider:    info.Provider,
+		SourceURL:   feedConfig.URL,
+		Title:       result.Title,
+		Description: result.Description,
+		ImageURL:    result.CoverArt,
+		Link:        result.ItemURL,
+		Author:      result.Author,
+		Category:    feedConfig.Custom.Category,
+		Language:    feedConfig.Custom.Language,
+		ReportedAt:  reportedAt.UTC(),
+	}
+	if !result.PubDate.IsZero() {
+		metadata.LastSourceUpdateAt = result.PubDate.UTC()
+	}
+	if feedConfig.Custom.Title != "" {
+		metadata.Title = feedConfig.Custom.Title
+	}
+	if feedConfig.Custom.Description != "" {
+		metadata.Description = feedConfig.Custom.Description
+	}
+	if feedConfig.Custom.CoverArt != "" {
+		metadata.ImageURL = feedConfig.Custom.CoverArt
+	}
+	if feedConfig.Custom.Link != "" {
+		metadata.Link = feedConfig.Custom.Link
+	}
+	if feedConfig.Custom.Author != "" {
+		metadata.Author = feedConfig.Custom.Author
+	}
+	if feedConfig.Custom.Explicit {
+		explicit := true
+		metadata.Explicit = &explicit
+	}
+	return metadata, nil
 }
 
 func (u *Manager) providerKey(provider model.Provider) (string, error) {

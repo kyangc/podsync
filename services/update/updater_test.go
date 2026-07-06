@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mxpv/podsync/pkg/builder"
 	"github.com/mxpv/podsync/pkg/feed"
 	"github.com/mxpv/podsync/pkg/model"
 	"github.com/mxpv/podsync/pkg/ytdl"
@@ -299,6 +300,157 @@ func TestDownloadEpisodesDoesNotRecordFinishedForExistingMedia(t *testing.T) {
 	assert.Empty(t, sink.events)
 }
 
+func TestRemoteFeedMetadataFromResultMapsFields(t *testing.T) {
+	reportedAt := time.Date(2026, 7, 6, 12, 5, 0, 0, time.UTC)
+	result := testFeedResult()
+
+	metadata, err := remoteFeedMetadataFromResult(testFeedConfig(), result, reportedAt)
+
+	require.NoError(t, err)
+	require.NotNil(t, metadata)
+	assert.Equal(t, "feed", metadata.FeedID)
+	assert.Equal(t, model.ProviderYoutube, metadata.Provider)
+	assert.Equal(t, "https://www.youtube.com/channel/UCrLtQJG-ZNJeU08N0SNIJzw", metadata.SourceURL)
+	assert.Equal(t, "Feed Title", metadata.Title)
+	assert.Equal(t, "Feed description", metadata.Description)
+	assert.Equal(t, "https://example.com/cover.jpg", metadata.ImageURL)
+	assert.Equal(t, "https://example.com/feed", metadata.Link)
+	assert.Equal(t, "Creator", metadata.Author)
+	assert.Empty(t, metadata.Category)
+	assert.Empty(t, metadata.Language)
+	assert.Nil(t, metadata.Explicit)
+	assert.Equal(t, result.PubDate.UTC(), metadata.LastSourceUpdateAt)
+	assert.Equal(t, reportedAt, metadata.ReportedAt)
+}
+
+func TestRemoteFeedMetadataFromResultUsesCustomOverrides(t *testing.T) {
+	feedConfig := testFeedConfig()
+	feedConfig.Custom.Title = "Custom Title"
+	feedConfig.Custom.Description = "Custom description"
+	feedConfig.Custom.CoverArt = "https://example.com/custom.jpg"
+	feedConfig.Custom.Link = "https://example.com/custom"
+	feedConfig.Custom.Author = "Custom Creator"
+	feedConfig.Custom.Category = "Technology"
+	feedConfig.Custom.Language = "zh-CN"
+	feedConfig.Custom.Explicit = true
+
+	metadata, err := remoteFeedMetadataFromResult(feedConfig, testFeedResult(), time.Now())
+
+	require.NoError(t, err)
+	require.NotNil(t, metadata)
+	assert.Equal(t, "Custom Title", metadata.Title)
+	assert.Equal(t, "Custom description", metadata.Description)
+	assert.Equal(t, "https://example.com/custom.jpg", metadata.ImageURL)
+	assert.Equal(t, "https://example.com/custom", metadata.Link)
+	assert.Equal(t, "Custom Creator", metadata.Author)
+	assert.Equal(t, "Technology", metadata.Category)
+	assert.Equal(t, "zh-CN", metadata.Language)
+	require.NotNil(t, metadata.Explicit)
+	assert.True(t, *metadata.Explicit)
+}
+
+func TestRemoteFeedMetadataFromResultSkipsUnsupportedProvider(t *testing.T) {
+	feedConfig := testFeedConfig()
+	feedConfig.URL = "https://vimeo.com/example"
+
+	metadata, err := remoteFeedMetadataFromResult(feedConfig, testFeedResult(), time.Now())
+
+	require.NoError(t, err)
+	assert.Nil(t, metadata)
+}
+
+func TestUpdateFeedReportsRemoteFeedMetadataAfterAddFeed(t *testing.T) {
+	reporter := &recordingFeedMetadataReporter{}
+	database := &hookDB{}
+	result := testFeedResult()
+	feedConfig := testFeedConfig()
+	feedConfig.URL = "https://space.bilibili.com/10835521"
+	manager := &Manager{
+		db:                         database,
+		downloader:                 hookDownloader{},
+		keys:                       map[model.Provider]feed.KeyProvider{},
+		remoteFeedMetadataReporter: reporter,
+		builderFactory: func(_ context.Context, provider model.Provider, key string, downloader Downloader) (builder.Builder, error) {
+			assert.Equal(t, model.ProviderBilibili, provider)
+			assert.Empty(t, key)
+			assert.NotNil(t, downloader)
+			return fakeFeedBuilder{result: result}, nil
+		},
+	}
+
+	err := manager.updateFeed(context.Background(), feedConfig)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, database.addFeedCalls)
+	assert.Equal(t, result, database.feed)
+	require.Len(t, reporter.metadata, 1)
+	assert.Equal(t, "feed", reporter.metadata[0].FeedID)
+	assert.Equal(t, model.ProviderBilibili, reporter.metadata[0].Provider)
+	assert.Equal(t, "https://space.bilibili.com/10835521", reporter.metadata[0].SourceURL)
+}
+
+func TestUpdateFeedDoesNotReportRemoteFeedMetadataWhenBuildFails(t *testing.T) {
+	reporter := &recordingFeedMetadataReporter{}
+	wantErr := errors.New("builder failed")
+	manager := &Manager{
+		db:                         &hookDB{},
+		downloader:                 hookDownloader{},
+		keys:                       map[model.Provider]feed.KeyProvider{},
+		remoteFeedMetadataReporter: reporter,
+		builderFactory: func(context.Context, model.Provider, string, Downloader) (builder.Builder, error) {
+			return fakeFeedBuilder{err: wantErr}, nil
+		},
+	}
+	feedConfig := testFeedConfig()
+	feedConfig.URL = "https://space.bilibili.com/10835521"
+
+	err := manager.updateFeed(context.Background(), feedConfig)
+
+	require.ErrorIs(t, err, wantErr)
+	assert.Empty(t, reporter.metadata)
+}
+
+func TestUpdateFeedDoesNotReportRemoteFeedMetadataWhenAddFeedFails(t *testing.T) {
+	reporter := &recordingFeedMetadataReporter{}
+	wantErr := errors.New("db failed")
+	manager := &Manager{
+		db:                         &hookDB{addFeedErr: wantErr},
+		downloader:                 hookDownloader{},
+		keys:                       map[model.Provider]feed.KeyProvider{},
+		remoteFeedMetadataReporter: reporter,
+		builderFactory: func(context.Context, model.Provider, string, Downloader) (builder.Builder, error) {
+			return fakeFeedBuilder{result: testFeedResult()}, nil
+		},
+	}
+	feedConfig := testFeedConfig()
+	feedConfig.URL = "https://space.bilibili.com/10835521"
+
+	err := manager.updateFeed(context.Background(), feedConfig)
+
+	require.ErrorIs(t, err, wantErr)
+	assert.Empty(t, reporter.metadata)
+}
+
+func TestUpdateFeedIgnoresRemoteFeedMetadataReporterError(t *testing.T) {
+	reporter := &recordingFeedMetadataReporter{err: errors.New("remote failed")}
+	manager := &Manager{
+		db:                         &hookDB{},
+		downloader:                 hookDownloader{},
+		keys:                       map[model.Provider]feed.KeyProvider{},
+		remoteFeedMetadataReporter: reporter,
+		builderFactory: func(context.Context, model.Provider, string, Downloader) (builder.Builder, error) {
+			return fakeFeedBuilder{result: testFeedResult()}, nil
+		},
+	}
+	feedConfig := testFeedConfig()
+	feedConfig.URL = "https://space.bilibili.com/10835521"
+
+	err := manager.updateFeed(context.Background(), feedConfig)
+
+	require.NoError(t, err)
+	assert.Len(t, reporter.metadata, 1)
+}
+
 type recordingRemoteOutbox struct {
 	tasks         []*model.RemotePublishTask
 	err           error
@@ -327,16 +479,46 @@ func (r *recordingEventSink) RecordRemoteEvent(event model.RemoteEventDraft) {
 	r.events = append(r.events, event)
 }
 
+type recordingFeedMetadataReporter struct {
+	metadata []*model.RemoteFeedMetadata
+	err      error
+}
+
+func (r *recordingFeedMetadataReporter) UpsertFeedMetadata(_ context.Context, metadata *model.RemoteFeedMetadata) error {
+	r.metadata = append(r.metadata, metadata)
+	return r.err
+}
+
+type fakeFeedBuilder struct {
+	result *model.Feed
+	err    error
+}
+
+func (f fakeFeedBuilder) Build(context.Context, *feed.Config) (*model.Feed, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.result, nil
+}
+
 type hookDB struct {
-	updated  bool
-	fail     error
-	episodes []*model.Episode
+	updated      bool
+	fail         error
+	episodes     []*model.Episode
+	feed         *model.Feed
+	addFeedErr   error
+	addFeedCalls int
 }
 
 func (h *hookDB) Close() error          { return nil }
 func (h *hookDB) Version() (int, error) { return 0, errors.New("not implemented") }
-func (h *hookDB) AddFeed(context.Context, string, *model.Feed) error {
-	return errors.New("not implemented")
+func (h *hookDB) AddFeed(_ context.Context, _ string, feed *model.Feed) error {
+	h.addFeedCalls++
+	if h.addFeedErr != nil {
+		return h.addFeedErr
+	}
+	h.feed = feed
+	return nil
 }
 func (h *hookDB) GetFeed(context.Context, string) (*model.Feed, error) {
 	return nil, errors.New("not implemented")
@@ -426,5 +608,18 @@ func testEpisode() *model.Episode {
 		VideoURL:    "https://www.youtube.com/watch?v=episode",
 		PubDate:     time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
 		Status:      model.EpisodeNew,
+	}
+}
+
+func testFeedResult() *model.Feed {
+	return &model.Feed{
+		ID:          "feed",
+		Title:       "Feed Title",
+		Description: "Feed description",
+		CoverArt:    "https://example.com/cover.jpg",
+		ItemURL:     "https://example.com/feed",
+		Author:      "Creator",
+		PubDate:     time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
+		Episodes:    []*model.Episode{testEpisode()},
 	}
 }

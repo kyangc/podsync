@@ -19,6 +19,7 @@ type remotePublishProcessor interface {
 
 type remotePublisherFactory func(remotepublish.R2Config) (remotepublish.Publisher, error)
 type remoteUpserterFactory func(baseURL string, token string) (remotepublish.EpisodeUpserter, error)
+type remoteFeedMetadataReporterFactory func(baseURL string, token string) (remotepublish.FeedMetadataReporter, error)
 
 func remotePublishOptions(cfg *Config, outbox update.RemotePublishOutbox) []update.Option {
 	if !cfg.Remote.Enabled {
@@ -38,6 +39,23 @@ func remotePublishEnabled(cfg *Config) bool {
 		cfg.R2.SecretAccessKey != ""
 }
 
+func remoteFeedMetadataReportingEnabled(cfg *Config) bool {
+	return cfg.Remote.Enabled &&
+		cfg.Remote.BaseURL != "" &&
+		cfg.Remote.Token != ""
+}
+
+func remoteFeedMetadataOptions(cfg *Config, newReporter remoteFeedMetadataReporterFactory) ([]update.Option, error) {
+	if !remoteFeedMetadataReportingEnabled(cfg) {
+		return nil, nil
+	}
+	reporter, err := newReporter(cfg.Remote.BaseURL, cfg.Remote.Token)
+	if err != nil {
+		return nil, err
+	}
+	return []update.Option{update.WithRemoteFeedMetadataReporter(reporter)}, nil
+}
+
 func remoteR2Config(cfg *Config) remotepublish.R2Config {
 	return remotepublish.R2Config{
 		Endpoint:        cfg.R2.Endpoint,
@@ -53,6 +71,10 @@ func newRemoteR2Publisher(cfg remotepublish.R2Config) (remotepublish.Publisher, 
 }
 
 func newRemoteNASUpserter(baseURL string, token string) (remotepublish.EpisodeUpserter, error) {
+	return remotepublish.NewNASClient(baseURL, token, nil)
+}
+
+func newRemoteFeedMetadataReporter(baseURL string, token string) (remotepublish.FeedMetadataReporter, error) {
 	return remotepublish.NewNASClient(baseURL, token, nil)
 }
 

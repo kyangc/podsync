@@ -154,6 +154,22 @@ export interface EventBatchRequest {
   events: RemoteEventInput[];
 }
 
+export interface FeedMetadataUpsertRequest {
+  feed_id: string;
+  provider: "youtube" | "bilibili";
+  source_url: string;
+  title?: string;
+  description?: string;
+  image_url?: string;
+  link?: string;
+  author?: string;
+  category?: string;
+  language?: string;
+  explicit?: boolean;
+  last_source_update_at?: string;
+  reported_at: string;
+}
+
 export interface AdminSyncRunRow {
   id: string;
   started_at: string;
