@@ -62,6 +62,14 @@ export interface AdminFeedListRow {
   public_path: string | null;
   metadata_title: string | null;
   metadata_description: string | null;
+  title: string | null;
+  not_title: string | null;
+  description: string | null;
+  not_description: string | null;
+  min_duration: number | null;
+  max_duration: number | null;
+  min_age: number | null;
+  max_age: number | null;
 }
 
 export type EpisodeStatus = "pending" | "visible" | "hidden" | "delete_pending" | "purged";
@@ -198,6 +206,33 @@ export interface AdminFeedStatusRequest {
   feed_id: string;
   enabled?: boolean;
   include_in_opml?: boolean;
+}
+
+export interface AdminFeedFilters {
+  title: string | null;
+  not_title: string | null;
+  description: string | null;
+  not_description: string | null;
+  min_duration: number | null;
+  max_duration: number | null;
+  min_age: number | null;
+  max_age: number | null;
+}
+
+export interface AdminFeedConfigUpsertRequest {
+  feed_id: string;
+  provider: "youtube" | "bilibili";
+  url: string;
+  title_override: string | null;
+  description_override: string | null;
+  enabled: boolean;
+  include_in_opml: boolean;
+  private_feed: boolean;
+  update_period: string;
+  page_size: number;
+  keep_last: number;
+  cookie_profile: string | null;
+  filters: AdminFeedFilters;
 }
 
 export interface FeedStatusRow {

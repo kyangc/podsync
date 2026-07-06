@@ -1,6 +1,7 @@
 import type {
   AdminEpisodeListRow,
   AdminEventRow,
+  AdminFeedFilters,
   AdminFeedListRow,
   AdminSubscriptionFeedRow,
   AdminSubscriptionOpmlRow,
@@ -35,10 +36,12 @@ interface FakeD1Options {
   beforeTombstoneSnapshot?: (() => void) | undefined;
   failTombstoneInsert?: boolean | undefined;
   failPurgeUpdateKeys?: Set<string> | undefined;
+  feedInsertUniqueCollision?: ((row: FakeFeedRow) => boolean) | undefined;
+  failFeedFiltersUpsert?: boolean | undefined;
   lastChanges?: number | undefined;
 }
 
-interface FakeFeedRow {
+export interface FakeFeedRow {
   feed_id: string;
   provider: "youtube" | "bilibili";
   url?: string | undefined;
@@ -55,6 +58,14 @@ interface FakeFeedRow {
   public_path?: string | null | undefined;
   metadata_title?: string | null | undefined;
   metadata_description?: string | null | undefined;
+  title?: string | null | undefined;
+  not_title?: string | null | undefined;
+  description?: string | null | undefined;
+  not_description?: string | null | undefined;
+  min_duration?: number | null | undefined;
+  max_duration?: number | null | undefined;
+  min_age?: number | null | undefined;
+  max_age?: number | null | undefined;
 }
 
 interface FakeOpmlTokenRow {
@@ -97,6 +108,14 @@ interface FakeReadableFeed {
   metadata_title: string | null;
   metadata_description: string | null;
   metadata_link: string | null;
+  title: string | null;
+  not_title: string | null;
+  description: string | null;
+  not_description: string | null;
+  min_duration: number | null;
+  max_duration: number | null;
+  min_age: number | null;
+  max_age: number | null;
 }
 
 export interface FakeEpisodeRow {
@@ -229,8 +248,8 @@ class FakeStatement {
   }
 
   private allRows(): unknown[] {
-    if (this.query.includes("FROM feeds f") && this.query.includes("LEFT JOIN feed_filters")) {
-      return (this.options.tomlFeeds ?? []).filter((feed) => feed.enabled === 1);
+    if (this.query.includes("FROM feeds f") && this.query.includes("LEFT JOIN feed_filters") && this.query.includes("WHERE f.enabled = 1")) {
+      return fakeFeedRows(this.options).filter((feed) => feed.enabled === 1);
     }
 
     if (
@@ -357,7 +376,15 @@ class FakeStatement {
   runWithOptions(options: FakeD1Options): D1Result {
     options.sqlLog?.push(this.query);
     let changes = 0;
-    if (this.query.includes("INSERT INTO episodes") && this.query.includes("ON CONFLICT")) {
+    if (this.query.includes("INSERT INTO feeds")) {
+      this.runFeedConfigInsert(options);
+      changes = 1;
+    } else if (this.query.includes("UPDATE feeds") && this.query.includes("SET url =")) {
+      changes = this.runFeedConfigUpdate(options);
+    } else if (this.query.includes("INSERT INTO feed_filters") && this.query.includes("ON CONFLICT")) {
+      this.runFeedFiltersUpsert(options);
+      changes = 1;
+    } else if (this.query.includes("INSERT INTO episodes") && this.query.includes("ON CONFLICT")) {
       this.runEpisodeUpsert(options);
       changes = 1;
     } else if (this.query.includes("INSERT INTO feed_metadata") && this.query.includes("ON CONFLICT")) {
@@ -380,6 +407,103 @@ class FakeStatement {
     }
     options.lastChanges = changes;
     return { results: [], success: true, meta: { changes } } as unknown as D1Result;
+  }
+
+  private runFeedConfigInsert(options: FakeD1Options): void {
+    const [
+      feedID,
+      provider,
+      url,
+      titleOverride,
+      descriptionOverride,
+      enabled,
+      includeInOpml,
+      privateFeed,
+      updatePeriod,
+      pageSize,
+      keepLast,
+      cookieProfile,
+      feedTokenHash,
+      publicPath,
+    ] = this.params;
+    const id = String(feedID);
+    const row: FakeFeedRow = {
+      feed_id: id,
+      provider: provider as "youtube" | "bilibili",
+      url: String(url),
+      title_override: nullableString(titleOverride),
+      description_override: nullableString(descriptionOverride),
+      enabled: Number(enabled),
+      include_in_opml: Number(includeInOpml),
+      private_feed: Number(privateFeed),
+      update_period: String(updatePeriod),
+      page_size: Number(pageSize),
+      keep_last: Number(keepLast),
+      cookie_profile: nullableString(cookieProfile),
+      feed_token_hash: String(feedTokenHash),
+      public_path: nullableString(publicPath),
+    };
+    if (options.feedInsertUniqueCollision?.(row)) {
+      throw new Error("UNIQUE constraint failed: feeds.public_path");
+    }
+    const feeds = options.feedsByID ?? new Map<string, FakeFeedRow>();
+    options.feedsByID = feeds;
+    if (feeds.has(id) || options.tomlFeeds?.some((feed) => feed.feed_id === id)) {
+      throw new Error("UNIQUE constraint failed: feeds.feed_id");
+    }
+    for (const feed of fakeFeedRows(options)) {
+      if (feed.feed_token_hash === row.feed_token_hash) throw new Error("UNIQUE constraint failed: feeds.feed_token_hash");
+      if (row.public_path !== null && feed.public_path === row.public_path) throw new Error("UNIQUE constraint failed: feeds.public_path");
+    }
+    feeds.set(id, row);
+  }
+
+  private runFeedConfigUpdate(options: FakeD1Options): number {
+    const [
+      url,
+      titleOverride,
+      descriptionOverride,
+      enabled,
+      includeInOpml,
+      privateFeed,
+      updatePeriod,
+      pageSize,
+      keepLast,
+      cookieProfile,
+      feedID,
+    ] = this.params;
+    const id = String(feedID);
+    const feed = options.feedsByID?.get(id) ?? options.tomlFeeds?.find((row) => row.feed_id === id);
+    if (!feed) return 0;
+    feed.url = String(url);
+    feed.title_override = nullableString(titleOverride);
+    feed.description_override = nullableString(descriptionOverride);
+    feed.enabled = Number(enabled);
+    feed.include_in_opml = Number(includeInOpml);
+    feed.private_feed = Number(privateFeed);
+    feed.update_period = String(updatePeriod);
+    feed.page_size = Number(pageSize);
+    feed.keep_last = Number(keepLast);
+    feed.cookie_profile = nullableString(cookieProfile);
+    return 1;
+  }
+
+  private runFeedFiltersUpsert(options: FakeD1Options): void {
+    if (options.failFeedFiltersUpsert) throw new Error("feed filters upsert failed");
+    const [feedID, title, notTitle, description, notDescription, minDuration, maxDuration, minAge, maxAge] = this.params;
+    const id = String(feedID);
+    const feed = options.feedsByID?.get(id) ?? options.tomlFeeds?.find((row) => row.feed_id === id);
+    if (!feed) throw new Error("FOREIGN KEY constraint failed: feed_filters.feed_id");
+    setFeedFilters(feed, {
+      title: nullableString(title),
+      not_title: nullableString(notTitle),
+      description: nullableString(description),
+      not_description: nullableString(notDescription),
+      min_duration: nullableNumber(minDuration),
+      max_duration: nullableNumber(maxDuration),
+      min_age: nullableNumber(minAge),
+      max_age: nullableNumber(maxAge),
+    });
   }
 
   private runEpisodeUpsert(options: FakeD1Options): void {
@@ -683,6 +807,21 @@ function nullableString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function nullableNumber(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
+}
+
+function setFeedFilters(feed: FakeFeedRow | FeedTomlRow, filters: AdminFeedFilters): void {
+  feed.title = filters.title;
+  feed.not_title = filters.not_title;
+  feed.description = filters.description;
+  feed.not_description = filters.not_description;
+  feed.min_duration = filters.min_duration;
+  feed.max_duration = filters.max_duration;
+  feed.min_age = filters.min_age;
+  feed.max_age = filters.max_age;
+}
+
 function comparePublishedAtDesc(left: string | null, right: string | null): number {
   const leftTime = left ? Date.parse(left) : 0;
   const rightTime = right ? Date.parse(right) : 0;
@@ -757,6 +896,14 @@ function fakeReadableFeedFromToml(feed: FeedTomlRow, options: FakeD1Options): Fa
     metadata_title: metadata?.title ?? extras.metadata_title ?? null,
     metadata_description: metadata?.description ?? extras.metadata_description ?? null,
     metadata_link: metadata?.link ?? null,
+    title: feed.title ?? null,
+    not_title: feed.not_title ?? null,
+    description: feed.description ?? null,
+    not_description: feed.not_description ?? null,
+    min_duration: feed.min_duration ?? null,
+    max_duration: feed.max_duration ?? null,
+    min_age: feed.min_age ?? null,
+    max_age: feed.max_age ?? null,
   };
 }
 
@@ -780,6 +927,14 @@ function fakeReadableFeedFromPartial(feed: FakeFeedRow, options: FakeD1Options):
     metadata_title: metadata?.title ?? feed.metadata_title ?? null,
     metadata_description: metadata?.description ?? feed.metadata_description ?? null,
     metadata_link: metadata?.link ?? null,
+    title: feed.title ?? null,
+    not_title: feed.not_title ?? null,
+    description: feed.description ?? null,
+    not_description: feed.not_description ?? null,
+    min_duration: feed.min_duration ?? null,
+    max_duration: feed.max_duration ?? null,
+    min_age: feed.min_age ?? null,
+    max_age: feed.max_age ?? null,
   };
 }
 
@@ -817,6 +972,14 @@ function adminFeedListRow(feed: FakeReadableFeed): AdminFeedListRow {
     public_path: feed.public_path,
     metadata_title: feed.metadata_title,
     metadata_description: feed.metadata_description,
+    title: feed.title,
+    not_title: feed.not_title,
+    description: feed.description,
+    not_description: feed.not_description,
+    min_duration: feed.min_duration,
+    max_duration: feed.max_duration,
+    min_age: feed.min_age,
+    max_age: feed.max_age,
   };
 }
 

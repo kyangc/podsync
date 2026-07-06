@@ -106,6 +106,7 @@ describe("admin read APIs", () => {
               url: "https://space.bilibili.com/10835521",
               metadata_title: "Bilibili Metadata",
               metadata_description: "Bilibili description",
+              not_title: "直播",
               public_path: "/f/bili.xml",
             }),
             feedRow({
@@ -134,6 +135,9 @@ describe("admin read APIs", () => {
         feed_id: string;
         title: string;
         description: string | null;
+        title_override: string | null;
+        description_override: string | null;
+        filters: { not_title: string | null };
         enabled: boolean;
         include_in_opml: boolean;
         private_feed: boolean;
@@ -145,6 +149,9 @@ describe("admin read APIs", () => {
         feed_id: "bili",
         title: "Bilibili Metadata",
         description: "Bilibili description",
+        title_override: null,
+        description_override: null,
+        filters: expect.objectContaining({ not_title: "直播" }),
         enabled: true,
         include_in_opml: true,
         private_feed: true,
@@ -154,6 +161,9 @@ describe("admin read APIs", () => {
         feed_id: "yt",
         title: "YouTube Override",
         description: "Override description",
+        title_override: "YouTube Override",
+        description_override: "Override description",
+        filters: expect.objectContaining({ not_title: null }),
         enabled: false,
         include_in_opml: false,
         private_feed: false,

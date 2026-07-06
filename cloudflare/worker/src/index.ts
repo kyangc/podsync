@@ -4,6 +4,8 @@ import type {
   AdminEpisodeListRow,
   AdminEpisodeStatusRequest,
   AdminEventRow,
+  AdminFeedConfigUpsertRequest,
+  AdminFeedFilters,
   AdminFeedListRow,
   AdminFeedStatusRequest,
   AdminSubscriptionFeedRow,
@@ -51,6 +53,15 @@ const utcTimestampPattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/
 const eventRetentionDays = 30;
 const syncRunRetentionDays = 180;
 const purgeBatchLimit = 50;
+const maxFeedIDLength = 128;
+const maxFeedStringLength = 512;
+const maxFeedURLLength = 2048;
+const maxUpdatePeriodLength = 64;
+const maxPageSize = 200;
+const maxKeepLast = 1000;
+const publicFeedTokenAttempts = 5;
+const feedIDPattern = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+const goDurationPattern = /^(?:[1-9]\d*(?:ns|us|µs|ms|s|m|h))+$/;
 
 const syncRunStatuses = new Set<SyncRunStatus>(["running", "success", "partial", "failed"]);
 const eventLevels = new Set<EventLevel>(["debug", "info", "warn", "error"]);
@@ -91,6 +102,13 @@ export interface MaintenanceResult {
   purge_candidates: number;
   episodes_purged: number;
   purge_errors: number;
+}
+
+interface ExistingAdminFeedRow {
+  feed_id: string;
+  provider: AdminFeedConfigUpsertRequest["provider"];
+  feed_token_hash: string;
+  public_path: string | null;
 }
 
 function text(body: string, status = 200, contentType = "text/plain; charset=utf-8"): Response {
@@ -1215,6 +1233,151 @@ function parseFeedMetadataUpsert(body: unknown): FeedMetadataUpsertRequest | Res
   return request;
 }
 
+function optionalNullableString(value: unknown, name: string, maxLength = maxFeedStringLength): string | null | Response {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return badRequest(`${name} must be string or null`);
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  if (trimmed.length > maxLength) return badRequest(`${name} is too long`);
+  return trimmed;
+}
+
+function requiredBoolean(value: unknown, name: string): boolean | Response {
+  if (typeof value !== "boolean") return badRequest(`${name} must be boolean`);
+  return value;
+}
+
+function integerInRange(value: unknown, name: string, min: number, max: number): number | Response {
+  if (!Number.isSafeInteger(value) || typeof value !== "number" || value < min || value > max) {
+    return badRequest(`${name} is invalid`);
+  }
+  return value;
+}
+
+function optionalFilterInteger(value: unknown, name: string): number | null | Response {
+  if (value === undefined || value === null) return null;
+  if (!Number.isSafeInteger(value) || typeof value !== "number" || value < 0) {
+    return badRequest(`${name} is invalid`);
+  }
+  return value;
+}
+
+function parseFeedFilters(value: unknown): AdminFeedFilters | Response {
+  if (value === undefined || value === null) {
+    return emptyFeedFilters();
+  }
+  if (typeof value !== "object" || Array.isArray(value)) return badRequest("filters must be object");
+  const filters = value as Record<string, unknown>;
+  const title = optionalNullableString(filters.title, "filters.title");
+  if (title instanceof Response) return title;
+  const notTitle = optionalNullableString(filters.not_title, "filters.not_title");
+  if (notTitle instanceof Response) return notTitle;
+  const description = optionalNullableString(filters.description, "filters.description");
+  if (description instanceof Response) return description;
+  const notDescription = optionalNullableString(filters.not_description, "filters.not_description");
+  if (notDescription instanceof Response) return notDescription;
+  const minDuration = optionalFilterInteger(filters.min_duration, "filters.min_duration");
+  if (minDuration instanceof Response) return minDuration;
+  const maxDuration = optionalFilterInteger(filters.max_duration, "filters.max_duration");
+  if (maxDuration instanceof Response) return maxDuration;
+  const minAge = optionalFilterInteger(filters.min_age, "filters.min_age");
+  if (minAge instanceof Response) return minAge;
+  const maxAge = optionalFilterInteger(filters.max_age, "filters.max_age");
+  if (maxAge instanceof Response) return maxAge;
+
+  return {
+    title,
+    not_title: notTitle,
+    description,
+    not_description: notDescription,
+    min_duration: minDuration,
+    max_duration: maxDuration,
+    min_age: minAge,
+    max_age: maxAge,
+  };
+}
+
+function emptyFeedFilters(): AdminFeedFilters {
+  return {
+    title: null,
+    not_title: null,
+    description: null,
+    not_description: null,
+    min_duration: null,
+    max_duration: null,
+    min_age: null,
+    max_age: null,
+  };
+}
+
+function hostMatchesRoot(host: string, root: string): boolean {
+  return host === root || host.endsWith(`.${root}`);
+}
+
+function providerURLIsValid(provider: AdminFeedConfigUpsertRequest["provider"], rawURL: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawURL);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  const host = parsed.hostname.toLowerCase();
+  if (provider === "youtube") return hostMatchesRoot(host, "youtube.com");
+  return hostMatchesRoot(host, "bilibili.com");
+}
+
+function parseAdminFeedConfigUpsert(body: unknown): AdminFeedConfigUpsertRequest | Response {
+  if (!body || typeof body !== "object") return badRequest("invalid feed config body");
+  const value = body as Record<string, unknown>;
+  if (!nonEmptyString(value.feed_id) || value.feed_id.length > maxFeedIDLength || !feedIDPattern.test(value.feed_id)) {
+    return badRequest("feed_id is invalid");
+  }
+  if (!isProvider(value.provider)) return badRequest("provider is invalid");
+  if (!nonEmptyString(value.url)) return badRequest("url is invalid");
+  const feedURL = value.url.trim();
+  if (feedURL.length > maxFeedURLLength || !providerURLIsValid(value.provider, feedURL)) {
+    return badRequest("url is invalid");
+  }
+  const titleOverride = optionalNullableString(value.title_override, "title_override");
+  if (titleOverride instanceof Response) return titleOverride;
+  const descriptionOverride = optionalNullableString(value.description_override, "description_override");
+  if (descriptionOverride instanceof Response) return descriptionOverride;
+  const enabled = requiredBoolean(value.enabled, "enabled");
+  if (enabled instanceof Response) return enabled;
+  const includeInOpml = requiredBoolean(value.include_in_opml, "include_in_opml");
+  if (includeInOpml instanceof Response) return includeInOpml;
+  const privateFeed = requiredBoolean(value.private_feed, "private_feed");
+  if (privateFeed instanceof Response) return privateFeed;
+  if (!nonEmptyString(value.update_period) || value.update_period.length > maxUpdatePeriodLength || !goDurationPattern.test(value.update_period)) {
+    return badRequest("update_period is invalid");
+  }
+  const pageSize = integerInRange(value.page_size, "page_size", 1, maxPageSize);
+  if (pageSize instanceof Response) return pageSize;
+  const keepLast = integerInRange(value.keep_last, "keep_last", 0, maxKeepLast);
+  if (keepLast instanceof Response) return keepLast;
+  const cookieProfile = optionalNullableString(value.cookie_profile, "cookie_profile");
+  if (cookieProfile instanceof Response) return cookieProfile;
+  const filters = parseFeedFilters(value.filters);
+  if (filters instanceof Response) return filters;
+
+  return {
+    feed_id: value.feed_id,
+    provider: value.provider,
+    url: feedURL,
+    title_override: titleOverride,
+    description_override: descriptionOverride,
+    enabled,
+    include_in_opml: includeInOpml,
+    private_feed: privateFeed,
+    update_period: value.update_period,
+    page_size: pageSize,
+    keep_last: keepLast,
+    cookie_profile: cookieProfile,
+    filters,
+  };
+}
+
 function parseAdminFeedStatus(body: unknown): AdminFeedStatusRequest | Response {
   if (!body || typeof body !== "object") return badRequest("invalid feed status body");
   const value = body as Record<string, unknown>;
@@ -1399,6 +1562,46 @@ function feedMetadataUpsertSQL(): string {
             reported_at = excluded.reported_at`;
 }
 
+function feedConfigInsertSQL(): string {
+  return `INSERT INTO feeds (
+            feed_id, provider, url, title_override, description_override,
+            enabled, include_in_opml, private_feed, update_period, page_size,
+            keep_last, cookie_profile, feed_token_hash, public_path, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`;
+}
+
+function feedConfigUpdateSQL(): string {
+  return `UPDATE feeds
+             SET url = ?,
+                 title_override = ?,
+                 description_override = ?,
+                 enabled = ?,
+                 include_in_opml = ?,
+                 private_feed = ?,
+                 update_period = ?,
+                 page_size = ?,
+                 keep_last = ?,
+                 cookie_profile = ?,
+                 updated_at = CURRENT_TIMESTAMP
+           WHERE feed_id = ?`;
+}
+
+function feedFiltersUpsertSQL(): string {
+  return `INSERT INTO feed_filters (
+            feed_id, title, not_title, description, not_description,
+            min_duration, max_duration, min_age, max_age
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(feed_id) DO UPDATE SET
+            title = excluded.title,
+            not_title = excluded.not_title,
+            description = excluded.description,
+            not_description = excluded.not_description,
+            min_duration = excluded.min_duration,
+            max_duration = excluded.max_duration,
+            min_age = excluded.min_age,
+            max_age = excluded.max_age`;
+}
+
 function parseIntegerParam(value: string | null, fallback: number, name: string): number | Response {
   if (value === null) return fallback;
   if (!/^\d+$/.test(value)) return badRequest(`${name} is invalid`);
@@ -1411,9 +1614,72 @@ function jsonBoolean(value: number): boolean {
   return value === 1;
 }
 
+function dbBoolean(value: boolean): number {
+  return value ? 1 : 0;
+}
+
 function optionalDBBoolean(value: boolean | undefined): number | null {
   if (value === undefined) return null;
   return value ? 1 : 0;
+}
+
+function newPublicFeedPath(): string {
+  return `/f/${crypto.randomUUID()}.xml`;
+}
+
+function tokenFromPublicFeedPath(publicPath: string): string {
+  return publicPath.slice("/f/".length, -".xml".length);
+}
+
+async function feedTokenHashFromPublicPath(publicPath: string): Promise<string> {
+  return sha256Hex(tokenFromPublicFeedPath(publicPath));
+}
+
+function feedConfigResponse(request: Request, feed: AdminFeedConfigUpsertRequest, publicPath: string | null) {
+  return {
+    feed_id: feed.feed_id,
+    provider: feed.provider,
+    url: feed.url,
+    title_override: feed.title_override,
+    description_override: feed.description_override,
+    enabled: feed.enabled,
+    include_in_opml: feed.include_in_opml,
+    private_feed: feed.private_feed,
+    update_period: feed.update_period,
+    page_size: feed.page_size,
+    keep_last: feed.keep_last,
+    cookie_profile: feed.cookie_profile,
+    filters: feed.filters,
+    public_feed_url: absolutePublicURL(request, publicPath, "/f/"),
+  };
+}
+
+function feedFilterBindings(feed: AdminFeedConfigUpsertRequest): unknown[] {
+  return [
+    feed.feed_id,
+    feed.filters.title,
+    feed.filters.not_title,
+    feed.filters.description,
+    feed.filters.not_description,
+    feed.filters.min_duration,
+    feed.filters.max_duration,
+    feed.filters.min_age,
+    feed.filters.max_age,
+  ];
+}
+
+function uniqueConstraintMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message;
+}
+
+function isPublicFeedTokenConstraintError(error: unknown): boolean {
+  const message = uniqueConstraintMessage(error);
+  return message.includes("collision") || message.includes("feeds.feed_token_hash") || message.includes("feeds.public_path");
+}
+
+function isFeedIDConstraintError(error: unknown): boolean {
+  return uniqueConstraintMessage(error).includes("feeds.feed_id");
 }
 
 function parseEpisodeStatusParam(value: string | null): EpisodeStatus | Response | null {
@@ -1490,9 +1756,12 @@ async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
     `SELECT f.feed_id, f.provider, f.url, f.title_override, f.description_override,
             f.enabled, f.include_in_opml, f.private_feed, f.update_period,
             f.page_size, f.keep_last, f.cookie_profile, f.public_path,
-            m.title AS metadata_title, m.description AS metadata_description
+            m.title AS metadata_title, m.description AS metadata_description,
+            ff.title, ff.not_title, ff.description, ff.not_description,
+            ff.min_duration, ff.max_duration, ff.min_age, ff.max_age
        FROM feeds f
        LEFT JOIN feed_metadata m ON m.feed_id = f.feed_id
+       LEFT JOIN feed_filters ff ON ff.feed_id = f.feed_id
       ORDER BY f.feed_id ASC`,
   ).all<AdminFeedListRow>();
 
@@ -1501,6 +1770,8 @@ async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
       feed_id: feed.feed_id,
       provider: feed.provider,
       url: feed.url,
+      title_override: feed.title_override,
+      description_override: feed.description_override,
       title: feed.metadata_title ?? feed.title_override ?? feed.feed_id,
       description: feed.metadata_description ?? feed.description_override ?? null,
       enabled: jsonBoolean(feed.enabled),
@@ -1510,9 +1781,104 @@ async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
       page_size: feed.page_size,
       keep_last: feed.keep_last,
       cookie_profile: feed.cookie_profile,
+      filters: {
+        title: feed.title,
+        not_title: feed.not_title,
+        description: feed.description,
+        not_description: feed.not_description,
+        min_duration: feed.min_duration,
+        max_duration: feed.max_duration,
+        min_age: feed.min_age,
+        max_age: feed.max_age,
+      },
       public_feed_url: absolutePublicURL(request, feed.public_path, "/f/"),
     })),
   });
+}
+
+async function handleAdminFeedUpsert(request: Request, env: Env): Promise<Response> {
+  const body = await readBoundedJson(request);
+  if (body instanceof Response) return body;
+
+  const parsed = parseAdminFeedConfigUpsert(body);
+  if (parsed instanceof Response) return parsed;
+
+  const existing = await env.DB.prepare(
+    `SELECT feed_id, provider, feed_token_hash, public_path
+       FROM feeds
+      WHERE feed_id = ?`,
+  ).bind(parsed.feed_id).first<ExistingAdminFeedRow>();
+  if (existing && existing.provider !== parsed.provider) {
+    return badRequest("provider cannot be changed");
+  }
+
+  if (!existing) {
+    return createAdminFeed(request, env, parsed);
+  }
+
+  const update = env.DB.prepare(feedConfigUpdateSQL()).bind(
+    parsed.url,
+    parsed.title_override,
+    parsed.description_override,
+    dbBoolean(parsed.enabled),
+    dbBoolean(parsed.include_in_opml),
+    dbBoolean(parsed.private_feed),
+    parsed.update_period,
+    parsed.page_size,
+    parsed.keep_last,
+    parsed.cookie_profile,
+    parsed.feed_id,
+  );
+  const filters = env.DB.prepare(feedFiltersUpsertSQL()).bind(...feedFilterBindings(parsed));
+  try {
+    const [feedResult] = await env.DB.batch([update, filters]);
+    if (feedResult?.meta.changes !== 1) return text("feed update failed", 500);
+  } catch {
+    return text("feed config upsert failed", 500);
+  }
+
+  return Response.json({
+    ok: true,
+    created: false,
+    feed: feedConfigResponse(request, parsed, existing.public_path),
+  });
+}
+
+async function createAdminFeed(request: Request, env: Env, parsed: AdminFeedConfigUpsertRequest): Promise<Response> {
+  for (let attempt = 0; attempt < publicFeedTokenAttempts; attempt++) {
+    const publicPath = newPublicFeedPath();
+    const feedTokenHash = await feedTokenHashFromPublicPath(publicPath);
+    const insert = env.DB.prepare(feedConfigInsertSQL()).bind(
+      parsed.feed_id,
+      parsed.provider,
+      parsed.url,
+      parsed.title_override,
+      parsed.description_override,
+      dbBoolean(parsed.enabled),
+      dbBoolean(parsed.include_in_opml),
+      dbBoolean(parsed.private_feed),
+      parsed.update_period,
+      parsed.page_size,
+      parsed.keep_last,
+      parsed.cookie_profile,
+      feedTokenHash,
+      publicPath,
+    );
+    const filters = env.DB.prepare(feedFiltersUpsertSQL()).bind(...feedFilterBindings(parsed));
+    try {
+      await env.DB.batch([insert, filters]);
+      return Response.json({
+        ok: true,
+        created: true,
+        feed: feedConfigResponse(request, parsed, publicPath),
+      });
+    } catch (error) {
+      if (isPublicFeedTokenConstraintError(error)) continue;
+      if (isFeedIDConstraintError(error)) return text("feed already exists", 409);
+      return text("feed config upsert failed", 500);
+    }
+  }
+  return text("failed to generate public feed token", 500);
 }
 
 async function handleAdminFeedStatus(request: Request, env: Env): Promise<Response> {
@@ -2124,6 +2490,10 @@ export default {
       if (url.pathname === "/api/admin/feeds") {
         if (request.method !== "GET") return methodNotAllowed();
         return handleAdminFeeds(request, env);
+      }
+      if (url.pathname === "/api/admin/feeds/upsert") {
+        if (request.method !== "POST") return methodNotAllowed();
+        return handleAdminFeedUpsert(request, env);
       }
       if (url.pathname === "/api/admin/episodes") {
         if (request.method !== "GET") return methodNotAllowed();
