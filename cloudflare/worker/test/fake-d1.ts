@@ -1,10 +1,23 @@
-import type { DownloaderDefaults, EpisodeStatus, FeedTomlRow, PublicEpisodeRow, PublicFeedRow, TombstoneChangeRow } from "../src/db";
+import type {
+  AdminEpisodeListRow,
+  AdminFeedListRow,
+  AdminSubscriptionFeedRow,
+  AdminSubscriptionOpmlRow,
+  DownloaderDefaults,
+  EpisodeStatus,
+  FeedTomlRow,
+  PublicEpisodeRow,
+  PublicFeedRow,
+  PublicOpmlFeedRow,
+  TombstoneChangeRow,
+} from "../src/db";
 
 interface FakeD1Options {
   tomlFeeds?: FeedTomlRow[] | undefined;
   youtubeDefaults?: DownloaderDefaults | null | undefined;
   publicFeedsByHash?: Map<string, PublicFeedRow> | undefined;
   opmlTokenHashes?: Set<string> | undefined;
+  opmlTokensByHash?: Map<string, FakeOpmlTokenRow> | undefined;
   feedsByID?: Map<string, FakeFeedRow> | undefined;
   episodesByKey?: Map<string, FakeEpisodeRow> | undefined;
   tombstoneChanges?: FakeTombstoneChangeRow[] | undefined;
@@ -19,8 +32,45 @@ interface FakeD1Options {
 interface FakeFeedRow {
   feed_id: string;
   provider: "youtube" | "bilibili";
+  url?: string | undefined;
+  title_override?: string | null | undefined;
+  description_override?: string | null | undefined;
   enabled?: number;
   include_in_opml?: number;
+  private_feed?: number | undefined;
+  update_period?: string | undefined;
+  page_size?: number | undefined;
+  keep_last?: number | undefined;
+  cookie_profile?: string | null | undefined;
+  feed_token_hash?: string | undefined;
+  public_path?: string | null | undefined;
+  metadata_title?: string | null | undefined;
+  metadata_description?: string | null | undefined;
+}
+
+interface FakeOpmlTokenRow {
+  label: string;
+  public_path: string | null;
+  enabled?: number | undefined;
+}
+
+interface FakeReadableFeed {
+  feed_id: string;
+  provider: "youtube" | "bilibili";
+  url: string;
+  title_override: string | null;
+  description_override: string | null;
+  enabled: number;
+  include_in_opml: number;
+  private_feed: number;
+  update_period: string;
+  page_size: number;
+  keep_last: number;
+  cookie_profile: string | null;
+  feed_token_hash: string;
+  public_path: string | null;
+  metadata_title: string | null;
+  metadata_description: string | null;
 }
 
 export interface FakeEpisodeRow {
@@ -35,7 +85,7 @@ export interface FakeEpisodeRow {
   published_at: string | null;
   duration: number | null;
   status: EpisodeStatus;
-  r2_key: string;
+  r2_key: string | null;
   size: number;
   mime_type: string;
   asset_token: string;
@@ -100,8 +150,10 @@ class FakeStatement {
       return episode as T;
     }
 
-    if (this.query.includes("FROM opml_tokens")) {
+    if (this.query.includes("FROM opml_tokens") && this.query.includes("token_hash = ?")) {
       const tokenHash = String(this.params[0] ?? "");
+      const token = this.options.opmlTokensByHash?.get(tokenHash);
+      if (token) return (token.enabled ?? 1) === 1 ? ({ id: 1 } as T) : null;
       return (this.options.opmlTokenHashes?.has(tokenHash) ? { id: 1 } : null) as T | null;
     }
 
@@ -127,11 +179,62 @@ class FakeStatement {
       return (this.options.tomlFeeds ?? []).filter((feed) => feed.enabled === 1);
     }
 
+    if (
+      this.query.includes("FROM feeds f") &&
+      this.query.includes("LEFT JOIN feed_metadata") &&
+      this.query.includes("f.enabled = 1") &&
+      this.query.includes("f.include_in_opml = 1")
+    ) {
+      return fakeFeedRows(this.options)
+        .filter((feed) => feed.enabled === 1 && feed.include_in_opml === 1 && fakePublicPath(feed) !== null)
+        .sort(compareFeedIDAsc)
+        .map(publicOpmlFeedRow);
+    }
+
+    if (
+      this.query.includes("FROM feeds f") &&
+      this.query.includes("LEFT JOIN feed_metadata") &&
+      this.query.includes("f.public_path IS NOT NULL")
+    ) {
+      return fakeFeedRows(this.options)
+        .filter((feed) => fakePublicPath(feed) !== null)
+        .sort(compareFeedIDAsc)
+        .map(adminSubscriptionFeedRow);
+    }
+
+    if (
+      this.query.includes("FROM feeds f") &&
+      this.query.includes("LEFT JOIN feed_metadata") &&
+      this.query.includes("m.title AS metadata_title")
+    ) {
+      return fakeFeedRows(this.options).sort(compareFeedIDAsc).map(adminFeedListRow);
+    }
+
+    if (this.query.includes("FROM opml_tokens") && this.query.includes("public_path IS NOT NULL")) {
+      return [...(this.options.opmlTokensByHash?.values() ?? [])]
+        .filter((token) => (token.enabled ?? 1) === 1 && token.public_path !== null && token.public_path !== "")
+        .sort((left, right) => left.label.localeCompare(right.label))
+        .map(adminSubscriptionOpmlRow);
+    }
+
+    if (this.query.includes("FROM episodes") && this.query.includes("ORDER BY COALESCE(datetime(published_at), datetime(updated_at))")) {
+      const feedID = String(this.params[0] ?? "");
+      const hasStatusFilter = this.query.includes("AND status = ?");
+      const status = hasStatusFilter ? String(this.params[1] ?? "") : null;
+      const limit = Number(this.params[hasStatusFilter ? 2 : 1] ?? 50);
+      const offset = Number(this.params[hasStatusFilter ? 3 : 2] ?? 0);
+      return [...(this.options.episodesByKey?.values() ?? [])]
+        .filter((episode) => episode.feed_id === feedID && (status === null || episode.status === status))
+        .sort(compareAdminEpisodeOrder)
+        .slice(offset, offset + limit)
+        .map(adminEpisodeListRow);
+    }
+
     if (this.query.includes("FROM episodes") && this.query.includes("status = 'visible'")) {
       const feedID = String(this.params[0] ?? "");
       const limit = Number(this.params[1] ?? 25);
       return [...(this.options.episodesByKey?.values() ?? [])]
-        .filter((episode) => episode.feed_id === feedID && episode.status === "visible" && episode.r2_key !== "")
+        .filter((episode) => episode.feed_id === feedID && episode.status === "visible" && episode.r2_key !== null && episode.r2_key !== "")
         .sort((left, right) => comparePublishedAtDesc(left.published_at, right.published_at))
         .slice(0, limit)
         .map(publicEpisodeRow);
@@ -314,6 +417,7 @@ function comparePublishedAtDesc(left: string | null, right: string | null): numb
 }
 
 function publicEpisodeRow(episode: FakeEpisodeRow): PublicEpisodeRow {
+  if (episode.r2_key === null) throw new Error("public episode row requires r2_key");
   return {
     local_episode_id: episode.local_episode_id,
     source_url: episode.source_url,
@@ -324,6 +428,156 @@ function publicEpisodeRow(episode: FakeEpisodeRow): PublicEpisodeRow {
     r2_key: episode.r2_key,
     size: episode.size,
     mime_type: episode.mime_type,
+  };
+}
+
+function fakeFeedRows(options: FakeD1Options): FakeReadableFeed[] {
+  const rows: FakeReadableFeed[] = [];
+  const seen = new Set<string>();
+  for (const feed of options.tomlFeeds ?? []) {
+    rows.push(fakeReadableFeedFromToml(feed));
+    seen.add(feed.feed_id);
+  }
+  for (const feed of options.feedsByID?.values() ?? []) {
+    if (seen.has(feed.feed_id)) continue;
+    rows.push(fakeReadableFeedFromPartial(feed));
+  }
+  return rows;
+}
+
+function fakeReadableFeedFromToml(feed: FeedTomlRow): FakeReadableFeed {
+  const extras = feed as FeedTomlRow & {
+    public_path?: string | null;
+    metadata_title?: string | null;
+    metadata_description?: string | null;
+  };
+  return {
+    feed_id: feed.feed_id,
+    provider: feed.provider,
+    url: feed.url,
+    title_override: feed.title_override,
+    description_override: feed.description_override,
+    enabled: feed.enabled,
+    include_in_opml: feed.include_in_opml,
+    private_feed: feed.private_feed,
+    update_period: feed.update_period,
+    page_size: feed.page_size,
+    keep_last: feed.keep_last,
+    cookie_profile: feed.cookie_profile,
+    feed_token_hash: feed.feed_token_hash,
+    public_path: extras.public_path ?? null,
+    metadata_title: extras.metadata_title ?? null,
+    metadata_description: extras.metadata_description ?? null,
+  };
+}
+
+function fakeReadableFeedFromPartial(feed: FakeFeedRow): FakeReadableFeed {
+  return {
+    feed_id: feed.feed_id,
+    provider: feed.provider,
+    url: feed.url ?? "",
+    title_override: feed.title_override ?? null,
+    description_override: feed.description_override ?? null,
+    enabled: feed.enabled ?? 1,
+    include_in_opml: feed.include_in_opml ?? 1,
+    private_feed: feed.private_feed ?? 1,
+    update_period: feed.update_period ?? "1h",
+    page_size: feed.page_size ?? 25,
+    keep_last: feed.keep_last ?? 25,
+    cookie_profile: feed.cookie_profile ?? null,
+    feed_token_hash: feed.feed_token_hash ?? "",
+    public_path: feed.public_path ?? null,
+    metadata_title: feed.metadata_title ?? null,
+    metadata_description: feed.metadata_description ?? null,
+  };
+}
+
+function fakePublicPath(feed: FakeReadableFeed): string | null {
+  return feed.public_path && feed.public_path !== "" ? feed.public_path : null;
+}
+
+function compareFeedIDAsc(left: FakeReadableFeed, right: FakeReadableFeed): number {
+  return left.feed_id.localeCompare(right.feed_id);
+}
+
+function publicOpmlFeedRow(feed: FakeReadableFeed): PublicOpmlFeedRow {
+  return {
+    feed_id: feed.feed_id,
+    title: feed.metadata_title,
+    title_override: feed.title_override,
+    public_path: feed.public_path,
+  };
+}
+
+function adminFeedListRow(feed: FakeReadableFeed): AdminFeedListRow {
+  return {
+    feed_id: feed.feed_id,
+    provider: feed.provider,
+    url: feed.url,
+    title_override: feed.title_override,
+    description_override: feed.description_override,
+    enabled: feed.enabled,
+    include_in_opml: feed.include_in_opml,
+    private_feed: feed.private_feed,
+    update_period: feed.update_period,
+    page_size: feed.page_size,
+    keep_last: feed.keep_last,
+    cookie_profile: feed.cookie_profile,
+    public_path: feed.public_path,
+    metadata_title: feed.metadata_title,
+    metadata_description: feed.metadata_description,
+  };
+}
+
+function adminSubscriptionFeedRow(feed: FakeReadableFeed): AdminSubscriptionFeedRow {
+  return {
+    feed_id: feed.feed_id,
+    title: feed.metadata_title,
+    title_override: feed.title_override,
+    public_path: feed.public_path,
+  };
+}
+
+function adminSubscriptionOpmlRow(token: FakeOpmlTokenRow): AdminSubscriptionOpmlRow {
+  return {
+    label: token.label,
+    public_path: token.public_path,
+  };
+}
+
+function sqliteDateTimeMillis(value: string | null): number {
+  if (!value) return 0;
+  const normalized = value.includes("T") ? value : `${value.replace(" ", "T")}Z`;
+  const parsed = Date.parse(normalized);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function coalesceSQLiteDateTimeMillis(primary: string | null, fallback: string | null): number {
+  const primaryTime = sqliteDateTimeMillis(primary);
+  if (primaryTime !== 0) return primaryTime;
+  return sqliteDateTimeMillis(fallback);
+}
+
+function compareAdminEpisodeOrder(left: FakeEpisodeRow, right: FakeEpisodeRow): number {
+  const leftTime = coalesceSQLiteDateTimeMillis(left.published_at, left.updated_at);
+  const rightTime = coalesceSQLiteDateTimeMillis(right.published_at, right.updated_at);
+  if (leftTime !== rightTime) return rightTime - leftTime;
+  return left.local_episode_id.localeCompare(right.local_episode_id);
+}
+
+function adminEpisodeListRow(episode: FakeEpisodeRow): AdminEpisodeListRow {
+  return {
+    local_episode_id: episode.local_episode_id,
+    source_episode_id: episode.source_episode_id,
+    source_url: episode.source_url,
+    title: episode.title,
+    published_at: episode.published_at,
+    duration: episode.duration,
+    status: episode.status,
+    r2_key: episode.r2_key,
+    size: episode.size,
+    mime_type: episode.mime_type,
+    updated_at: episode.updated_at ?? "2026-07-06 00:00:00",
   };
 }
 
@@ -351,6 +605,7 @@ function cloneOptions(options: FakeD1Options): FakeD1Options {
     tomlFeeds: options.tomlFeeds?.map((feed) => ({ ...feed })),
     publicFeedsByHash: cloneMap(options.publicFeedsByHash),
     opmlTokenHashes: options.opmlTokenHashes ? new Set(options.opmlTokenHashes) : undefined,
+    opmlTokensByHash: cloneMap(options.opmlTokensByHash),
     feedsByID: cloneMap(options.feedsByID),
     episodesByKey: cloneMap(options.episodesByKey),
     tombstoneChanges: options.tombstoneChanges?.map((change) => ({ ...change })),
@@ -370,6 +625,8 @@ function commitOptions(target: FakeD1Options, staged: FakeD1Options): void {
   if (!target.publicFeedsByHash) target.publicFeedsByHash = staged.publicFeedsByHash;
   commitSet(target.opmlTokenHashes, staged.opmlTokenHashes);
   if (!target.opmlTokenHashes) target.opmlTokenHashes = staged.opmlTokenHashes;
+  commitMap(target.opmlTokensByHash, staged.opmlTokensByHash);
+  if (!target.opmlTokensByHash) target.opmlTokensByHash = staged.opmlTokensByHash;
   commitMap(target.feedsByID, staged.feedsByID);
   if (!target.feedsByID) target.feedsByID = staged.feedsByID;
   commitMap(target.episodesByKey, staged.episodesByKey);

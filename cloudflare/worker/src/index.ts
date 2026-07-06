@@ -1,8 +1,12 @@
 import { hasCloudflareAccessIdentity, isAuthorizedNasRequest } from "./auth";
 import type {
   AdminEpisodeAction,
+  AdminEpisodeListRow,
   AdminEpisodeStatusRequest,
+  AdminFeedListRow,
   AdminFeedStatusRequest,
+  AdminSubscriptionFeedRow,
+  AdminSubscriptionOpmlRow,
   DownloaderDefaults,
   EpisodeAdminRow,
   EpisodeStatus,
@@ -13,6 +17,7 @@ import type {
   MaxSequenceRow,
   PublicEpisodeRow,
   PublicFeedRow,
+  PublicOpmlFeedRow,
   TombstoneChangeRow,
 } from "./db";
 import type { Env } from "./env";
@@ -26,6 +31,7 @@ const defaultYoutubeDefaults: DownloaderDefaults = {
 	fragment_retries: 1,
 };
 const maxJsonBodyBytes = 64 * 1024;
+const publicPathTokenPattern = /^[A-Za-z0-9_-]+$/;
 
 function text(body: string, status = 200, contentType = "text/plain; charset=utf-8"): Response {
   return new Response(body, {
@@ -43,6 +49,18 @@ function pathToken(pathname: string, prefix: string): string | null {
   } catch {
     return null;
   }
+}
+
+function validPublicXmlPath(path: string | null, prefix: "/f/" | "/opml/"): path is string {
+  if (path === null) return false;
+  if (!path.startsWith(prefix) || !path.endsWith(".xml")) return false;
+  const token = path.slice(prefix.length, -".xml".length);
+  return publicPathTokenPattern.test(token);
+}
+
+function absolutePublicURL(request: Request, path: string | null, prefix: "/f/" | "/opml/"): string | null {
+  if (!validPublicXmlPath(path, prefix)) return null;
+  return new URL(path, new URL(request.url).origin).toString();
 }
 
 function methodNotAllowed(): Response {
@@ -259,6 +277,29 @@ function parseIntegerParam(value: string | null, fallback: number, name: string)
   return parsed;
 }
 
+function jsonBoolean(value: number): boolean {
+  return value === 1;
+}
+
+function parseEpisodeStatusParam(value: string | null): EpisodeStatus | Response | null {
+  if (value === null || value === "") return null;
+  if (value === "pending" || value === "visible" || value === "hidden" || value === "delete_pending" || value === "purged") {
+    return value;
+  }
+  return badRequest("status is invalid");
+}
+
+function adminListLimit(url: URL, fallback: number, max: number): number | Response {
+  const limit = parseIntegerParam(url.searchParams.get("limit"), fallback, "limit");
+  if (limit instanceof Response) return limit;
+  if (limit < 1 || limit > max) return badRequest("limit is invalid");
+  return limit;
+}
+
+function adminListOffset(url: URL): number | Response {
+  return parseIntegerParam(url.searchParams.get("offset"), 0, "offset");
+}
+
 function tombstoneLimit(url: URL): number | Response {
   const limit = parseIntegerParam(url.searchParams.get("limit"), 100, "limit");
   if (limit instanceof Response) return limit;
@@ -307,6 +348,36 @@ async function handleNasConfig(request: Request, env: Env): Promise<Response> {
 
   const toml = compileFeedsToml(results, defaults ?? defaultYoutubeDefaults);
   return text(toml, 200, "application/toml; charset=utf-8");
+}
+
+async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `SELECT f.feed_id, f.provider, f.url, f.title_override, f.description_override,
+            f.enabled, f.include_in_opml, f.private_feed, f.update_period,
+            f.page_size, f.keep_last, f.cookie_profile, f.public_path,
+            m.title AS metadata_title, m.description AS metadata_description
+       FROM feeds f
+       LEFT JOIN feed_metadata m ON m.feed_id = f.feed_id
+      ORDER BY f.feed_id ASC`,
+  ).all<AdminFeedListRow>();
+
+  return Response.json({
+    feeds: results.map((feed) => ({
+      feed_id: feed.feed_id,
+      provider: feed.provider,
+      url: feed.url,
+      title: feed.metadata_title ?? feed.title_override ?? feed.feed_id,
+      description: feed.metadata_description ?? feed.description_override ?? null,
+      enabled: jsonBoolean(feed.enabled),
+      include_in_opml: jsonBoolean(feed.include_in_opml),
+      private_feed: jsonBoolean(feed.private_feed),
+      update_period: feed.update_period,
+      page_size: feed.page_size,
+      keep_last: feed.keep_last,
+      cookie_profile: feed.cookie_profile,
+      public_feed_url: absolutePublicURL(request, feed.public_path, "/f/"),
+    })),
+  });
 }
 
 async function handleAdminFeedStatus(request: Request, env: Env): Promise<Response> {
@@ -403,6 +474,84 @@ async function handleAdminEpisodeStatus(request: Request, env: Env): Promise<Res
     action: parsed.action,
     status: transition.status,
     changed: true,
+  });
+}
+
+async function handleAdminEpisodes(url: URL, env: Env): Promise<Response> {
+  const feedID = url.searchParams.get("feed_id");
+  if (!feedID || feedID.trim() === "") return badRequest("feed_id is required");
+  const status = parseEpisodeStatusParam(url.searchParams.get("status"));
+  if (status instanceof Response) return status;
+  const limit = adminListLimit(url, 50, 200);
+  if (limit instanceof Response) return limit;
+  const offset = adminListOffset(url);
+  if (offset instanceof Response) return offset;
+
+  const exists = await env.DB.prepare(
+    `SELECT feed_id
+       FROM feeds
+      WHERE feed_id = ?`,
+  ).bind(feedID).first<{ feed_id: string }>();
+  if (!exists) return text("feed not found", 404);
+
+  const whereStatus = status ? " AND status = ?" : "";
+  const bindings: unknown[] = status ? [feedID, status, limit, offset] : [feedID, limit, offset];
+  const { results } = await env.DB.prepare(
+    `SELECT local_episode_id, source_episode_id, source_url, title, published_at,
+            duration, status, r2_key, size, mime_type, updated_at
+       FROM episodes
+      WHERE feed_id = ?${whereStatus}
+      ORDER BY COALESCE(datetime(published_at), datetime(updated_at)) DESC, local_episode_id ASC
+      LIMIT ? OFFSET ?`,
+  ).bind(...bindings).all<AdminEpisodeListRow>();
+
+  return Response.json({
+    feed_id: feedID,
+    limit,
+    offset,
+    episodes: results.map((episode) => ({
+      local_episode_id: episode.local_episode_id,
+      source_episode_id: episode.source_episode_id,
+      source_url: episode.source_url,
+      title: episode.title,
+      published_at: episode.published_at,
+      duration: episode.duration,
+      status: episode.status,
+      has_media: episode.r2_key !== null && episode.r2_key !== "",
+      size: episode.size,
+      mime_type: episode.mime_type,
+      updated_at: episode.updated_at,
+    })),
+  });
+}
+
+async function handleAdminSubscriptions(request: Request, env: Env): Promise<Response> {
+  const { results: feeds } = await env.DB.prepare(
+    `SELECT f.feed_id, f.title_override, f.public_path, m.title
+       FROM feeds f
+       LEFT JOIN feed_metadata m ON m.feed_id = f.feed_id
+      WHERE f.public_path IS NOT NULL
+      ORDER BY f.feed_id ASC`,
+  ).all<AdminSubscriptionFeedRow>();
+
+  const { results: opml } = await env.DB.prepare(
+    `SELECT label, public_path
+       FROM opml_tokens
+      WHERE enabled = 1 AND public_path IS NOT NULL
+      ORDER BY label ASC`,
+  ).all<AdminSubscriptionOpmlRow>();
+
+  return Response.json({
+    feeds: feeds.flatMap((feed) => {
+      const xmlURL = absolutePublicURL(request, feed.public_path, "/f/");
+      if (!xmlURL) return [];
+      return [{ feed_id: feed.feed_id, title: feed.title ?? feed.title_override ?? feed.feed_id, xml_url: xmlURL }];
+    }),
+    opml: opml.flatMap((token) => {
+      const xmlURL = absolutePublicURL(request, token.public_path, "/opml/");
+      if (!xmlURL) return [];
+      return [{ label: token.label, xml_url: xmlURL }];
+    }),
   });
 }
 
@@ -587,7 +736,7 @@ async function handleFeedXml(pathname: string, request: Request, env: Env): Prom
   }
 }
 
-async function handleOpml(pathname: string, env: Env): Promise<Response> {
+async function handleOpml(pathname: string, request: Request, env: Env): Promise<Response> {
   const token = pathToken(pathname, "/opml/");
   if (!token) return text("not found", 404);
 
@@ -600,7 +749,26 @@ async function handleOpml(pathname: string, env: Env): Promise<Response> {
 
   if (!opmlToken) return text("not found", 404);
 
-  return text(renderOpml([]), 200, "text/x-opml; charset=utf-8");
+  const { results } = await env.DB.prepare(
+    `SELECT f.feed_id, f.title_override, f.public_path, m.title
+       FROM feeds f
+       LEFT JOIN feed_metadata m ON m.feed_id = f.feed_id
+      WHERE f.enabled = 1
+        AND f.include_in_opml = 1
+        AND f.public_path IS NOT NULL
+      ORDER BY f.feed_id ASC`,
+  ).all<PublicOpmlFeedRow>();
+
+  const feeds = results.flatMap((feed) => {
+    const xmlUrl = absolutePublicURL(request, feed.public_path, "/f/");
+    if (!xmlUrl) return [];
+    return [{
+      title: feed.title ?? feed.title_override ?? feed.feed_id,
+      xmlUrl,
+    }];
+  });
+
+  return text(renderOpml(feeds), 200, "text/x-opml; charset=utf-8");
 }
 
 export default {
@@ -629,6 +797,18 @@ export default {
 
     if (url.pathname.startsWith("/api/admin/")) {
       if (!hasCloudflareAccessIdentity(request)) return text("forbidden", 403);
+      if (url.pathname === "/api/admin/feeds") {
+        if (request.method !== "GET") return methodNotAllowed();
+        return handleAdminFeeds(request, env);
+      }
+      if (url.pathname === "/api/admin/episodes") {
+        if (request.method !== "GET") return methodNotAllowed();
+        return handleAdminEpisodes(url, env);
+      }
+      if (url.pathname === "/api/admin/subscriptions") {
+        if (request.method !== "GET") return methodNotAllowed();
+        return handleAdminSubscriptions(request, env);
+      }
       if (url.pathname === "/api/admin/feeds/status") {
         if (request.method !== "POST") return methodNotAllowed();
         return handleAdminFeedStatus(request, env);
@@ -653,7 +833,7 @@ export default {
 
     if (url.pathname.startsWith("/opml/")) {
       if (request.method !== "GET") return methodNotAllowed();
-      return handleOpml(url.pathname, env);
+      return handleOpml(url.pathname, request, env);
     }
 
     return text("not found", 404);

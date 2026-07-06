@@ -46,7 +46,58 @@ export interface PublicFeedRow {
   link: string | null;
 }
 
+export interface AdminFeedListRow {
+  feed_id: string;
+  provider: "youtube" | "bilibili";
+  url: string;
+  title_override: string | null;
+  description_override: string | null;
+  enabled: number;
+  include_in_opml: number;
+  private_feed: number;
+  update_period: string;
+  page_size: number;
+  keep_last: number;
+  cookie_profile: string | null;
+  public_path: string | null;
+  metadata_title: string | null;
+  metadata_description: string | null;
+}
+
 export type EpisodeStatus = "pending" | "visible" | "hidden" | "delete_pending" | "purged";
+
+export interface AdminEpisodeListRow {
+  local_episode_id: string;
+  source_episode_id: string;
+  source_url: string | null;
+  title: string | null;
+  published_at: string | null;
+  duration: number | null;
+  status: EpisodeStatus;
+  r2_key: string | null;
+  size: number | null;
+  mime_type: string | null;
+  updated_at: string;
+}
+
+export interface PublicOpmlFeedRow {
+  feed_id: string;
+  title: string | null;
+  title_override: string | null;
+  public_path: string | null;
+}
+
+export interface AdminSubscriptionFeedRow {
+  feed_id: string;
+  title: string | null;
+  title_override: string | null;
+  public_path: string | null;
+}
+
+export interface AdminSubscriptionOpmlRow {
+  label: string;
+  public_path: string | null;
+}
 
 export interface AdminFeedStatusRequest {
   feed_id: string;

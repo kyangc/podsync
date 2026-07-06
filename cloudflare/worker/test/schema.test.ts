@@ -1,10 +1,15 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const schema = readFileSync(join(here, "../migrations/0001_initial.sql"), "utf8");
+const migrationsDir = join(here, "../migrations");
+const schema = readdirSync(migrationsDir)
+  .filter((file) => file.endsWith(".sql"))
+  .sort()
+  .map((file) => readFileSync(join(migrationsDir, file), "utf8"))
+  .join("\n");
 
 describe("D1 schema contract", () => {
   it("has required idempotency and token constraints", () => {
@@ -22,5 +27,12 @@ describe("D1 schema contract", () => {
 
   it("allows pending episodes without complete metadata", () => {
     expect(schema).toMatch(/CREATE TABLE episodes \([\s\S]*\n  title TEXT,\n  description TEXT,/);
+  });
+
+  it("stores public URL material separately from token hashes", () => {
+    expect(schema).toContain("ALTER TABLE feeds ADD COLUMN public_path TEXT");
+    expect(schema).toContain("ALTER TABLE opml_tokens ADD COLUMN public_path TEXT");
+    expect(schema).toContain("CREATE UNIQUE INDEX idx_feeds_public_path ON feeds(public_path)");
+    expect(schema).toContain("CREATE UNIQUE INDEX idx_opml_tokens_public_path ON opml_tokens(public_path)");
   });
 });
