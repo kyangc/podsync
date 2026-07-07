@@ -8,13 +8,13 @@
     "crons": ["17 */6 * * *"]
   },
   "vars": {
-    "MEDIA_PUBLIC_BASE_URL": "https://media.example.com"
+    "MEDIA_PUBLIC_BASE_URL": "https://pub-158db865a511464b9291bf7278abf15e.r2.dev"
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "podsync-control-plane",
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "4645686e-c03b-47c0-a174-6514f10e9218"
     }
   ],
   "r2_buckets": [
