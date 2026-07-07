@@ -1,4 +1,4 @@
-import { hasCloudflareAccessIdentity, isAuthorizedNasRequest } from "./auth";
+import { adminTokenCookie, isAuthorizedAdminRequest, isAuthorizedAdminToken, isAuthorizedNasRequest } from "./auth";
 import type {
   AdminEpisodeAction,
   AdminEpisodeListRow,
@@ -1396,6 +1396,27 @@ function dashboardResponse(): Response {
     status: 200,
     headers: dashboardHeaders(),
   });
+}
+
+async function dashboardAuthResponse(request: Request, env: Env, url: URL): Promise<Response | null> {
+  if (url.searchParams.has("token")) {
+    if (!(await isAuthorizedAdminToken(url.searchParams.get("token"), env))) return text("forbidden", 403);
+
+    const clean = new URL(url);
+    clean.searchParams.delete("token");
+    return new Response(null, {
+      status: 302,
+      headers: {
+        "location": `${clean.pathname}${clean.search}${clean.hash}`,
+        "set-cookie": adminTokenCookie(env.ADMIN_TOKEN!),
+        "cache-control": "no-store",
+      },
+    });
+  }
+
+  if (!(await isAuthorizedAdminRequest(request, env))) return text("forbidden", 403);
+
+  return null;
 }
 
 function pathToken(pathname: string, prefix: string): string | null {
@@ -3163,7 +3184,7 @@ export default {
     }
 
     if (url.pathname.startsWith("/api/admin/")) {
-      if (!hasCloudflareAccessIdentity(request)) return text("forbidden", 403);
+      if (!(await isAuthorizedAdminRequest(request, env))) return text("forbidden", 403);
       if (url.pathname === "/api/admin/feeds") {
         if (request.method !== "GET") return methodNotAllowed();
         return handleAdminFeeds(request, env);
@@ -3205,7 +3226,8 @@ export default {
 
     if (url.pathname === "/dashboard" || url.pathname.startsWith("/dashboard/")) {
       if (request.method !== "GET") return methodNotAllowed();
-      if (!hasCloudflareAccessIdentity(request)) return text("forbidden", 403);
+      const authResponse = await dashboardAuthResponse(request, env, url);
+      if (authResponse) return authResponse;
       return dashboardResponse();
     }
 

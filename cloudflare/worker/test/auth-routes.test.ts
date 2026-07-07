@@ -10,6 +10,11 @@ const env = {
   NAS_TOKEN: "secret-token",
 };
 
+const envWithAdminToken = {
+  ...env,
+  ADMIN_TOKEN: "admin-token",
+};
+
 describe("route auth boundaries", () => {
   it("rejects NAS config without token", async () => {
     const response = await worker.fetch(new Request("https://podcast.example.com/api/nas/config.toml"), env);
@@ -65,6 +70,24 @@ describe("route auth boundaries", () => {
     expect(withAccess.status).not.toBe(403);
   });
 
+  it("ignores spoofed Cloudflare Access headers when ADMIN_TOKEN is configured", async () => {
+    const spoofedAccess = await worker.fetch(
+      new Request("https://podcast.example.com/api/admin/feeds", {
+        headers: { "cf-access-jwt-assertion": "present" },
+      }),
+      envWithAdminToken,
+    );
+    expect(spoofedAccess.status).toBe(403);
+
+    const withToken = await worker.fetch(
+      new Request("https://podcast.example.com/api/admin/feeds", {
+        headers: { authorization: "Bearer admin-token" },
+      }),
+      envWithAdminToken,
+    );
+    expect(withToken.status).toBe(200);
+  });
+
   it("guards dashboard routes with Cloudflare Access identity", async () => {
     const withoutAccess = await worker.fetch(new Request("https://podcast.example.com/dashboard/"), env);
     expect(withoutAccess.status).toBe(403);
@@ -76,6 +99,28 @@ describe("route auth boundaries", () => {
       env,
     );
     expect(withAccess.status).toBe(200);
+  });
+
+  it("sets a dashboard admin cookie from a valid token query", async () => {
+    const login = await worker.fetch(new Request("https://podcast.example.com/dashboard/?token=admin-token"), envWithAdminToken);
+
+    expect(login.status).toBe(302);
+    expect(login.headers.get("location")).toBe("/dashboard/");
+    expect(login.headers.get("set-cookie")).toContain("podsync_admin_token=admin-token");
+
+    const dashboard = await worker.fetch(
+      new Request("https://podcast.example.com/dashboard/", {
+        headers: { cookie: "podsync_admin_token=admin-token" },
+      }),
+      envWithAdminToken,
+    );
+    expect(dashboard.status).toBe(200);
+  });
+
+  it("rejects invalid dashboard admin token queries", async () => {
+    const response = await worker.fetch(new Request("https://podcast.example.com/dashboard/?token=wrong"), envWithAdminToken);
+
+    expect(response.status).toBe(403);
   });
 
   it("guards nested dashboard routes with the same Access and method boundaries", async () => {
