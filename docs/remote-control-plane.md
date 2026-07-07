@@ -665,8 +665,8 @@ GET /opml/<opml_token>.xml
 
 ## 鉴权
 
-- Dashboard：Cloudflare Access。
-- Admin API：与 dashboard 同样受 Cloudflare Access 保护，只允许 Access-authenticated 请求。
+- Dashboard：优先使用 `ADMIN_TOKEN`。访问 `/dashboard/?token=<ADMIN_TOKEN>` 后写入 `HttpOnly` cookie，再跳转回干净的 `/dashboard/`。
+- Admin API：优先使用 `ADMIN_TOKEN`，支持 `Authorization: Bearer <ADMIN_TOKEN>` 或 dashboard cookie。只有未配置 `ADMIN_TOKEN` 时才退回 Cloudflare Access header。
 - NAS API：单个全局 `NAS_TOKEN`，通过 `Authorization: Bearer`。
 - Public RSS/OPML：长随机 path token。
 - R2 audio：不可猜 object key + 公开媒体域名。
@@ -676,7 +676,8 @@ GET /opml/<opml_token>.xml
 ```text
 /dashboard/*
 /api/admin/*
-  -> Cloudflare Access
+  -> ADMIN_TOKEN bearer/cookie
+  -> fallback Cloudflare Access only when ADMIN_TOKEN is unset
 
 /api/nas/*
   -> Bearer NAS_TOKEN
@@ -689,7 +690,7 @@ GET /opml/<opml_token>.xml
   -> public object URL with unguessable key
 ```
 
-Cloudflare Access 规则不能覆盖 public RSS/OPML，否则 podcast 客户端无法订阅。
+如果直接暴露 workers.dev，必须配置 `ADMIN_TOKEN`，否则客户端可伪造 Access header。Cloudflare Access 规则不能覆盖 public RSS/OPML，否则 podcast 客户端无法订阅。
 
 ## 关键事件日志
 
