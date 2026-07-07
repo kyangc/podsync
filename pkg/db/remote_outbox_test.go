@@ -189,7 +189,7 @@ func TestBadger_DueRemotePublishTasksReturnsPendingDueTasks(t *testing.T) {
 
 	got, err := db.DueRemotePublishTasks(ctx, now, 10)
 	require.NoError(t, err)
-	var ids []string
+	ids := make([]string, 0, len(got))
 	for _, task := range got {
 		ids = append(ids, task.LocalEpisodeID)
 	}

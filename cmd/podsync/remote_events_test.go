@@ -54,8 +54,8 @@ func TestCollectRemoteEventRedactionsIncludesConfiguredSecrets(t *testing.T) {
 		Remote: RemoteConfig{Token: "remote-token"},
 		R2:     R2Config{AccessKeyID: "r2-access", SecretAccessKey: "r2-secret"},
 		Tokens: map[model.Provider]StringSlice{
-			model.ProviderYoutube: StringSlice{"youtube-token"},
-			model.ProviderVimeo:   StringSlice{"vimeo-token"},
+			model.ProviderYoutube: {"youtube-token"},
+			model.ProviderVimeo:   {"vimeo-token"},
 		},
 		CookieProfiles: map[string]CookieProfile{
 			"bili": {Path: "/app/secrets/bili.txt"},
