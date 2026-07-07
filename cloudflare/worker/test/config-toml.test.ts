@@ -42,11 +42,14 @@ describe("compileFeedsToml", () => {
         provider: "bilibili",
         url: "https://space.bilibili.com/10835521",
         cookie_profile: "bilibili-main",
+        bilibili_include_upower_exclusive: 1,
       },
     ], { socket_timeout: 12, retries: 1, fragment_retries: 1 });
 
     expect(toml).toContain('[feeds."bili.feed-1"]');
     expect(toml).toContain('cookie_profile = "bilibili-main"');
+    expect(toml).toContain('[feeds."bili.feed-1".bilibili]');
+    expect(toml).toContain("include_upower_exclusive = true");
     expect(toml).not.toContain("youtube_dl_args");
   });
 

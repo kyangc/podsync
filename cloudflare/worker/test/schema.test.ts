@@ -40,4 +40,9 @@ describe("D1 schema contract", () => {
     expect(schema).toContain("ALTER TABLE feeds ADD COLUMN deleted_at TEXT");
     expect(schema).toContain("CREATE INDEX idx_feeds_deleted_enabled_opml ON feeds(deleted_at, enabled, include_in_opml)");
   });
+
+  it("stores Bilibili feed options used by generated NAS config", () => {
+    expect(schema).toContain("ALTER TABLE feeds ADD COLUMN bilibili_include_upower_exclusive INTEGER NOT NULL DEFAULT 0");
+    expect(schema).toContain("CHECK (bilibili_include_upower_exclusive IN (0, 1))");
+  });
 });

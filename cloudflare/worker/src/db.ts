@@ -11,6 +11,7 @@ export interface FeedRow {
   page_size: number;
   keep_last: number;
   cookie_profile: string | null;
+  bilibili_include_upower_exclusive?: number;
   feed_token_hash: string;
   deleted_at?: string | null;
 }
@@ -61,6 +62,7 @@ export interface AdminFeedListRow {
   page_size: number;
   keep_last: number;
   cookie_profile: string | null;
+  bilibili_include_upower_exclusive?: number;
   public_path: string | null;
   metadata_title: string | null;
   metadata_description: string | null;
@@ -225,6 +227,10 @@ export interface AdminFeedFilters {
   max_age: number | null;
 }
 
+export interface AdminFeedBilibiliOptions {
+  include_upower_exclusive: boolean;
+}
+
 export interface AdminFeedConfigUpsertRequest {
   feed_id: string;
   provider: "youtube" | "bilibili";
@@ -238,6 +244,7 @@ export interface AdminFeedConfigUpsertRequest {
   page_size: number;
   keep_last: number;
   cookie_profile: string | null;
+  bilibili: AdminFeedBilibiliOptions;
   filters: AdminFeedFilters;
 }
 

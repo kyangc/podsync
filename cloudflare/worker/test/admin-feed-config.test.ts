@@ -115,6 +115,9 @@ describe("admin feed config upsert API", () => {
       feedBody({ enabled: "true" }),
       feedBody({ filters: [] }),
       feedBody({ filters: { min_duration: -1 } }),
+      feedBody({ bilibili: [] }),
+      feedBody({ bilibili: { include_upower_exclusive: "true" } }),
+      feedBody({ bilibili: { include_upower_exclusive: true } }),
     ]) {
       const response = await worker.fetch(adminRequest("/api/admin/feeds/upsert", candidate), { DB: fakeD1() });
       expect(response.status, JSON.stringify(candidate)).toBe(400);
@@ -177,6 +180,55 @@ describe("admin feed config upsert API", () => {
     expect(toml).toContain('[feeds."new-feed"]');
     expect(toml).toContain('url = "https://www.youtube.com/channel/UCrLtQJG-ZNJeU08N0SNIJzw"');
     expect(toml).toContain('filters = { not_title = "live", max_duration = 86400 }');
+  });
+
+  it("creates Bilibili charged feed options in NAS TOML output", async () => {
+    const feedsByID = new Map();
+    const env = {
+      DB: fakeD1({ feedsByID }),
+      NAS_TOKEN: nasToken,
+    };
+
+    const response = await worker.fetch(adminRequest("/api/admin/feeds/upsert", feedBody({
+      provider: "bilibili",
+      url: "https://space.bilibili.com/10835521",
+      cookie_profile: "bilibili-main",
+      bilibili: { include_upower_exclusive: true },
+      filters: {
+        title: null,
+        not_title: "直播",
+        description: null,
+        not_description: null,
+        min_duration: null,
+        max_duration: null,
+        min_age: null,
+        max_age: null,
+      },
+    })), env);
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      feed: {
+        bilibili: { include_upower_exclusive: boolean };
+      };
+    };
+    expect(body.feed.bilibili.include_upower_exclusive).toBe(true);
+
+    const saved = feedsByID.get("new-feed");
+    expect(saved).toMatchObject({
+      provider: "bilibili",
+      cookie_profile: "bilibili-main",
+      bilibili_include_upower_exclusive: 1,
+    });
+
+    const config = await worker.fetch(nasConfigRequest(), env);
+    expect(config.status).toBe(200);
+    const toml = await config.text();
+    expect(toml).toContain('[feeds."new-feed"]');
+    expect(toml).toContain('cookie_profile = "bilibili-main"');
+    expect(toml).toContain('filters = { not_title = "直播" }');
+    expect(toml).toContain('[feeds."new-feed".bilibili]');
+    expect(toml).toContain("include_upower_exclusive = true");
   });
 
   it("retries generated public token collisions on create", async () => {

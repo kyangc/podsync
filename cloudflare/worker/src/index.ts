@@ -499,6 +499,7 @@ function dashboardHTML(): string {
                 <label><input id="feed-enabled" type="checkbox"> Enabled</label>
                 <label><input id="feed-include-in-opml" type="checkbox"> OPML</label>
                 <label><input id="feed-private-feed" type="checkbox"> Private feed</label>
+                <label><input id="feed-bilibili-include-upower" type="checkbox"> Bilibili charged</label>
               </div>
             </div>
             <div class="form-field">
@@ -663,6 +664,7 @@ function dashboardHTML(): string {
         "feed-enabled",
         "feed-include-in-opml",
         "feed-private-feed",
+        "feed-bilibili-include-upower",
         "feed-update-period",
         "feed-page-size",
         "feed-keep-last",
@@ -832,6 +834,7 @@ function dashboardHTML(): string {
           page_size: 25,
           keep_last: 25,
           cookie_profile: null,
+          bilibili: { include_upower_exclusive: false },
           filters: emptyFilters()
         };
       }
@@ -855,6 +858,9 @@ function dashboardHTML(): string {
           page_size: valueOrDefault(feed.page_size, 25),
           keep_last: valueOrDefault(feed.keep_last, 25),
           cookie_profile: feed.cookie_profile,
+          bilibili: {
+            include_upower_exclusive: Boolean(feed.bilibili && feed.bilibili.include_upower_exclusive)
+          },
           filters: {
             title: filters.title,
             not_title: filters.not_title,
@@ -886,6 +892,7 @@ function dashboardHTML(): string {
         setCheckField("feed-enabled", feed.enabled);
         setCheckField("feed-include-in-opml", feed.include_in_opml);
         setCheckField("feed-private-feed", feed.private_feed);
+        setCheckField("feed-bilibili-include-upower", feed.bilibili && feed.bilibili.include_upower_exclusive);
         setTextField("feed-update-period", feed.update_period);
         setTextField("feed-page-size", feed.page_size);
         setTextField("feed-keep-last", feed.keep_last);
@@ -954,6 +961,9 @@ function dashboardHTML(): string {
           page_size: requiredInteger("feed-page-size", "Page size", 1),
           keep_last: requiredInteger("feed-keep-last", "Keep last", 0),
           cookie_profile: textOrNull("feed-cookie-profile"),
+          bilibili: {
+            include_upower_exclusive: provider === "bilibili" && byID("feed-bilibili-include-upower").checked
+          },
           filters: {
             title: textOrNull("feed-filter-title"),
             not_title: textOrNull("feed-filter-not-title"),
@@ -977,6 +987,7 @@ function dashboardHTML(): string {
         });
         byID("feed-id").readOnly = editing;
         byID("feed-provider").disabled = state.busy || editing;
+        byID("feed-bilibili-include-upower").disabled = state.busy || byID("feed-provider").value !== "bilibili";
         byID("feed-form-save").disabled = state.busy || !state.feedFormOpen;
         byID("feed-form-cancel").disabled = state.busy;
       }
@@ -1376,6 +1387,7 @@ function dashboardHTML(): string {
       byID("new-feed").addEventListener("click", openNewFeedForm);
       byID("feed-form").addEventListener("submit", submitFeedForm);
       byID("feed-form-cancel").addEventListener("click", closeFeedForm);
+      byID("feed-provider").addEventListener("change", renderFeedForm);
       byID("refresh-episodes").addEventListener("click", function () {
         loadEpisodes(true);
       });
@@ -1822,6 +1834,27 @@ function providerURLIsValid(provider: AdminFeedConfigUpsertRequest["provider"], 
   return hostMatchesRoot(host, "bilibili.com");
 }
 
+function parseBilibiliOptions(
+  provider: AdminFeedConfigUpsertRequest["provider"],
+  rawOptions: unknown,
+): AdminFeedConfigUpsertRequest["bilibili"] | Response {
+  if (rawOptions === undefined || rawOptions === null) {
+    return { include_upower_exclusive: false };
+  }
+  if (typeof rawOptions !== "object" || Array.isArray(rawOptions)) {
+    return badRequest("bilibili is invalid");
+  }
+  const value = rawOptions as Record<string, unknown>;
+  const includeUpowerExclusive = value.include_upower_exclusive === undefined
+    ? false
+    : requiredBoolean(value.include_upower_exclusive, "bilibili.include_upower_exclusive");
+  if (includeUpowerExclusive instanceof Response) return includeUpowerExclusive;
+  if (provider !== "bilibili" && includeUpowerExclusive) {
+    return badRequest("bilibili.include_upower_exclusive is only valid for Bilibili feeds");
+  }
+  return { include_upower_exclusive: provider === "bilibili" ? includeUpowerExclusive : false };
+}
+
 function parseAdminFeedConfigUpsert(body: unknown): AdminFeedConfigUpsertRequest | Response {
   if (!body || typeof body !== "object") return badRequest("invalid feed config body");
   const value = body as Record<string, unknown>;
@@ -1853,6 +1886,8 @@ function parseAdminFeedConfigUpsert(body: unknown): AdminFeedConfigUpsertRequest
   if (keepLast instanceof Response) return keepLast;
   const cookieProfile = optionalNullableString(value.cookie_profile, "cookie_profile");
   if (cookieProfile instanceof Response) return cookieProfile;
+  const bilibili = parseBilibiliOptions(value.provider, value.bilibili);
+  if (bilibili instanceof Response) return bilibili;
   const filters = parseFeedFilters(value.filters);
   if (filters instanceof Response) return filters;
 
@@ -1869,6 +1904,7 @@ function parseAdminFeedConfigUpsert(body: unknown): AdminFeedConfigUpsertRequest
     page_size: pageSize,
     keep_last: keepLast,
     cookie_profile: cookieProfile,
+    bilibili,
     filters,
   };
 }
@@ -2127,8 +2163,9 @@ function feedConfigInsertSQL(): string {
   return `INSERT INTO feeds (
             feed_id, provider, url, title_override, description_override,
             enabled, include_in_opml, private_feed, update_period, page_size,
-            keep_last, cookie_profile, feed_token_hash, public_path, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`;
+            keep_last, cookie_profile, bilibili_include_upower_exclusive, feed_token_hash,
+            public_path, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`;
 }
 
 function feedConfigUpdateSQL(): string {
@@ -2143,6 +2180,7 @@ function feedConfigUpdateSQL(): string {
                  page_size = ?,
                  keep_last = ?,
                  cookie_profile = ?,
+                 bilibili_include_upower_exclusive = ?,
                  updated_at = CURRENT_TIMESTAMP
            WHERE feed_id = ?
              AND deleted_at IS NULL`;
@@ -2253,6 +2291,7 @@ function feedConfigResponse(request: Request, feed: AdminFeedConfigUpsertRequest
     page_size: feed.page_size,
     keep_last: feed.keep_last,
     cookie_profile: feed.cookie_profile,
+    bilibili: feed.bilibili,
     filters: feed.filters,
     public_feed_url: absolutePublicURL(request, publicPath, "/f/"),
   };
@@ -2342,8 +2381,9 @@ async function handleNasConfig(request: Request, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `SELECT f.feed_id, f.provider, f.url, f.title_override, f.description_override, f.enabled,
             f.include_in_opml, f.private_feed, f.update_period, f.page_size, f.keep_last,
-            f.cookie_profile, f.feed_token_hash, ff.title, ff.not_title, ff.description,
-            ff.not_description, ff.min_duration, ff.max_duration, ff.min_age, ff.max_age
+            f.cookie_profile, f.bilibili_include_upower_exclusive, f.feed_token_hash,
+            ff.title, ff.not_title, ff.description, ff.not_description,
+            ff.min_duration, ff.max_duration, ff.min_age, ff.max_age
        FROM feeds f
        LEFT JOIN feed_filters ff ON ff.feed_id = f.feed_id
       WHERE f.enabled = 1
@@ -2365,7 +2405,8 @@ async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `SELECT f.feed_id, f.provider, f.url, f.title_override, f.description_override,
             f.enabled, f.include_in_opml, f.private_feed, f.update_period,
-            f.page_size, f.keep_last, f.cookie_profile, f.public_path,
+            f.page_size, f.keep_last, f.cookie_profile, f.bilibili_include_upower_exclusive,
+            f.public_path,
             m.title AS metadata_title, m.description AS metadata_description,
             ff.title, ff.not_title, ff.description, ff.not_description,
             ff.min_duration, ff.max_duration, ff.min_age, ff.max_age
@@ -2392,6 +2433,9 @@ async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
       page_size: feed.page_size,
       keep_last: feed.keep_last,
       cookie_profile: feed.cookie_profile,
+      bilibili: {
+        include_upower_exclusive: feed.provider === "bilibili" && jsonBoolean(feed.bilibili_include_upower_exclusive ?? 0),
+      },
       filters: {
         title: feed.title,
         not_title: feed.not_title,
@@ -2439,6 +2483,7 @@ async function handleAdminFeedUpsert(request: Request, env: Env): Promise<Respon
     parsed.page_size,
     parsed.keep_last,
     parsed.cookie_profile,
+    dbBoolean(parsed.bilibili.include_upower_exclusive),
     parsed.feed_id,
   );
   const filters = env.DB.prepare(feedFiltersUpsertSQL()).bind(...feedFilterBindings(parsed));
@@ -2474,6 +2519,7 @@ async function createAdminFeed(request: Request, env: Env, parsed: AdminFeedConf
       parsed.page_size,
       parsed.keep_last,
       parsed.cookie_profile,
+      dbBoolean(parsed.bilibili.include_upower_exclusive),
       feedTokenHash,
       publicPath,
     );

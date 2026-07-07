@@ -110,6 +110,7 @@ describe("admin read APIs", () => {
               metadata_title: "Bilibili Metadata",
               metadata_description: "Bilibili description",
               not_title: "直播",
+              bilibili_include_upower_exclusive: 1,
               public_path: "/f/bili.xml",
             }),
             feedRow({
@@ -144,6 +145,7 @@ describe("admin read APIs", () => {
         enabled: boolean;
         include_in_opml: boolean;
         private_feed: boolean;
+        bilibili: { include_upower_exclusive: boolean };
         public_feed_url: string | null;
       }>;
     };
@@ -158,6 +160,7 @@ describe("admin read APIs", () => {
         enabled: true,
         include_in_opml: true,
         private_feed: true,
+        bilibili: { include_upower_exclusive: true },
         public_feed_url: "https://podcast.example.com/f/bili.xml",
       }),
       expect.objectContaining({

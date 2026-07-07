@@ -58,6 +58,7 @@ export interface FakeFeedRow {
   page_size?: number | undefined;
   keep_last?: number | undefined;
   cookie_profile?: string | null | undefined;
+  bilibili_include_upower_exclusive?: number | undefined;
   feed_token_hash?: string | undefined;
   public_path?: string | null | undefined;
   deleted_at?: string | null | undefined;
@@ -108,6 +109,7 @@ interface FakeReadableFeed {
   page_size: number;
   keep_last: number;
   cookie_profile: string | null;
+  bilibili_include_upower_exclusive: number;
   feed_token_hash: string;
   public_path: string | null;
   deleted_at: string | null;
@@ -444,6 +446,7 @@ class FakeStatement {
       pageSize,
       keepLast,
       cookieProfile,
+      bilibiliIncludeUpowerExclusive,
       feedTokenHash,
       publicPath,
     ] = this.params;
@@ -461,6 +464,7 @@ class FakeStatement {
       page_size: Number(pageSize),
       keep_last: Number(keepLast),
       cookie_profile: nullableString(cookieProfile),
+      bilibili_include_upower_exclusive: Number(bilibiliIncludeUpowerExclusive),
       feed_token_hash: String(feedTokenHash),
       public_path: nullableString(publicPath),
     };
@@ -491,6 +495,7 @@ class FakeStatement {
       pageSize,
       keepLast,
       cookieProfile,
+      bilibiliIncludeUpowerExclusive,
       feedID,
     ] = this.params;
     const id = String(feedID);
@@ -508,6 +513,7 @@ class FakeStatement {
     feed.page_size = Number(pageSize);
     feed.keep_last = Number(keepLast);
     feed.cookie_profile = nullableString(cookieProfile);
+    feed.bilibili_include_upower_exclusive = Number(bilibiliIncludeUpowerExclusive);
     return 1;
   }
 
@@ -999,6 +1005,7 @@ function fakeReadableFeedFromToml(feed: FeedTomlRow, options: FakeD1Options): Fa
     page_size: feed.page_size,
     keep_last: feed.keep_last,
     cookie_profile: feed.cookie_profile,
+    bilibili_include_upower_exclusive: feed.bilibili_include_upower_exclusive ?? 0,
     feed_token_hash: feed.feed_token_hash,
     public_path: extras.public_path ?? null,
     deleted_at: extras.deleted_at ?? null,
@@ -1031,6 +1038,7 @@ function fakeReadableFeedFromPartial(feed: FakeFeedRow, options: FakeD1Options):
     page_size: feed.page_size ?? 25,
     keep_last: feed.keep_last ?? 25,
     cookie_profile: feed.cookie_profile ?? null,
+    bilibili_include_upower_exclusive: feed.bilibili_include_upower_exclusive ?? 0,
     feed_token_hash: feed.feed_token_hash ?? "",
     public_path: feed.public_path ?? null,
     deleted_at: feed.deleted_at ?? null,
@@ -1092,6 +1100,7 @@ function adminFeedListRow(feed: FakeReadableFeed): AdminFeedListRow {
     page_size: feed.page_size,
     keep_last: feed.keep_last,
     cookie_profile: feed.cookie_profile,
+    bilibili_include_upower_exclusive: feed.bilibili_include_upower_exclusive,
     public_path: feed.public_path,
     metadata_title: feed.metadata_title,
     metadata_description: feed.metadata_description,

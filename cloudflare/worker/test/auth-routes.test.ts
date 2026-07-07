@@ -231,6 +231,7 @@ describe("route auth boundaries", () => {
       "feed-page-size",
       "feed-keep-last",
       "feed-cookie-profile",
+      "feed-bilibili-include-upower",
       "feed-filter-title",
       "feed-filter-not-title",
       "feed-filter-description",
@@ -257,6 +258,7 @@ describe("route auth boundaries", () => {
       "page_size:",
       "keep_last:",
       "cookie_profile:",
+      "bilibili:",
       "filters:",
     ];
     for (const key of payloadKeys) {

@@ -62,6 +62,12 @@ export function compileFeedsToml(feeds: FeedTomlRow[], youtubeDefaults: Download
       );
     }
 
+    if (feed.provider === "bilibili" && feed.bilibili_include_upower_exclusive === 1) {
+      chunks.push("");
+      chunks.push(`[feeds.${quote(feed.feed_id)}.bilibili]`);
+      chunks.push(line("include_upower_exclusive", true));
+    }
+
     chunks.push("");
   }
 
