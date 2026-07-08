@@ -68,6 +68,8 @@ export interface AdminFeedListRow {
   metadata_description: string | null;
   metadata_last_source_update_at: string | null;
   metadata_reported_at: string | null;
+  latest_episode_published_at: string | null;
+  episode_count: number;
   title: string | null;
   not_title: string | null;
   description: string | null;

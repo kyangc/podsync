@@ -128,8 +128,32 @@ describe("admin read APIs", () => {
               source_url: "https://space.bilibili.com/10835521",
               title: "Bilibili Metadata",
               description: "Bilibili description",
-              last_source_update_at: "2026-07-06T13:00:00Z",
+              last_source_update_at: "2020-07-06T13:00:00Z",
               reported_at: "2026-07-06T13:05:00Z",
+            })],
+          ]),
+          episodesByKey: new Map([
+            [fakeEpisodeKey("bili", "old"), episode({
+              feed_id: "bili",
+              provider: "bilibili",
+              source_episode_id: "old",
+              local_episode_id: "old",
+              published_at: "2026-07-06T10:00:00Z",
+            })],
+            [fakeEpisodeKey("bili", "latest"), episode({
+              feed_id: "bili",
+              provider: "bilibili",
+              source_episode_id: "latest",
+              local_episode_id: "latest",
+              published_at: "2026-07-07T10:00:00Z",
+            })],
+            [fakeEpisodeKey("bili", "purged"), episode({
+              feed_id: "bili",
+              provider: "bilibili",
+              source_episode_id: "purged",
+              local_episode_id: "purged",
+              published_at: "2026-07-08T10:00:00Z",
+              status: "purged",
             })],
           ]),
           tomlFeeds: [
@@ -175,6 +199,10 @@ describe("admin read APIs", () => {
         private_feed: boolean;
         bilibili: { include_upower_exclusive: boolean };
         public_feed_url: string | null;
+        last_source_update_at: string | null;
+        metadata_reported_at: string | null;
+        latest_episode_published_at: string | null;
+        episode_count: number;
       }>;
     };
     expect(body.feeds).toEqual([
@@ -189,8 +217,10 @@ describe("admin read APIs", () => {
         include_in_opml: true,
         private_feed: true,
         bilibili: { include_upower_exclusive: true },
-        last_source_update_at: "2026-07-06T13:00:00Z",
+        last_source_update_at: "2020-07-06T13:00:00Z",
         metadata_reported_at: "2026-07-06T13:05:00Z",
+        latest_episode_published_at: "2026-07-07T10:00:00Z",
+        episode_count: 2,
         public_feed_url: "https://podcast.example.com/f/bili.xml",
       }),
       expect.objectContaining({
@@ -203,6 +233,8 @@ describe("admin read APIs", () => {
         enabled: false,
         include_in_opml: false,
         private_feed: false,
+        latest_episode_published_at: null,
+        episode_count: 0,
         public_feed_url: null,
       }),
     ]);

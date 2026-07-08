@@ -563,6 +563,31 @@ function dashboardHTML(): string {
     }
     th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; vertical-align: middle; overflow-wrap: anywhere; }
     th { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: #fbfcfd; }
+    .sort-header {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      max-width: 100%;
+      min-height: 24px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .sort-header:hover, .sort-header:focus-visible { color: var(--accent); }
+    .sort-indicator {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1;
+    }
+    .sort-header.active .sort-indicator { color: var(--accent); }
     tbody tr.selected { background: #ffffff; }
     tbody tr.disabled-row { color: var(--text); background: #ffffff; }
     tbody tr:last-child td { border-bottom: 0; }
@@ -1060,12 +1085,12 @@ function dashboardHTML(): string {
         <table>
           <thead>
             <tr>
-              <th style="width: 32%">订阅源</th>
-              <th style="width: 8%">平台</th>
-              <th style="width: 9%">状态</th>
-              <th style="width: 15%">最近更新</th>
-              <th style="width: 11%">剧集</th>
-              <th style="width: 8%">订阅</th>
+              <th style="width: 32%" aria-sort="none"><button class="sort-header" type="button" data-sort-key="title">订阅源<span class="sort-indicator" aria-hidden="true"></span></button></th>
+              <th style="width: 8%" aria-sort="none"><button class="sort-header" type="button" data-sort-key="provider">平台<span class="sort-indicator" aria-hidden="true"></span></button></th>
+              <th style="width: 9%" aria-sort="none"><button class="sort-header" type="button" data-sort-key="status">状态<span class="sort-indicator" aria-hidden="true"></span></button></th>
+              <th style="width: 15%" aria-sort="descending"><button class="sort-header active desc" type="button" data-sort-key="last_updated">最近更新<span class="sort-indicator" aria-hidden="true">↓</span></button></th>
+              <th style="width: 11%" aria-sort="none"><button class="sort-header" type="button" data-sort-key="episodes">剧集<span class="sort-indicator" aria-hidden="true"></span></button></th>
+              <th style="width: 8%" aria-sort="none"><button class="sort-header" type="button" data-sort-key="subscription">订阅<span class="sort-indicator" aria-hidden="true"></span></button></th>
               <th style="width: 17%">操作</th>
             </tr>
           </thead>
@@ -1429,6 +1454,8 @@ function dashboardHTML(): string {
         feedSearch: "",
         providerFilter: "",
         feedStateFilter: "",
+        feedSortKey: "last_updated",
+        feedSortDirection: "desc",
         eventLevelFilter: "",
         feedDetailsOpen: false,
         detailsFeedID: "",
@@ -1986,11 +2013,14 @@ function dashboardHTML(): string {
       }
 
       function feedLastUpdated(feed) {
-        if (feed.last_source_update_at) return formatRelative(feed.last_source_update_at);
-        if (feed.metadata_reported_at) return formatRelative(feed.metadata_reported_at);
-        var feedID = feed.feed_id;
-        var event = state.events.find(function (item) { return item.feed_id === feedID; });
-        return event ? formatRelative(event.event_time) : "-";
+        if (feed.latest_episode_published_at) return formatRelative(feed.latest_episode_published_at);
+        return "-";
+      }
+
+      function feedLastUpdatedTime(feed) {
+        if (!feed.latest_episode_published_at) return 0;
+        var time = new Date(feed.latest_episode_published_at).getTime();
+        return Number.isNaN(time) ? 0 : time;
       }
 
       function iconButton(className, label, icon) {
@@ -2056,6 +2086,71 @@ function dashboardHTML(): string {
         return svg;
       }
 
+      function feedSortText(value) {
+        return String(value || "").toLocaleLowerCase();
+      }
+
+      function feedSortValue(feed, key) {
+        if (key === "provider") return providerLabel(feed.provider);
+        if (key === "status") return feedState(feed).label;
+        if (key === "last_updated") return feedLastUpdatedTime(feed);
+        if (key === "episodes") return Number(feed.episode_count || 0);
+        if (key === "subscription") return feed.public_feed_url ? 1 : 0;
+        return feed.title || feed.feed_id;
+      }
+
+      function compareFeedSortValues(left, right, key, direction) {
+        var leftValue = feedSortValue(left, key);
+        var rightValue = feedSortValue(right, key);
+        if (key === "last_updated") {
+          if (!leftValue && !rightValue) return feedSortText(left.title || left.feed_id).localeCompare(feedSortText(right.title || right.feed_id));
+          if (!leftValue) return 1;
+          if (!rightValue) return -1;
+        }
+        var result;
+        if (typeof leftValue === "number" && typeof rightValue === "number") {
+          result = leftValue === rightValue ? 0 : (leftValue < rightValue ? -1 : 1);
+        } else {
+          result = feedSortText(leftValue).localeCompare(feedSortText(rightValue));
+        }
+        if (result === 0) result = feedSortText(left.title || left.feed_id).localeCompare(feedSortText(right.title || right.feed_id));
+        return direction === "desc" ? -result : result;
+      }
+
+      function sortedFeeds(feeds) {
+        return feeds.slice().sort(function (left, right) {
+          return compareFeedSortValues(left, right, state.feedSortKey, state.feedSortDirection);
+        });
+      }
+
+      function defaultSortDirection(key) {
+        return key === "last_updated" || key === "episodes" || key === "subscription" ? "desc" : "asc";
+      }
+
+      function setFeedSort(key) {
+        if (state.feedSortKey === key) {
+          state.feedSortDirection = state.feedSortDirection === "asc" ? "desc" : "asc";
+        } else {
+          state.feedSortKey = key;
+          state.feedSortDirection = defaultSortDirection(key);
+        }
+        renderFeeds();
+      }
+
+      function renderFeedSortHeaders() {
+        document.querySelectorAll("[data-sort-key]").forEach(function (button) {
+          var key = button.getAttribute("data-sort-key");
+          var active = key === state.feedSortKey;
+          var direction = active ? state.feedSortDirection : "";
+          button.classList.toggle("active", active);
+          button.classList.toggle("asc", direction === "asc");
+          button.classList.toggle("desc", direction === "desc");
+          button.querySelector(".sort-indicator").textContent = active ? (direction === "asc" ? "↑" : "↓") : "";
+          var header = button.closest("th");
+          if (header) header.setAttribute("aria-sort", active ? (direction === "asc" ? "ascending" : "descending") : "none");
+        });
+      }
+
       function filteredFeeds() {
         return state.feeds.filter(function (feed) {
           var text = [feed.feed_id, feed.title, feed.url, feed.cookie_profile].filter(Boolean).join(" ").toLowerCase();
@@ -2092,7 +2187,8 @@ function dashboardHTML(): string {
       function renderFeeds() {
         var body = byID("feeds-body");
         body.replaceChildren();
-        var feeds = filteredFeeds();
+        renderFeedSortHeaders();
+        var feeds = sortedFeeds(filteredFeeds());
         if (state.feeds.length === 0) {
           body.appendChild(emptyRow(7, "还没有订阅源。"));
           return;
@@ -2716,6 +2812,9 @@ function dashboardHTML(): string {
       byID("feed-search").addEventListener("input", function (event) { state.feedSearch = event.target.value; renderFeeds(); });
       byID("provider-filter").addEventListener("change", function (event) { state.providerFilter = event.target.value; renderFeeds(); });
       byID("feed-state-filter").addEventListener("change", function (event) { state.feedStateFilter = event.target.value; renderFeeds(); });
+      document.querySelectorAll("[data-sort-key]").forEach(function (button) {
+        button.addEventListener("click", function () { setFeedSort(button.getAttribute("data-sort-key")); });
+      });
       byID("reset-feed-filters").addEventListener("click", function () {
         state.feedSearch = "";
         state.providerFilter = "";
@@ -3769,11 +3868,20 @@ async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
             f.public_path,
             m.title AS metadata_title, m.description AS metadata_description,
             m.last_source_update_at AS metadata_last_source_update_at, m.reported_at AS metadata_reported_at,
+            ep.latest_episode_published_at, COALESCE(ep.episode_count, 0) AS episode_count,
             ff.title, ff.not_title, ff.description, ff.not_description,
             ff.min_duration, ff.max_duration, ff.min_age, ff.max_age
        FROM feeds f
        LEFT JOIN feed_metadata m ON m.feed_id = f.feed_id
        LEFT JOIN feed_filters ff ON ff.feed_id = f.feed_id
+       LEFT JOIN (
+            SELECT feed_id,
+                   MAX(strftime('%Y-%m-%dT%H:%M:%SZ', COALESCE(datetime(published_at), datetime(updated_at)))) AS latest_episode_published_at,
+                   COUNT(*) AS episode_count
+              FROM episodes
+             WHERE status != 'purged'
+             GROUP BY feed_id
+       ) ep ON ep.feed_id = f.feed_id
       WHERE f.deleted_at IS NULL
       ORDER BY f.feed_id ASC`,
   ).all<AdminFeedListRow>();
@@ -3789,6 +3897,8 @@ async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
       description: feed.metadata_description ?? feed.description_override ?? null,
       last_source_update_at: feed.metadata_last_source_update_at,
       metadata_reported_at: feed.metadata_reported_at,
+      latest_episode_published_at: feed.latest_episode_published_at,
+      episode_count: feed.episode_count,
       enabled: jsonBoolean(feed.enabled),
       include_in_opml: jsonBoolean(feed.include_in_opml),
       private_feed: jsonBoolean(feed.private_feed),

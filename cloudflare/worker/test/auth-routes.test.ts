@@ -240,7 +240,9 @@ describe("route auth boundaries", () => {
     expect(body).toContain("订阅导出");
     expect(body).toContain("OPML");
     expect(body).toContain(".summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));");
-    expect(body).toContain("<th style=\"width: 32%\">订阅源</th>");
+    expect(body).toContain("data-sort-key=\"title\">订阅源");
+    expect(body).toContain("data-sort-key=\"last_updated\">最近更新");
+    expect(body).toContain("data-sort-key=\"episodes\">剧集");
     expect(body).toContain("<th style=\"width: 17%\">操作</th>");
     expect(body).toContain(".metric[data-tooltip]::after");
     expect(body).toContain("#metric-logs { color: var(--text); }");
@@ -297,7 +299,11 @@ describe("route auth boundaries", () => {
     expect(body).toContain("mobileMeta.appendChild(el(\"span\", providerPillClass(feed.provider), provider))");
     expect(body).toContain("appendCell(row, el(\"span\", providerPillClass(feed.provider), provider), \"provider-cell\", \"平台\")");
     expect(body).toContain("chips.appendChild(el(\"span\", providerPillClass(feed.provider), providerLabel(feed.provider)))");
-    expect(body.indexOf("<th style=\"width: 15%\">最近更新</th>")).toBeLessThan(body.indexOf("<th style=\"width: 11%\">剧集</th>"));
+    expect(body).toContain("feedSortKey: \"last_updated\"");
+    expect(body).toContain("feedSortDirection: \"desc\"");
+    expect(body).toContain("sortedFeeds(filteredFeeds())");
+    expect(body).toContain("feed.latest_episode_published_at");
+    expect(body.indexOf("data-sort-key=\"last_updated\">最近更新")).toBeLessThan(body.indexOf("data-sort-key=\"episodes\">剧集"));
     expect(body).toContain("appendCell(row, lastUpdated, \"activity-cell\", \"最近更新\")");
     expect(body).toContain("appendCell(row, episodes, \"episodes-cell\", \"剧集\")");
     expect(body.indexOf("appendCell(row, lastUpdated, \"activity-cell\", \"最近更新\")")).toBeLessThan(body.indexOf("appendCell(row, episodes, \"episodes-cell\", \"剧集\")"));

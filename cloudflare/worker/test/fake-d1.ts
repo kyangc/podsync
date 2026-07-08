@@ -118,6 +118,8 @@ interface FakeReadableFeed {
   metadata_link: string | null;
   metadata_last_source_update_at: string | null;
   metadata_reported_at: string | null;
+  latest_episode_published_at: string | null;
+  episode_count: number;
   title: string | null;
   not_title: string | null;
   description: string | null;
@@ -1016,6 +1018,8 @@ function fakeReadableFeedFromToml(feed: FeedTomlRow, options: FakeD1Options): Fa
     metadata_link: metadata?.link ?? null,
     metadata_last_source_update_at: metadata?.last_source_update_at ?? null,
     metadata_reported_at: metadata?.reported_at ?? null,
+    latest_episode_published_at: latestEpisodePublishedAt(options, feed.feed_id),
+    episode_count: episodeCount(options, feed.feed_id),
     title: feed.title ?? null,
     not_title: feed.not_title ?? null,
     description: feed.description ?? null,
@@ -1051,6 +1055,8 @@ function fakeReadableFeedFromPartial(feed: FakeFeedRow, options: FakeD1Options):
     metadata_link: metadata?.link ?? null,
     metadata_last_source_update_at: metadata?.last_source_update_at ?? null,
     metadata_reported_at: metadata?.reported_at ?? null,
+    latest_episode_published_at: latestEpisodePublishedAt(options, feed.feed_id),
+    episode_count: episodeCount(options, feed.feed_id),
     title: feed.title ?? null,
     not_title: feed.not_title ?? null,
     description: feed.description ?? null,
@@ -1112,6 +1118,8 @@ function adminFeedListRow(feed: FakeReadableFeed): AdminFeedListRow {
     metadata_description: feed.metadata_description,
     metadata_last_source_update_at: feed.metadata_last_source_update_at,
     metadata_reported_at: feed.metadata_reported_at,
+    latest_episode_published_at: feed.latest_episode_published_at,
+    episode_count: feed.episode_count,
     title: feed.title,
     not_title: feed.not_title,
     description: feed.description,
@@ -1155,6 +1163,22 @@ function coalesceSQLiteDateTimeMillis(primary: string | null, fallback: string |
   const primaryTime = sqliteDateTimeMillis(primary);
   if (primaryTime !== 0) return primaryTime;
   return sqliteDateTimeMillis(fallback);
+}
+
+function feedEpisodes(options: FakeD1Options, feedID: string): FakeEpisodeRow[] {
+  return [...(options.episodesByKey?.values() ?? [])].filter((episode) => episode.feed_id === feedID && episode.status !== "purged");
+}
+
+function latestEpisodePublishedAt(options: FakeD1Options, feedID: string): string | null {
+  const timestamps = feedEpisodes(options, feedID)
+    .map((episode) => coalesceSQLiteDateTimeMillis(episode.published_at, episode.updated_at))
+    .filter((time) => time > 0);
+  if (timestamps.length === 0) return null;
+  return new Date(Math.max(...timestamps)).toISOString().replace(".000Z", "Z");
+}
+
+function episodeCount(options: FakeD1Options, feedID: string): number {
+  return feedEpisodes(options, feedID).length;
 }
 
 function compareAdminEpisodeOrder(left: FakeEpisodeRow, right: FakeEpisodeRow): number {
