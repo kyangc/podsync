@@ -873,6 +873,115 @@ function dashboardHTML(): string {
       section[data-region="feeds"] .actions-cell .mobile-only {
         display: inline-grid;
       }
+      section[data-region="episodes"].modal {
+        width: min(420px, calc(100vw - 28px));
+        max-height: calc(100vh - 42px);
+      }
+      section[data-region="episodes"] header {
+        align-items: flex-start;
+        padding: 12px 14px;
+      }
+      section[data-region="episodes"] header .ghost {
+        min-height: 28px;
+        padding: 4px 6px;
+      }
+      section[data-region="episodes"] .modal-toolbar {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
+        gap: 8px;
+        padding: 12px 14px;
+        background: #ffffff;
+      }
+      section[data-region="episodes"] .toolbar-left {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+      }
+      section[data-region="episodes"] .toolbar-right {
+        justify-content: flex-end;
+      }
+      section[data-region="episodes"] .table-wrap {
+        overflow: visible;
+      }
+      section[data-region="episodes"] .episode-table {
+        min-width: 0;
+        table-layout: auto;
+      }
+      section[data-region="episodes"] thead {
+        display: none;
+      }
+      section[data-region="episodes"] tbody {
+        display: grid;
+        gap: 10px;
+        padding: 12px 14px;
+      }
+      section[data-region="episodes"] tbody tr {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #ffffff;
+        padding: 12px;
+      }
+      section[data-region="episodes"] tbody td {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        border: 0;
+        padding: 3px 8px;
+        border-radius: 5px;
+        background: #f9fafb;
+        color: var(--text);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      section[data-region="episodes"] tbody td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-weight: 600;
+      }
+      section[data-region="episodes"] tbody td.empty {
+        flex: 1 0 100%;
+        justify-content: center;
+        padding: 18px 10px;
+        background: transparent;
+      }
+      section[data-region="episodes"] tbody td.empty::before,
+      section[data-region="episodes"] .episode-title-cell::before,
+      section[data-region="episodes"] .episode-status-cell::before,
+      section[data-region="episodes"] .actions-cell::before {
+        content: none;
+      }
+      section[data-region="episodes"] .episode-title-cell {
+        flex: 1 0 100%;
+        display: block;
+        padding: 0;
+        background: transparent;
+      }
+      section[data-region="episodes"] .episode-title-link {
+        max-width: 100%;
+        font-size: 14px;
+      }
+      section[data-region="episodes"] .episode-status-cell {
+        padding: 0;
+        background: transparent;
+      }
+      section[data-region="episodes"] .actions-cell {
+        flex: 1 0 100%;
+        justify-content: flex-start;
+        padding: 2px 0 0;
+        background: transparent;
+      }
+      section[data-region="episodes"] .actions-cell .actions {
+        margin-left: 0;
+      }
+      section[data-region="episodes"] .modal-footer {
+        padding: 12px 14px;
+      }
     }
     @media (max-width: 360px) {
       section[data-region="feeds"] .feed-filter-bar {
@@ -2141,12 +2250,12 @@ function dashboardHTML(): string {
           } else {
             titleNode = el("span", "episode-title-link", title);
           }
-          appendCell(row, titleNode, "episode-title-cell");
-          appendCell(row, formatDate(episode.published_at || episode.updated_at));
-          appendCell(row, formatDuration(episode.duration));
-          appendCell(row, episode.has_media ? formatBytes(episode.size) : "-");
-          appendCell(row, el("span", "pill " + episode.status, episodeStatusLabel(episode.status)));
-          appendCell(row, episodeActions(episode), "actions-cell");
+          appendCell(row, titleNode, "episode-title-cell", "剧集");
+          appendCell(row, formatDate(episode.published_at || episode.updated_at), "episode-published-cell", "发布");
+          appendCell(row, formatDuration(episode.duration), "episode-duration-cell", "时长");
+          appendCell(row, episode.has_media ? formatBytes(episode.size) : "-", "episode-size-cell", "大小");
+          appendCell(row, el("span", "pill " + episode.status, episodeStatusLabel(episode.status)), "episode-status-cell", "状态");
+          appendCell(row, episodeActions(episode), "actions-cell", "操作");
           body.appendChild(row);
         });
       }

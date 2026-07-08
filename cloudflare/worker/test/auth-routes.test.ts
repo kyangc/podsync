@@ -312,7 +312,15 @@ describe("route auth boundaries", () => {
     expect(body).toContain("section[data-region=\"feeds\"] .mobile-feed-meta");
     expect(body).toContain("section[data-region=\"feeds\"] .episodes-cell");
     expect(body).toContain("section[data-region=\"feeds\"] .actions-cell .mobile-only");
+    expect(body).toContain("section[data-region=\"episodes\"].modal");
+    expect(body).toContain("section[data-region=\"episodes\"] tbody tr");
+    expect(body).toContain("section[data-region=\"episodes\"] .episode-title-cell");
+    expect(body).toContain("section[data-region=\"episodes\"] .episode-status-cell");
+    expect(body).toContain("section[data-region=\"episodes\"] .modal-footer");
     expect(body).toContain("appendCell(row, actions, \"actions-cell\", \"操作\")");
+    expect(body).toContain("appendCell(row, titleNode, \"episode-title-cell\", \"剧集\")");
+    expect(body).toContain("appendCell(row, formatDate(episode.published_at || episode.updated_at), \"episode-published-cell\", \"发布\")");
+    expect(body).toContain("appendCell(row, episodeActions(episode), \"actions-cell\", \"操作\")");
     expect(body).toContain("data-tooltip=\"远端配置里的唯一标识");
     expect(body).toContain("data-tooltip=\"NAS 拉取配置后按这个间隔尝试更新");
     expect(body).not.toContain(" title=\"");
