@@ -328,12 +328,15 @@ describe("route auth boundaries", () => {
     expect(body).toContain("section[data-region=\"episodes\"] .custom-select { flex: 0 0 132px; min-width: 132px; }");
     expect(body).toContain("section[data-region=\"episodes\"].modal .episode-table");
     expect(body).toContain("section[data-region=\"episodes\"] tbody tr");
-    expect(body).toContain("grid-template-columns: minmax(0, 1fr) max-content max-content");
+    expect(body).toContain("section[data-region=\"episodes\"] .episode-status-cell");
+    expect(body).toContain("order: 6");
+    expect(body).toContain("section[data-region=\"episodes\"] .actions-cell");
+    expect(body).toContain("order: 5");
+    expect(body).toContain(".icon-button.refresh { color: #2563eb; border-color: transparent; background: transparent; }");
     expect(body).toContain("section[data-region=\"episodes\"] .episode-published-cell");
     expect(body).toContain("section[data-region=\"episodes\"] .episode-duration-cell");
     expect(body).toContain("section[data-region=\"episodes\"] .episode-size-cell");
     expect(body).toContain("section[data-region=\"episodes\"] .episode-title-cell");
-    expect(body).toContain("section[data-region=\"episodes\"] .episode-status-cell");
     expect(body).toContain("section[data-region=\"episodes\"] .modal-footer");
     expect(body).toContain("appendCell(row, actions, \"actions-cell\", \"操作\")");
     expect(body).toContain("appendCell(row, titleNode, \"episode-title-cell\", \"剧集\")");

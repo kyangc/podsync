@@ -752,7 +752,8 @@ function dashboardHTML(): string {
     .icon-button.play { color: #15803d; border-color: #bbf7d0; background: #ecfdf3; }
     .icon-button.edit { color: #2563eb; border-color: #bfdbfe; background: #eff6ff; }
     .icon-button.copy, .icon-button.list { color: #2563eb; border-color: #bfdbfe; background: #eff6ff; }
-    .icon-button.refresh { color: #2563eb; border-color: var(--line-strong); background: #ffffff; }
+    .icon-button.refresh { color: #2563eb; border-color: transparent; background: transparent; }
+    .icon-button.refresh:hover:not(:disabled) { border-color: transparent; background: #eff6ff; }
     .icon-button.hide { color: #b45309; border-color: #fed7aa; background: #fff7ed; }
     .icon-button.restore { color: #15803d; border-color: #bbf7d0; background: #ecfdf3; }
     .icon-button.delete { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
@@ -949,9 +950,9 @@ function dashboardHTML(): string {
         width: 100%;
         max-width: 100%;
         min-width: 0;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) max-content max-content;
+        display: flex;
         align-items: center;
+        flex-wrap: wrap;
         gap: 8px;
         border: 1px solid var(--line);
         border-radius: 6px;
@@ -993,7 +994,8 @@ function dashboardHTML(): string {
         content: none;
       }
       section[data-region="episodes"] .episode-title-cell {
-        grid-column: 1 / -1;
+        order: 1;
+        flex: 1 0 100%;
         width: 100%;
         max-width: 100%;
         min-width: 0;
@@ -1007,23 +1009,28 @@ function dashboardHTML(): string {
         font-size: 14px;
       }
       section[data-region="episodes"] .episode-published-cell {
-        grid-column: 1;
+        order: 2;
+        flex: 0 1 auto;
         max-width: 100%;
       }
       section[data-region="episodes"] .episode-duration-cell {
-        grid-column: 2;
+        order: 3;
+        flex: 0 1 auto;
       }
       section[data-region="episodes"] .episode-size-cell {
-        grid-column: 3;
+        order: 4;
+        flex: 0 1 auto;
       }
       section[data-region="episodes"] .episode-status-cell {
-        grid-column: 1;
+        order: 6;
+        flex: 0 0 auto;
         justify-self: start;
         padding: 0;
         background: transparent;
       }
       section[data-region="episodes"] .actions-cell {
-        grid-column: 2 / -1;
+        order: 5;
+        flex: 0 0 auto;
         justify-self: start;
         justify-content: flex-start;
         padding: 0;
@@ -1031,6 +1038,7 @@ function dashboardHTML(): string {
       }
       section[data-region="episodes"] .actions-cell .actions {
         margin-left: 0;
+        justify-content: flex-start;
       }
       section[data-region="episodes"] .modal-footer {
         padding: 12px 14px;
