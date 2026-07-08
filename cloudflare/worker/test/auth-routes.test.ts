@@ -246,7 +246,8 @@ describe("route auth boundaries", () => {
     expect(body).toContain("data-sort-key=\"last_updated\">最近更新");
     expect(body).toContain("data-sort-key=\"episodes\">剧集");
     expect(body).toContain("<th style=\"width: 17%\">操作</th>");
-    expect(body).toContain("#metric-logs { color: var(--text); }");
+    expect(body).toContain("z-index: 39;");
+    expect(body).toContain("#metric-logs { color: var(--text); font-size: 22px; }");
     expect(body).not.toContain("近期失败");
     expect(body).not.toContain("远端发布");
     expect(body).not.toContain("recentFailures");

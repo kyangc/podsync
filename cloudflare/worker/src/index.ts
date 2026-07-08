@@ -220,7 +220,7 @@ function dashboardHTML(): string {
       background: rgba(255, 255, 255, 0.9);
       position: sticky;
       top: 0;
-      z-index: 10;
+      z-index: 39;
     }
     .brand, .section-tools, .toolbar-left, .toolbar-right, .chip-row, .actions {
       display: flex;
@@ -281,7 +281,7 @@ function dashboardHTML(): string {
     }
     button.metric:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
     .action-metric strong { color: var(--accent); font-size: 18px; }
-    #metric-logs { color: var(--text); }
+    #metric-logs { color: var(--text); font-size: 22px; }
     section {
       border: 1px solid var(--line);
       background: var(--panel);
