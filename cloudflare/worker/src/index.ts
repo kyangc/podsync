@@ -913,8 +913,9 @@ function dashboardHTML(): string {
       section[data-region="episodes"] .table-wrap {
         overflow: visible;
       }
-      section[data-region="episodes"] .episode-table {
+      section[data-region="episodes"].modal .episode-table {
         min-width: 0;
+        width: 100%;
         table-layout: auto;
       }
       section[data-region="episodes"] thead {
