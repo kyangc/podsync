@@ -3,7 +3,12 @@
   "name": "podsync-control-plane",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-06",
+  "workers_dev": true,
+  "preview_urls": true,
   "observability": { "enabled": true },
+  "routes": [
+    { "pattern": "podsync.kyangc.net", "custom_domain": true }
+  ],
   "triggers": {
     "crons": ["17 */6 * * *"]
   },
