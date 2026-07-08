@@ -115,6 +115,7 @@ interface FakeReadableFeed {
   deleted_at: string | null;
   metadata_title: string | null;
   metadata_description: string | null;
+  metadata_image_url: string | null;
   metadata_link: string | null;
   metadata_last_source_update_at: string | null;
   metadata_reported_at: string | null;
@@ -1015,6 +1016,7 @@ function fakeReadableFeedFromToml(feed: FeedTomlRow, options: FakeD1Options): Fa
     deleted_at: extras.deleted_at ?? null,
     metadata_title: metadata?.title ?? extras.metadata_title ?? null,
     metadata_description: metadata?.description ?? extras.metadata_description ?? null,
+    metadata_image_url: metadata?.image_url ?? null,
     metadata_link: metadata?.link ?? null,
     metadata_last_source_update_at: metadata?.last_source_update_at ?? null,
     metadata_reported_at: metadata?.reported_at ?? null,
@@ -1052,6 +1054,7 @@ function fakeReadableFeedFromPartial(feed: FakeFeedRow, options: FakeD1Options):
     deleted_at: feed.deleted_at ?? null,
     metadata_title: metadata?.title ?? feed.metadata_title ?? null,
     metadata_description: metadata?.description ?? feed.metadata_description ?? null,
+    metadata_image_url: metadata?.image_url ?? null,
     metadata_link: metadata?.link ?? null,
     metadata_last_source_update_at: metadata?.last_source_update_at ?? null,
     metadata_reported_at: metadata?.reported_at ?? null,
@@ -1116,6 +1119,7 @@ function adminFeedListRow(feed: FakeReadableFeed): AdminFeedListRow {
     public_path: feed.public_path,
     metadata_title: feed.metadata_title,
     metadata_description: feed.metadata_description,
+    metadata_image_url: feed.metadata_image_url,
     metadata_last_source_update_at: feed.metadata_last_source_update_at,
     metadata_reported_at: feed.metadata_reported_at,
     latest_episode_published_at: feed.latest_episode_published_at,

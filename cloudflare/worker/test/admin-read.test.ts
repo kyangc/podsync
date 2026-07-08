@@ -128,6 +128,7 @@ describe("admin read APIs", () => {
               source_url: "https://space.bilibili.com/10835521",
               title: "Bilibili Metadata",
               description: "Bilibili description",
+              image_url: "https://i.example.com/bili-avatar.jpg",
               last_source_update_at: "2020-07-06T13:00:00Z",
               reported_at: "2026-07-06T13:05:00Z",
             })],
@@ -191,6 +192,7 @@ describe("admin read APIs", () => {
         feed_id: string;
         title: string;
         description: string | null;
+        image_url: string | null;
         title_override: string | null;
         description_override: string | null;
         filters: { not_title: string | null };
@@ -210,6 +212,7 @@ describe("admin read APIs", () => {
         feed_id: "bili",
         title: "Bilibili Metadata",
         description: "Bilibili description",
+        image_url: "https://i.example.com/bili-avatar.jpg",
         title_override: null,
         description_override: null,
         filters: expect.objectContaining({ not_title: "直播" }),

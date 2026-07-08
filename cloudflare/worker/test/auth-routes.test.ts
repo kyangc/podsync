@@ -168,6 +168,7 @@ describe("route auth boundaries", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(response.headers.get("content-security-policy")).toContain("connect-src 'self'");
+    expect(response.headers.get("content-security-policy")).toContain("img-src 'self' https: data:");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -375,6 +376,10 @@ describe("route auth boundaries", () => {
     expect(body).toContain("openEpisodesModal(feed.feed_id)");
     expect(body).toContain("function safeExternalURL");
     expect(body).toContain("url.protocol === \"http:\" || url.protocol === \"https:\"");
+    expect(body).toContain("function safeImageURL");
+    expect(body).toContain("function feedAvatar");
+    expect(body).toContain("el(\"span\", \"feed-avatar\", label)");
+    expect(body).toContain("nameStack.appendChild(feedAvatar(feed))");
     expect(body).toContain("noopener noreferrer");
     expect(body.length).toBeGreaterThan(12000);
   });

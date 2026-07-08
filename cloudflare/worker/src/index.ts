@@ -136,7 +136,7 @@ function text(body: string, status = 200, contentType = "text/plain; charset=utf
 function dashboardHeaders(): Headers {
   return new Headers({
     "content-type": "text/html; charset=utf-8",
-    "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' https: data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
     "cache-control": "no-store",
@@ -570,6 +570,24 @@ function dashboardHTML(): string {
     .muted { color: var(--muted); }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     .stack { display: grid; gap: 4px; min-width: 0; }
+    .feed-name-stack { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .feed-avatar {
+      flex: 0 0 28px;
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #f8fafc;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .feed-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .mobile-feed-meta { display: none; }
     .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .feed-title-button {
@@ -1635,6 +1653,17 @@ function dashboardHTML(): string {
         return "";
       }
 
+      function safeImageURL(value) {
+        if (!value) return "";
+        try {
+          var url = new URL(value, window.location.origin);
+          if (url.protocol === "https:" || url.protocol === "data:") return url.toString();
+        } catch (error) {
+          return "";
+        }
+        return "";
+      }
+
       function fallbackCopy(value) {
         var input = document.createElement("input");
         input.value = value;
@@ -2004,6 +2033,24 @@ function dashboardHTML(): string {
         return "pill " + (provider === "bilibili" ? "provider-bilibili" : "provider-youtube");
       }
 
+      function feedAvatar(feed) {
+        var label = feed.provider === "bilibili" ? "B" : "Y";
+        var avatar = el("span", "feed-avatar", label);
+        var url = safeImageURL(feed.image_url);
+        if (!url) return avatar;
+        avatar.textContent = "";
+        var image = document.createElement("img");
+        image.src = url;
+        image.alt = (feed.title || feed.feed_id) + " 头像";
+        image.loading = "lazy";
+        image.referrerPolicy = "no-referrer";
+        image.addEventListener("error", function () {
+          avatar.replaceChildren(label);
+        }, { once: true });
+        avatar.appendChild(image);
+        return avatar;
+      }
+
       function needsCookie(feed) {
         return feed.provider === "bilibili" && !feed.cookie_profile;
       }
@@ -2199,6 +2246,7 @@ function dashboardHTML(): string {
           name.title = feed.url || feed.feed_id;
           name.addEventListener("click", function () { openFeedDetailsModal(feed.feed_id); });
           var nameStack = el("div", "stack feed-name-stack");
+          nameStack.appendChild(feedAvatar(feed));
           nameStack.appendChild(name);
           var mobileMeta = el("div", "mobile-feed-meta");
           mobileMeta.appendChild(el("span", providerPillClass(feed.provider), provider));
@@ -3858,6 +3906,7 @@ async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
             f.page_size, f.keep_last, f.cookie_profile, f.bilibili_include_upower_exclusive,
             f.public_path,
             m.title AS metadata_title, m.description AS metadata_description,
+            m.image_url AS metadata_image_url,
             m.last_source_update_at AS metadata_last_source_update_at, m.reported_at AS metadata_reported_at,
             ep.latest_episode_published_at, COALESCE(ep.episode_count, 0) AS episode_count,
             ff.title, ff.not_title, ff.description, ff.not_description,
@@ -3886,6 +3935,7 @@ async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
       description_override: feed.description_override,
       title: feed.metadata_title ?? feed.title_override ?? feed.feed_id,
       description: feed.metadata_description ?? feed.description_override ?? null,
+      image_url: feed.metadata_image_url,
       last_source_update_at: feed.metadata_last_source_update_at,
       metadata_reported_at: feed.metadata_reported_at,
       latest_episode_published_at: feed.latest_episode_published_at,

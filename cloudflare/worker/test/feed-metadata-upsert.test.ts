@@ -192,7 +192,7 @@ describe("NAS feed metadata upsert API", () => {
         source_url: "old",
         title: "Old",
         description: "Old description",
-        image_url: null,
+        image_url: "https://example.com/cover.jpg",
         link: null,
         author: null,
         category: null,
@@ -225,7 +225,7 @@ describe("NAS feed metadata upsert API", () => {
         source_url: "https://www.youtube.com/channel/channel",
         title: "Reported Title",
         description: "Reported description",
-        image_url: null,
+        image_url: "https://example.com/cover.jpg",
         link: "https://example.com/reported",
         author: null,
         category: null,
@@ -264,11 +264,12 @@ describe("NAS feed metadata upsert API", () => {
       env,
     );
     expect(admin.status).toBe(200);
-    const adminBody = await admin.json() as { feeds: Array<{ feed_id: string; title: string; description: string }> };
+    const adminBody = await admin.json() as { feeds: Array<{ feed_id: string; title: string; description: string; image_url: string | null }> };
     expect(adminBody.feeds).toContainEqual(expect.objectContaining({
       feed_id: "feed",
       title: "Reported Title",
       description: "Reported description",
+      image_url: "https://example.com/cover.jpg",
     }));
   });
 });
