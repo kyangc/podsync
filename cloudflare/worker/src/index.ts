@@ -667,11 +667,32 @@ function dashboardHTML(): string {
     .detail-value { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
     .detail-value.mono { font-size: 13px; }
     .log-empty { margin: 18px; border: 1px dashed var(--line-strong); border-radius: 6px; padding: 24px; text-align: center; color: var(--muted); }
-    .toast-region { position: fixed; top: 72px; right: 20px; z-index: 80; display: grid; gap: 8px; width: min(340px, calc(100vw - 40px)); }
-    .toast { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; background: #ffffff; padding: 10px 12px; box-shadow: 0 6px 20px rgba(16, 24, 40, 0.12); }
-    .toast.success { border-left-color: var(--ok); }
-    .toast.warning { border-left-color: var(--warn); }
-    .toast.error { border-left-color: var(--danger); }
+    .toast-region {
+      position: fixed;
+      left: 50%;
+      bottom: max(24px, env(safe-area-inset-bottom));
+      z-index: 80;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      width: min(520px, calc(100vw - 32px));
+      transform: translateX(-50%);
+      pointer-events: none;
+    }
+    .toast {
+      max-width: 100%;
+      border: 0;
+      border-radius: 999px;
+      background: rgba(17, 24, 39, 0.94);
+      color: #ffffff;
+      padding: 10px 16px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.24);
+      text-align: center;
+      line-height: 1.45;
+      pointer-events: auto;
+    }
+    .toast button { display: none; }
     .support-panel[hidden] { display: none; }
     .nowrap { white-space: nowrap; }
     .episode-table th, .episode-table td { white-space: nowrap; }
@@ -1027,7 +1048,7 @@ function dashboardHTML(): string {
         <h1>Podsync Dashboard</h1>
       </div>
       <div class="header-tools">
-        <button id="refresh-dashboard" class="primary sync-button" type="button" aria-label="立即同步"><span class="sync-label">立即同步</span><span class="sync-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 9V4h5"></path><path d="M4.6 9A8 8 0 0 1 18 6.4L20 8.5"></path><path d="M20 15v5h-5"></path><path d="M19.4 15A8 8 0 0 1 6 17.6L4 15.5"></path></svg></span></button>
+        <button id="refresh-dashboard" class="primary sync-button" type="button" aria-label="刷新后台数据，不会触发 NAS 立即抓取"><span class="sync-label">刷新数据</span><span class="sync-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 9V4h5"></path><path d="M4.6 9A8 8 0 0 1 18 6.4L20 8.5"></path><path d="M20 15v5h-5"></path><path d="M19.4 15A8 8 0 0 1 6 17.6L4 15.5"></path></svg></span></button>
       </div>
     </header>
 
@@ -1661,10 +1682,6 @@ function dashboardHTML(): string {
         var region = byID("toast-region");
         var toast = el("div", "toast " + (kind || "info"));
         toast.appendChild(el("span", "", message));
-        var close = el("button", "ghost", "关闭");
-        close.type = "button";
-        close.addEventListener("click", function () { toast.remove(); });
-        toast.appendChild(close);
         region.appendChild(toast);
         window.setTimeout(function () { toast.remove(); }, 4200);
       }
