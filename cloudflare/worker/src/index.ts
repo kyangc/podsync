@@ -222,7 +222,7 @@ function dashboardHTML(): string {
       top: 0;
       z-index: 10;
     }
-    .brand, .header-tools, .section-tools, .toolbar-left, .toolbar-right, .chip-row, .actions {
+    .brand, .section-tools, .toolbar-left, .toolbar-right, .chip-row, .actions {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -256,8 +256,6 @@ function dashboardHTML(): string {
       box-shadow: 0 0 0 2px var(--accent);
     }
     .brand h1 { margin: 0; font-size: 20px; line-height: 1.2; white-space: nowrap; }
-    .header-tools { justify-content: flex-end; gap: 10px; }
-    .sync-icon { display: none; }
     .status { min-width: 0; min-height: 0; color: var(--muted); text-align: right; font-size: 13px; }
     .status[hidden] { display: none; }
     .status.error { color: var(--danger); }
@@ -759,37 +757,6 @@ function dashboardHTML(): string {
     @media (max-width: 980px) {
       main { padding: 0 14px 20px; }
       .topbar { align-items: center; flex-direction: row; margin: 0 -14px 14px; padding: 12px 14px; }
-      .header-tools { margin-left: auto; flex-wrap: nowrap; }
-      button.sync-button {
-        width: 36px;
-        height: 36px;
-        min-height: 36px;
-        padding: 0;
-        display: inline-grid;
-        place-items: center;
-        border-color: var(--line-strong);
-        background: #ffffff;
-        color: var(--accent);
-        box-shadow: none;
-      }
-      button.sync-button:hover:not(:disabled) { border-color: #bfdbfe; background: #eff6ff; color: var(--accent); }
-      .sync-label { display: none; }
-      .sync-icon {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 17px;
-        height: 17px;
-      }
-      .sync-icon svg {
-        width: 18px;
-        height: 18px;
-        stroke: currentColor;
-        fill: none;
-        stroke-width: 2;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-      }
       .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       .form-grid { grid-template-columns: 1fr; }
       .form-section-grid, .form-section-grid.runtime-grid, .form-section-grid.switch-grid { grid-template-columns: 1fr; }
@@ -1046,9 +1013,6 @@ function dashboardHTML(): string {
       <div class="brand">
         <span class="brand-logo" aria-hidden="true">P</span>
         <h1>Podsync Dashboard</h1>
-      </div>
-      <div class="header-tools">
-        <button id="refresh-dashboard" class="primary sync-button" type="button" aria-label="刷新后台数据，不会触发 NAS 立即抓取"><span class="sync-label">刷新数据</span><span class="sync-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 9V4h5"></path><path d="M4.6 9A8 8 0 0 1 18 6.4L20 8.5"></path><path d="M20 15v5h-5"></path><path d="M19.4 15A8 8 0 0 1 6 17.6L4 15.5"></path></svg></span></button>
       </div>
     </header>
 
@@ -1560,7 +1524,6 @@ function dashboardHTML(): string {
       function setBusy(value) {
         var changed = state.busy !== value;
         state.busy = value;
-        setDisabled("refresh-dashboard", value);
         setDisabled("refresh-episodes", value || !state.selectedFeedID);
         setDisabled("new-feed", value);
         setDisabled("feed-form-save", value || !state.feedFormOpen);
@@ -2799,7 +2762,6 @@ function dashboardHTML(): string {
         syncCustomSelect(selectID);
       }
 
-      byID("refresh-dashboard").addEventListener("click", loadDashboard);
       byID("new-feed").addEventListener("click", openNewFeedForm);
       byID("feed-form").addEventListener("submit", submitFeedForm);
       byID("feed-form-cancel").addEventListener("click", closeFeedForm);
