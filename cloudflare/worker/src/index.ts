@@ -931,7 +931,7 @@ function dashboardHTML(): string {
         max-width: 100%;
         min-width: 0;
         display: grid;
-        grid-template-columns: minmax(0, max-content) max-content max-content minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr) max-content max-content;
         align-items: center;
         gap: 8px;
         border: 1px solid var(--line);
@@ -954,6 +954,7 @@ function dashboardHTML(): string {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        justify-self: start;
       }
       section[data-region="episodes"] tbody td::before {
         content: attr(data-label);
@@ -998,11 +999,13 @@ function dashboardHTML(): string {
       }
       section[data-region="episodes"] .episode-status-cell {
         grid-column: 1;
+        justify-self: start;
         padding: 0;
         background: transparent;
       }
       section[data-region="episodes"] .actions-cell {
         grid-column: 2 / -1;
+        justify-self: start;
         justify-content: flex-start;
         padding: 0;
         background: transparent;

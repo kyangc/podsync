@@ -326,7 +326,7 @@ describe("route auth boundaries", () => {
     expect(body).toContain("section[data-region=\"episodes\"] #episode-search { flex: 1 1 auto; min-width: 0; }");
     expect(body).toContain("section[data-region=\"episodes\"] .custom-select { flex: 0 0 132px; min-width: 132px; }");
     expect(body).toContain("section[data-region=\"episodes\"] tbody tr");
-    expect(body).toContain("grid-template-columns: minmax(0, max-content) max-content max-content minmax(0, 1fr)");
+    expect(body).toContain("grid-template-columns: minmax(0, 1fr) max-content max-content");
     expect(body).toContain("section[data-region=\"episodes\"] .episode-published-cell");
     expect(body).toContain("section[data-region=\"episodes\"] .episode-duration-cell");
     expect(body).toContain("section[data-region=\"episodes\"] .episode-size-cell");
