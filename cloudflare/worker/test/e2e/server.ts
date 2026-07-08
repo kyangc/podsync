@@ -57,6 +57,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     return;
   }
 
+  if (url.pathname === "/__test/seed-events") {
+    if (request.method !== "POST") {
+      response.statusCode = 405;
+      response.end("method not allowed");
+      return;
+    }
+    const body = await readJSON(request);
+    const seed = await worker.fetch(nasJSONRequest(origin, "/api/nas/events/batch", eventBatchBody(body)), env);
+    await forwardResponse(seed, response);
+    return;
+  }
+
   if (url.pathname === "/__test/config.toml") {
     const config = await worker.fetch(new Request(`${origin}/api/nas/config.toml`, {
       headers: { authorization: `Bearer ${nasToken}` },
@@ -115,6 +127,48 @@ function episodeBody(overrides: Record<string, unknown>) {
     mime_type: "audio/mpeg",
     asset_token: "asset-token",
     ...overrides,
+  };
+}
+
+function eventBatchBody(overrides: Record<string, unknown>) {
+  return {
+    run: {
+      id: "ui-e2e-run",
+      started_at: "2026-07-08T12:00:00Z",
+      finished_at: "2026-07-08T12:05:00Z",
+      status: "partial",
+      feeds_updated: 1,
+      episodes_downloaded: 1,
+      episodes_uploaded: 1,
+      errors_count: 1,
+      ...(typeof overrides.run === "object" && overrides.run !== null ? overrides.run as Record<string, unknown> : {}),
+    },
+    events: Array.isArray(overrides.events) ? overrides.events : [
+      {
+        sequence: 1,
+        event_time: "2026-07-08T12:03:00Z",
+        level: "info",
+        type: "feed_update_finished",
+        feed_id: "alpha-notes",
+        message: "YouTube updated",
+      },
+      {
+        sequence: 2,
+        event_time: "2026-07-08T12:02:00Z",
+        level: "warn",
+        type: "feed_update_failed",
+        feed_id: "zed-bili",
+        message: "Bilibili warning",
+      },
+      {
+        sequence: 3,
+        event_time: "2026-07-08T12:01:00Z",
+        level: "error",
+        type: "remote_api_failed",
+        feed_id: "zed-bili",
+        message: "Remote failed",
+      },
+    ],
   };
 }
 

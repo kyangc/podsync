@@ -2500,10 +2500,16 @@ function dashboardHTML(): string {
         return "信息";
       }
 
+      function eventMatchesLevel(event, selectedLevel) {
+        if (!selectedLevel) return true;
+        if (selectedLevel === "warning") return event.level === "warning" || event.level === "warn";
+        return event.level === selectedLevel;
+      }
+
       function renderEvents() {
         var body = byID("events-body");
         body.replaceChildren();
-        var events = state.eventLevelFilter ? state.events.filter(function (event) { return event.level === state.eventLevelFilter; }) : state.events;
+        var events = state.events.filter(function (event) { return eventMatchesLevel(event, state.eventLevelFilter); });
         byID("logs-empty-filter").hidden = events.length > 0 || !state.eventLevelFilter;
         if (!events.length) {
           body.appendChild(emptyRow(4, state.eventLevelFilter ? "没有匹配的日志。" : "暂无运行日志。"));
