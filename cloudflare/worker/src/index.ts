@@ -260,7 +260,7 @@ function dashboardHTML(): string {
     .status[hidden] { display: none; }
     .status.error { color: var(--danger); }
     .status.ok { color: var(--ok); }
-    .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+    .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
     .metric {
       position: relative;
       border: 1px solid var(--line);
@@ -280,38 +280,8 @@ function dashboardHTML(): string {
       text-align: left;
     }
     button.metric:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
-    .metric[data-tooltip]::after {
-      content: attr(data-tooltip);
-      position: absolute;
-      top: calc(100% + 6px);
-      right: 0;
-      z-index: 80;
-      width: max-content;
-      max-width: min(280px, 80vw);
-      padding: 8px 10px;
-      border-radius: 6px;
-      background: #172033;
-      color: #ffffff;
-      box-shadow: 0 10px 22px rgba(16, 24, 40, 0.22);
-      font-size: 12px;
-      line-height: 1.4;
-      font-weight: 500;
-      white-space: normal;
-      opacity: 0;
-      pointer-events: none;
-      transform: translateY(-2px);
-      transition: opacity 120ms ease, transform 120ms ease;
-    }
-    .metric[data-tooltip]:hover::after,
-    .metric[data-tooltip]:focus-visible::after {
-      opacity: 1;
-      transform: translateY(0);
-    }
     .action-metric strong { color: var(--accent); font-size: 18px; }
     #metric-logs { color: var(--text); }
-    #metric-health { font-size: 15px; }
-    #metric-health.metric-health-ok { color: var(--ok); }
-    #metric-health.metric-health-warning { color: var(--warn); }
     section {
       border: 1px solid var(--line);
       background: var(--panel);
@@ -1019,8 +989,6 @@ function dashboardHTML(): string {
     <div class="summary" aria-label="概览">
       <div class="metric"><span>订阅源总数</span><strong id="metric-feeds">-</strong></div>
       <div class="metric"><span>已启用</span><strong id="metric-enabled">-</strong></div>
-      <div class="metric"><span>近期失败</span><strong id="metric-failures">-</strong></div>
-      <div id="metric-health-card" class="metric"><span>远端发布</span><strong id="metric-health">-</strong></div>
       <button id="open-logs" class="metric action-metric" type="button"><span>查看日志</span><strong id="metric-logs">-</strong></button>
       <button id="copy-opml" class="metric action-metric" type="button"><span>订阅导出</span><strong>OPML</strong></button>
     </div>
@@ -2147,20 +2115,10 @@ function dashboardHTML(): string {
         var enabled = state.feeds.filter(function (feed) { return feed.enabled; }).length;
         var latest = state.syncRuns[0];
         var latestEvent = state.events[0];
-        var recentFailures = latest ? Number(latest.errors_count || 0) : state.events.filter(function (event) { return event.level === "error"; }).length;
         var lastContact = latestEvent ? latestEvent.event_time : (latest ? latest.finished_at || latest.started_at : "");
         byID("metric-feeds").textContent = String(state.feeds.length);
         byID("metric-enabled").textContent = String(enabled);
-        byID("metric-failures").textContent = String(recentFailures);
         byID("metric-logs").textContent = String(state.events.length);
-        var health = byID("metric-health");
-        health.textContent = recentFailures > 0 ? "需关注" : "健康";
-        health.className = recentFailures > 0 ? "metric-health-warning" : "metric-health-ok";
-        var healthTooltip = recentFailures > 0
-          ? "最近一次同步存在失败或错误日志，需要查看日志排查。"
-          : "最近一次同步没有失败或错误日志。";
-        byID("metric-health-card").setAttribute("data-tooltip", healthTooltip);
-        byID("metric-health-card").setAttribute("aria-label", "远端发布：" + health.textContent + "。" + healthTooltip);
         byID("logs-subtitle").textContent = "最近 NAS 联系：" + formatRelative(lastContact);
       }
 
