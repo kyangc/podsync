@@ -332,7 +332,7 @@ describe("route auth boundaries", () => {
     expect(body).toContain("order: 6");
     expect(body).toContain("section[data-region=\"episodes\"] .actions-cell");
     expect(body).toContain("order: 5");
-    expect(body).toContain(".icon-button.refresh { color: #2563eb; border-color: transparent; background: transparent; }");
+    expect(body).toContain(".icon-button.refresh { color: #2563eb; border: 0; background: transparent; }");
     expect(body).toContain("section[data-region=\"episodes\"] .episode-published-cell");
     expect(body).toContain("section[data-region=\"episodes\"] .episode-duration-cell");
     expect(body).toContain("section[data-region=\"episodes\"] .episode-size-cell");

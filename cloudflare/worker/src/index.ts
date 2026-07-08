@@ -752,8 +752,8 @@ function dashboardHTML(): string {
     .icon-button.play { color: #15803d; border-color: #bbf7d0; background: #ecfdf3; }
     .icon-button.edit { color: #2563eb; border-color: #bfdbfe; background: #eff6ff; }
     .icon-button.copy, .icon-button.list { color: #2563eb; border-color: #bfdbfe; background: #eff6ff; }
-    .icon-button.refresh { color: #2563eb; border-color: transparent; background: transparent; }
-    .icon-button.refresh:hover:not(:disabled) { border-color: transparent; background: #eff6ff; }
+    .icon-button.refresh { color: #2563eb; border: 0; background: transparent; }
+    .icon-button.refresh:hover:not(:disabled) { border: 0; background: #eff6ff; }
     .icon-button.hide { color: #b45309; border-color: #fed7aa; background: #fff7ed; }
     .icon-button.restore { color: #15803d; border-color: #bbf7d0; background: #ecfdf3; }
     .icon-button.delete { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
