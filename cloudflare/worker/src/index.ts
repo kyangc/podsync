@@ -145,121 +145,179 @@ function dashboardHeaders(): Headers {
 
 function dashboardHTML(): string {
   return `<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Podsync Control</title>
+  <title>PodSync 远端管理</title>
+  <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTYiIGZpbGw9IiMyNTYzZWIiLz48cGF0aCBkPSJNMTggMThoMjFhMTMgMTMgMCAwIDEgMCAyNkgyOHYtOWgxMWE0IDQgMCAwIDAgMC04SDI4djI1SDE4eiIgZmlsbD0iI2ZmZiIvPjxjaXJjbGUgY3g9IjQ3IiBjeT0iNDciIHI9IjUiIGZpbGw9IiMyMmM1NWUiLz48L3N2Zz4=">
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f8fa;
+      --bg: #f6f7f9;
       --panel: #ffffff;
-      --panel-soft: #f0f3f6;
-      --line: #d7dde4;
-      --text: #18212c;
-      --muted: #687481;
-      --accent: #176f6b;
-      --accent-strong: #0f5652;
-      --warn: #9a5b00;
-      --danger: #a33434;
-      --ok: #22714f;
+      --panel-soft: #f8fafc;
+      --line: #d9dee7;
+      --line-strong: #cbd5e1;
+      --text: #172033;
+      --muted: #667085;
+      --muted-strong: #475467;
+      --accent: #2563eb;
+      --warn: #b45309;
+      --danger: #dc2626;
+      --ok: #16a34a;
+      --disabled: #98a2b3;
+      --shadow: 0 18px 45px rgba(16, 24, 40, 0.18);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    button, input, select, textarea {
-      font: inherit;
-    }
+    button, input, select, textarea { font: inherit; }
     button {
       border: 1px solid var(--line);
       border-radius: 6px;
       background: var(--panel);
       color: var(--text);
       cursor: pointer;
+      min-height: 32px;
       padding: 6px 10px;
     }
-    button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); }
+    button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
     button:disabled { cursor: not-allowed; opacity: 0.55; }
-    button.primary {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: #ffffff;
-    }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+    button.primary:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; color: #ffffff; }
     button.danger { color: var(--danger); }
-    a { color: var(--accent-strong); }
-    main {
-      min-height: 100vh;
-      padding: 20px;
+    button.small { min-height: 28px; padding: 4px 8px; font-size: 13px; }
+    button.ghost { background: transparent; border-color: transparent; min-height: 28px; padding: 4px 6px; }
+    button.ghost:hover:not(:disabled), button.link-button:hover:not(:disabled) {
+      border-color: transparent;
+      background: transparent;
     }
+    button.link-button {
+      border-color: transparent;
+      background: transparent;
+      color: var(--accent);
+      min-height: 28px;
+      padding: 4px 6px;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    a { color: var(--accent); }
+    main { min-height: 100vh; padding: 0 24px 28px; }
     .topbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      margin-bottom: 16px;
+      min-height: 56px;
+      margin: 0 -24px 16px;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.9);
+      position: sticky;
+      top: 0;
+      z-index: 10;
     }
-    .title h1 {
-      font-size: 24px;
-      line-height: 1.2;
-      margin: 0;
+    .brand, .header-tools, .section-tools, .toolbar-left, .toolbar-right, .chip-row, .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-width: 0;
     }
-    .title p {
-      margin: 4px 0 0;
-      color: var(--muted);
+    .brand-logo {
+      display: inline-grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #ffffff;
+      font-weight: 800;
+      letter-spacing: 0;
+      line-height: 1;
+      position: relative;
+      overflow: hidden;
+      flex: 0 0 auto;
     }
-    .status {
-      min-height: 22px;
-      color: var(--muted);
-      text-align: right;
+    .brand-logo::after {
+      content: "";
+      position: absolute;
+      right: 4px;
+      bottom: 4px;
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #22c55e;
+      box-shadow: 0 0 0 2px var(--accent);
     }
+    .brand h1 { margin: 0; font-size: 20px; line-height: 1.2; white-space: nowrap; }
+    .header-tools { justify-content: flex-end; gap: 10px; }
+    .sync-icon { display: none; }
+    .status { min-width: 0; min-height: 0; color: var(--muted); text-align: right; font-size: 13px; }
+    .status[hidden] { display: none; }
     .status.error { color: var(--danger); }
     .status.ok { color: var(--ok); }
-    .summary {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-      margin-bottom: 16px;
-    }
+    .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
     .metric {
+      position: relative;
       border: 1px solid var(--line);
       background: var(--panel);
-      border-radius: 8px;
-      padding: 12px;
+      border-radius: 6px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
     }
-    .metric span {
-      display: block;
-      color: var(--muted);
+    .metric span { color: var(--muted); font-size: 15px; font-weight: 600; }
+    .metric strong { font-size: 22px; }
+    button.metric {
+      width: 100%;
+      min-height: 0;
+      text-align: left;
+    }
+    button.metric:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+    .metric[data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      z-index: 80;
+      width: max-content;
+      max-width: min(280px, 80vw);
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #172033;
+      color: #ffffff;
+      box-shadow: 0 10px 22px rgba(16, 24, 40, 0.22);
       font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
+      line-height: 1.4;
+      font-weight: 500;
+      white-space: normal;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-2px);
+      transition: opacity 120ms ease, transform 120ms ease;
     }
-    .metric strong {
-      display: block;
-      margin-top: 4px;
-      font-size: 22px;
+    .metric[data-tooltip]:hover::after,
+    .metric[data-tooltip]:focus-visible::after {
+      opacity: 1;
+      transform: translateY(0);
     }
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.4fr);
-      gap: 16px;
-      align-items: start;
-    }
-    .lower {
-      display: grid;
-      grid-template-columns: minmax(280px, 0.9fr) minmax(300px, 0.8fr) minmax(360px, 1.1fr);
-      gap: 16px;
-      margin-top: 16px;
-      align-items: start;
-    }
+    .action-metric strong { color: var(--accent); font-size: 18px; }
+    #metric-logs { color: var(--text); }
+    #metric-health { font-size: 15px; }
+    #metric-health.metric-health-ok { color: var(--ok); }
+    #metric-health.metric-health-warning { color: var(--warn); }
     section {
       border: 1px solid var(--line);
       background: var(--panel);
-      border-radius: 8px;
+      border-radius: 6px;
       min-width: 0;
     }
     section header {
@@ -270,53 +328,180 @@ function dashboardHTML(): string {
       padding: 12px 14px;
       border-bottom: 1px solid var(--line);
       background: var(--panel-soft);
-      border-radius: 8px 8px 0 0;
+      border-radius: 6px 6px 0 0;
     }
-    section h2 {
-      font-size: 15px;
-      margin: 0;
-    }
-    .section-tools {
+    section h2 { font-size: 15px; margin: 0; }
+    .toolbar {
       display: flex;
       align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .feed-form {
-      border-bottom: 1px solid var(--line);
-      padding: 12px 14px;
-      display: grid;
+      justify-content: flex-start;
       gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
       background: #ffffff;
     }
-    .feed-form[hidden] { display: none; }
-    .feed-form-title {
+    .toolbar input, .toolbar select, .modal-toolbar input, .modal-toolbar select {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--text);
+      min-height: 32px;
+      padding: 6px 8px;
+    }
+    .toolbar select, .modal-toolbar select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%2398a2b3' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-position: right 11px center;
+      background-repeat: no-repeat;
+      background-size: 16px 16px;
+      padding-right: 36px;
+    }
+    .toolbar select[hidden] { display: none; }
+    .custom-select {
+      position: relative;
+      min-width: 112px;
+      z-index: 35;
+    }
+    .select-trigger {
+      width: 100%;
       display: flex;
-      justify-content: space-between;
-      gap: 10px;
       align-items: center;
+      justify-content: flex-start;
+      position: relative;
+      padding-right: 34px;
+      text-align: left;
+      white-space: nowrap;
+      color: var(--text);
+      background: #ffffff;
     }
-    .feed-form-title strong { font-size: 14px; }
-    .form-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
+    .select-trigger::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: 12px;
+      width: 7px;
+      height: 7px;
+      border-right: 1.5px solid #98a2b3;
+      border-bottom: 1.5px solid #98a2b3;
+      transform: translateY(-60%) rotate(45deg);
+      pointer-events: none;
     }
-    .form-field {
-      display: grid;
-      gap: 4px;
-      min-width: 0;
+    .select-menu {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      z-index: 30;
+      min-width: 100%;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      box-shadow: 0 12px 24px rgba(16, 24, 40, 0.16);
     }
-    .form-field.wide { grid-column: 1 / -1; }
-    .form-field label,
-    .form-group-label {
+    .select-menu[hidden] { display: none; }
+    .select-option {
+      width: 100%;
+      display: block;
+      border-color: transparent;
+      background: #ffffff;
+      color: var(--text);
+      text-align: left;
+      white-space: nowrap;
+    }
+    .select-option:hover, .select-option:focus {
+      border-color: transparent;
+      background: #eff6ff;
+      color: var(--accent);
+      outline: none;
+    }
+    .select-option[aria-selected="true"] {
+      background: #eff6ff;
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .search { min-width: min(340px, 100%); }
+    .feed-filter-bar {
+      align-items: center;
+      flex-wrap: nowrap;
+    }
+    .feed-filter-bar .search {
+      width: 220px;
+      flex: 0 1 220px;
+    }
+    .feed-filter-bar .custom-select {
+      flex: 0 0 112px;
+    }
+    .form-field .custom-select {
+      width: 100%;
+    }
+    .form-field .select-trigger {
+      min-height: 32px;
+    }
+    .modal-toolbar .custom-select {
+      flex: 0 0 128px;
+    }
+    .custom-select.is-disabled .select-trigger {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+    #reset-feed-filters {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; padding: 18px 22px; }
+    .form-field { display: grid; gap: 4px; min-width: 0; }
+    .form-field.wide, .form-section { grid-column: 1 / -1; }
+    .form-field label, .form-group-label { color: var(--muted); font-size: 12px; font-weight: 600; }
+    .tooltip-label {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      width: max-content;
+      max-width: 100%;
+      cursor: help;
+      outline: none;
+    }
+    .tooltip-label::after {
+      content: "?";
+      display: inline-grid;
+      place-items: center;
+      width: 15px;
+      height: 15px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
       color: var(--muted);
-      font-size: 12px;
-      font-weight: 600;
+      background: #ffffff;
+      font-size: 10px;
+      line-height: 1;
     }
-    .form-field input,
-    .form-field select,
-    .form-field textarea {
+    .tooltip-label::before {
+      content: attr(data-tooltip);
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      z-index: 90;
+      width: max-content;
+      max-width: 260px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #172033;
+      color: #ffffff;
+      box-shadow: 0 10px 22px rgba(16, 24, 40, 0.22);
+      font-size: 12px;
+      line-height: 1.4;
+      font-weight: 500;
+      white-space: normal;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-2px);
+      transition: opacity 120ms ease, transform 120ms ease;
+    }
+    .tooltip-label:hover::before, .tooltip-label:focus-visible::before {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .form-field input, .form-field select, .form-field textarea {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -324,305 +509,787 @@ function dashboardHTML(): string {
       background: #ffffff;
       color: var(--text);
     }
-    .form-field textarea {
-      min-height: 58px;
-      resize: vertical;
+    .form-field textarea { min-height: 58px; resize: vertical; }
+    .form-field.has-error label { color: var(--danger); }
+    .form-field.has-error input, .form-field.has-error textarea, .form-field.has-error .select-trigger {
+      border-color: var(--danger);
+      box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.1);
     }
-    .check-row {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-    .check-row label {
+    .form-section { border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); padding: 14px; display: grid; gap: 12px; }
+    .form-section[hidden] { display: none; }
+    .form-section-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
+    .form-section-title { color: var(--text); font-size: 13px; font-weight: 700; }
+    .form-section-note { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .form-section-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; align-items: start; }
+    .form-section-grid.runtime-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .form-section-grid.switch-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
+    .form-section.danger-zone { background: #fef2f2; border-color: #fecaca; }
+    .form-field.checkbox-field { align-content: center; justify-content: start; min-height: 32px; }
+    .form-field.checkbox-field.checkbox-start { grid-column: auto; }
+    .form-field.checkbox-field label {
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      width: max-content;
+      max-width: 100%;
       color: var(--text);
+      font-size: 14px;
+      font-weight: 500;
     }
+    .form-field.checkbox-field input[type="checkbox"] {
+      width: auto;
+      flex: 0 0 auto;
+      margin: 0;
+    }
+    .feed-form { display: grid; gap: 0; background: #ffffff; }
+    .feed-form[hidden] { display: none; }
+    .feed-form-title { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 18px 22px; border-bottom: 1px solid var(--line); }
+    .feed-form-title strong { font-size: 18px; }
+    .feed-form-title span { display: block; margin-top: 3px; color: var(--muted); font-size: 13px; }
+    .feed-form .feed-form-title, .feed-form .modal-footer { flex: 0 0 auto; }
+    .feed-form .form-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+    .modal-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 22px; border-top: 1px solid var(--line); background: var(--panel-soft); border-radius: 0 0 6px 6px; }
+    .modal-footer-actions { display: flex; justify-content: flex-end; gap: 8px; }
     .table-wrap { overflow-x: auto; }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    section[data-region="feeds"] > .table-wrap table { min-width: 960px; }
+    .modal.large .table-wrap table { min-width: 860px; }
+    .modal.logs .table-wrap table { min-width: 760px; }
+    .modal.logs th, .modal.logs td {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      overflow-wrap: normal;
     }
-    th, td {
-      border-bottom: 1px solid var(--line);
-      padding: 9px 10px;
-      text-align: left;
-      vertical-align: top;
-      overflow-wrap: anywhere;
-    }
-    th {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-      background: #fbfcfd;
-    }
-    tbody tr.selected { background: #eaf5f3; }
+    th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; vertical-align: middle; overflow-wrap: anywhere; }
+    th { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: #fbfcfd; }
+    tbody tr.selected { background: #ffffff; }
+    tbody tr.disabled-row { color: var(--text); background: #ffffff; }
     tbody tr:last-child td { border-bottom: 0; }
     .muted { color: var(--muted); }
-    .mono {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .stack { display: grid; gap: 4px; min-width: 0; }
+    .mobile-feed-meta { display: none; }
+    .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .feed-title-button {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      font-weight: 600;
+      text-align: left;
+    }
+    .feed-title-button:hover:not(:disabled) {
+      border-color: transparent;
+      background: transparent;
+      color: var(--text);
     }
     .pill {
       display: inline-flex;
       align-items: center;
       border: 1px solid var(--line);
-      border-radius: 999px;
+      border-radius: 5px;
       padding: 2px 8px;
       background: #ffffff;
       color: var(--muted);
       font-size: 12px;
+      font-weight: 600;
       white-space: nowrap;
     }
-    .pill.visible { color: var(--ok); border-color: #b7dbc9; }
-    .pill.hidden, .pill.delete_pending { color: var(--warn); border-color: #e0c892; }
-    .pill.purged { color: var(--danger); border-color: #e0b0b0; }
-    .actions {
+    .pill.success, .pill.visible, .pill.ok { color: var(--ok); border-color: #bbf7d0; background: #ecfdf3; }
+    .pill.warning, .pill.hidden, .pill.delete_pending, .pill.pending { color: var(--warn); border-color: #fed7aa; background: #fff7ed; }
+    .pill.danger, .pill.purged, .pill.error { color: var(--danger); border-color: #fecaca; background: #fef2f2; }
+    .pill.disabled { color: #667085; border-color: #e4e7ec; background: #f2f4f7; }
+    .pill.info { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
+    .pill.provider-bilibili { color: #0369a1; border-color: #bae6fd; background: #f0f9ff; }
+    .pill.provider-youtube { color: #b91c1c; border-color: #fecdd3; background: #fff1f2; }
+    .empty { padding: 16px; color: var(--muted); text-align: center; }
+    .field-error { color: var(--danger); font-size: 12px; min-height: 16px; }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(52, 64, 84, 0.62);
+    }
+    .modal-backdrop[hidden] { display: none; }
+    .modal {
+      width: min(640px, 100%);
+      max-height: min(780px, calc(100vh - 48px));
       display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
+      flex-direction: column;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: var(--shadow);
+      overflow: hidden;
     }
-    .empty {
-      padding: 16px;
-      color: var(--muted);
-    }
-    .url-list {
-      display: grid;
-      gap: 8px;
-      padding: 12px;
-    }
-    .url-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 8px;
-      align-items: center;
-      border-bottom: 1px solid var(--line);
-      padding-bottom: 8px;
-    }
-    .url-row:last-child { border-bottom: 0; padding-bottom: 0; }
-    .stack { display: grid; gap: 4px; min-width: 0; }
+    .modal.large { width: min(920px, 100%); }
+    .modal.logs { width: min(820px, 100%); }
+    .modal.small { width: min(440px, 100%); }
+    .modal header, .modal-footer, .modal-toolbar { flex: 0 0 auto; }
+    .modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; background: #ffffff; }
+    .modal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: var(--panel-soft); }
+    .modal-subtitle { color: var(--muted); font-size: 13px; margin-top: 3px; }
+    .detail-body { padding: 18px 22px; }
+    .detail-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; margin: 0; }
+    .detail-item { min-width: 0; }
+    .detail-item.wide { grid-column: 1 / -1; }
+    .detail-label { color: var(--muted); font-size: 12px; font-weight: 600; margin: 0 0 4px; }
+    .detail-value { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+    .detail-value.mono { font-size: 13px; }
+    .log-empty { margin: 18px; border: 1px dashed var(--line-strong); border-radius: 6px; padding: 24px; text-align: center; color: var(--muted); }
+    .toast-region { position: fixed; top: 72px; right: 20px; z-index: 80; display: grid; gap: 8px; width: min(340px, calc(100vw - 40px)); }
+    .toast { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; background: #ffffff; padding: 10px 12px; box-shadow: 0 6px 20px rgba(16, 24, 40, 0.12); }
+    .toast.success { border-left-color: var(--ok); }
+    .toast.warning { border-left-color: var(--warn); }
+    .toast.error { border-left-color: var(--danger); }
+    .support-panel[hidden] { display: none; }
     .nowrap { white-space: nowrap; }
+    .episode-table th, .episode-table td { white-space: nowrap; }
+    .episode-title-cell { min-width: 0; }
+    .episode-title-link {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+    .actions { flex-wrap: nowrap; }
+    .actions-cell { white-space: nowrap; }
+    .mobile-only, .icon-button.mobile-only { display: none; }
+    .icon-button {
+      position: relative;
+      width: 30px;
+      height: 30px;
+      min-height: 30px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 6px;
+      line-height: 1;
+      font-weight: 700;
+    }
+    .icon-button:disabled { opacity: 1; }
+    .icon-button:disabled svg { opacity: 0.45; }
+    .icon-button[data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: calc(100% + 7px);
+      left: 50%;
+      z-index: 90;
+      width: max-content;
+      max-width: 180px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: #172033;
+      color: #ffffff;
+      box-shadow: 0 8px 18px rgba(16, 24, 40, 0.18);
+      font-size: 12px;
+      line-height: 1.35;
+      font-weight: 500;
+      white-space: nowrap;
+      display: none;
+      pointer-events: none;
+      transform: translate(-50%, 2px);
+    }
+    .icon-button[data-tooltip]:hover::after,
+    .icon-button[data-tooltip]:focus-visible::after {
+      display: block;
+      transform: translate(-50%, 0);
+    }
+    .icon-button svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .icon-button.play svg { fill: currentColor; stroke: none; }
+    .icon-button.pause { color: #b45309; border-color: #fed7aa; background: #fff7ed; }
+    .icon-button.play { color: #15803d; border-color: #bbf7d0; background: #ecfdf3; }
+    .icon-button.edit { color: #2563eb; border-color: #bfdbfe; background: #eff6ff; }
+    .icon-button.copy, .icon-button.list { color: #2563eb; border-color: #bfdbfe; background: #eff6ff; }
+    .icon-button.hide { color: #b45309; border-color: #fed7aa; background: #fff7ed; }
+    .icon-button.restore { color: #15803d; border-color: #bbf7d0; background: #ecfdf3; }
+    .icon-button.delete { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
     @media (max-width: 980px) {
-      main { padding: 14px; }
-      .summary, .layout, .lower { grid-template-columns: 1fr; }
+      main { padding: 0 14px 20px; }
+      .topbar { align-items: center; flex-direction: row; margin: 0 -14px 14px; padding: 12px 14px; }
+      .header-tools { margin-left: auto; flex-wrap: nowrap; }
+      button.sync-button {
+        width: 36px;
+        height: 36px;
+        min-height: 36px;
+        padding: 0;
+        display: inline-grid;
+        place-items: center;
+        border-color: var(--line-strong);
+        background: #ffffff;
+        color: var(--accent);
+        box-shadow: none;
+      }
+      button.sync-button:hover:not(:disabled) { border-color: #bfdbfe; background: #eff6ff; color: var(--accent); }
+      .sync-label { display: none; }
+      .sync-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 17px;
+        height: 17px;
+      }
+      .sync-icon svg {
+        width: 18px;
+        height: 18px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       .form-grid { grid-template-columns: 1fr; }
-      .topbar { align-items: flex-start; flex-direction: column; }
+      .form-section-grid, .form-section-grid.runtime-grid, .form-section-grid.switch-grid { grid-template-columns: 1fr; }
+      .form-section-header { display: grid; gap: 3px; }
+      .form-section-note { white-space: normal; }
+      .toolbar, .modal-toolbar { align-items: stretch; flex-direction: column; }
+      .toolbar-right { justify-content: flex-start; }
+      .search { min-width: 0; width: 100%; }
+      .feed-filter-bar { align-items: stretch; flex-wrap: wrap; }
+      .feed-filter-bar .search { width: 100%; flex: 1 0 100%; }
+      .modal-toolbar .custom-select { flex: 0 0 auto; width: 100%; }
       .status { text-align: left; }
+    }
+    @media (max-width: 720px) {
+      section[data-region="feeds"], section[data-region="feeds"] .toolbar {
+        overflow: visible;
+      }
+      section[data-region="feeds"] .feed-filter-bar {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+        align-items: start;
+        gap: 8px;
+        width: 100%;
+      }
+      section[data-region="feeds"] .feed-filter-bar .search {
+        grid-column: 1 / -1;
+      }
+      section[data-region="feeds"] .custom-select {
+        min-width: 0;
+        width: 100%;
+      }
+      section[data-region="feeds"] .select-trigger {
+        min-width: 0;
+        width: 100%;
+      }
+      section[data-region="feeds"] .select-menu {
+        left: 0;
+        right: auto;
+        width: max-content;
+        min-width: 100%;
+      }
+      section[data-region="feeds"] > .table-wrap { overflow: visible; }
+      section[data-region="feeds"] > .table-wrap table {
+        min-width: 0;
+        table-layout: auto;
+      }
+      section[data-region="feeds"] thead { display: none; }
+      section[data-region="feeds"] tbody {
+        display: grid;
+        gap: 10px;
+        padding: 10px;
+      }
+      section[data-region="feeds"] tbody tr {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #ffffff;
+        padding: 12px;
+      }
+      section[data-region="feeds"] tbody tr.selected {
+        border-color: var(--line);
+        background: #ffffff;
+      }
+      section[data-region="feeds"] tbody tr.disabled-row {
+        background: #ffffff;
+      }
+      section[data-region="feeds"] tbody td {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        border: 0;
+        padding: 0;
+      }
+      section[data-region="feeds"] tbody td::before {
+        content: none;
+      }
+      section[data-region="feeds"] tbody td:first-child {
+        flex: 1 0 100%;
+      }
+      section[data-region="feeds"] tbody td:first-child::before,
+      section[data-region="feeds"] tbody td.empty::before {
+        content: none;
+      }
+      section[data-region="feeds"] .feed-name-stack {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+      section[data-region="feeds"] .mobile-feed-meta {
+        display: inline-flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      section[data-region="feeds"] .provider-cell,
+      section[data-region="feeds"] .status-cell,
+      section[data-region="feeds"] .activity-cell,
+      section[data-region="feeds"] .episodes-cell,
+      section[data-region="feeds"] .subscription-cell {
+        display: none;
+      }
+      section[data-region="feeds"] .feed-title-button {
+        width: auto;
+        max-width: 100%;
+        min-height: 24px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        font-size: 15px;
+      }
+      section[data-region="feeds"] .actions-cell {
+        flex: 1 0 100%;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 10px;
+        padding-top: 2px;
+      }
+      section[data-region="feeds"] .actions-cell .actions {
+        margin-left: 0;
+      }
+      section[data-region="feeds"] .actions-cell .mobile-only {
+        display: inline-grid;
+      }
+    }
+    @media (max-width: 360px) {
+      section[data-region="feeds"] .feed-filter-bar {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      }
+      section[data-region="feeds"] #reset-feed-filters {
+        grid-column: 1 / -1;
+        justify-self: end;
+      }
     }
   </style>
 </head>
 <body>
   <main id="app" data-dashboard-app>
-    <div class="topbar">
-      <div class="title">
-        <h1>Podsync Control</h1>
-        <p>Remote feeds, subscriptions, episode visibility, and recent NAS activity.</p>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-logo" aria-hidden="true">P</span>
+        <h1>Podsync Dashboard</h1>
       </div>
-      <div class="section-tools">
-        <button id="refresh-dashboard" class="primary" type="button">Refresh</button>
-        <div id="dashboard-status" class="status" role="status" aria-live="polite">Loading...</div>
+      <div class="header-tools">
+        <button id="refresh-dashboard" class="primary sync-button" type="button" aria-label="立即同步"><span class="sync-label">立即同步</span><span class="sync-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 9V4h5"></path><path d="M4.6 9A8 8 0 0 1 18 6.4L20 8.5"></path><path d="M20 15v5h-5"></path><path d="M19.4 15A8 8 0 0 1 6 17.6L4 15.5"></path></svg></span></button>
       </div>
+    </header>
+
+    <div class="summary" aria-label="概览">
+      <div class="metric"><span>订阅源总数</span><strong id="metric-feeds">-</strong></div>
+      <div class="metric"><span>已启用</span><strong id="metric-enabled">-</strong></div>
+      <div class="metric"><span>近期失败</span><strong id="metric-failures">-</strong></div>
+      <div id="metric-health-card" class="metric"><span>远端发布</span><strong id="metric-health">-</strong></div>
+      <button id="open-logs" class="metric action-metric" type="button"><span>查看日志</span><strong id="metric-logs">-</strong></button>
+      <button id="copy-opml" class="metric action-metric" type="button"><span>订阅导出</span><strong>OPML</strong></button>
     </div>
 
-    <div class="summary" aria-label="Summary">
-      <div class="metric"><span>Feeds</span><strong id="metric-feeds">-</strong></div>
-      <div class="metric"><span>Enabled</span><strong id="metric-enabled">-</strong></div>
-      <div class="metric"><span>In OPML</span><strong id="metric-opml">-</strong></div>
-      <div class="metric"><span>Latest Run</span><strong id="metric-run">-</strong></div>
-    </div>
+    <section data-region="feeds" aria-labelledby="feeds-title">
+      <header>
+        <h2 id="feeds-title">订阅源</h2>
+        <div class="section-tools">
+          <button id="new-feed" class="primary" type="button">添加订阅源</button>
+        </div>
+      </header>
+      <div class="toolbar">
+        <div class="toolbar-left feed-filter-bar">
+          <input id="feed-search" class="search" type="search" placeholder="搜索订阅源..." autocomplete="off">
+          <select id="provider-filter" aria-label="按平台筛选" hidden aria-hidden="true" tabindex="-1">
+            <option value="">全部平台</option>
+            <option value="bilibili">B 站</option>
+            <option value="youtube">YouTube</option>
+          </select>
+          <div class="custom-select" data-select-control="provider-filter">
+            <button id="provider-filter-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="provider-filter-menu">全部平台</button>
+            <div id="provider-filter-menu" class="select-menu" role="listbox" aria-label="按平台筛选" hidden>
+              <button class="select-option" type="button" role="option" data-select-value="" aria-selected="true">全部平台</button>
+              <button class="select-option" type="button" role="option" data-select-value="bilibili" aria-selected="false">B 站</button>
+              <button class="select-option" type="button" role="option" data-select-value="youtube" aria-selected="false">YouTube</button>
+            </div>
+          </div>
+          <select id="feed-state-filter" aria-label="按状态筛选" hidden aria-hidden="true" tabindex="-1">
+            <option value="">全部状态</option>
+            <option value="enabled">已启用</option>
+            <option value="disabled">已停用</option>
+            <option value="needs_cookie">需要 Cookie</option>
+          </select>
+          <div class="custom-select" data-select-control="feed-state-filter">
+            <button id="feed-state-filter-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="feed-state-filter-menu">全部状态</button>
+            <div id="feed-state-filter-menu" class="select-menu" role="listbox" aria-label="按状态筛选" hidden>
+              <button class="select-option" type="button" role="option" data-select-value="" aria-selected="true">全部状态</button>
+              <button class="select-option" type="button" role="option" data-select-value="enabled" aria-selected="false">已启用</button>
+              <button class="select-option" type="button" role="option" data-select-value="disabled" aria-selected="false">已停用</button>
+              <button class="select-option" type="button" role="option" data-select-value="needs_cookie" aria-selected="false">需要 Cookie</button>
+            </div>
+          </div>
+          <button id="reset-feed-filters" type="button">重置筛选</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 32%">订阅源</th>
+              <th style="width: 8%">平台</th>
+              <th style="width: 9%">状态</th>
+              <th style="width: 11%">剧集</th>
+              <th style="width: 15%">最近活动</th>
+              <th style="width: 8%">订阅</th>
+              <th style="width: 17%">操作</th>
+            </tr>
+          </thead>
+          <tbody id="feeds-body"></tbody>
+        </table>
+      </div>
+    </section>
 
-    <div class="layout">
-      <section data-region="feeds" aria-labelledby="feeds-title">
-        <header>
-          <h2 id="feeds-title">Feeds</h2>
-          <div class="section-tools">
-            <span id="selected-feed-label" class="muted">No feed selected</span>
-            <button id="new-feed" type="button">New</button>
+    <section data-region="subscriptions" class="support-panel" aria-labelledby="subscriptions-title" hidden>
+      <header><h2 id="subscriptions-title">订阅地址</h2></header>
+      <div id="subscription-feeds" class="url-list"></div>
+      <div id="subscription-opml" class="url-list"></div>
+    </section>
+    <section data-region="runs" class="support-panel" aria-labelledby="runs-title" hidden>
+      <header><h2 id="runs-title">同步记录</h2></header>
+      <table><tbody id="runs-body"></tbody></table>
+    </section>
+
+    <div id="feed-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="feed-form-title">
+      <form id="feed-form" class="feed-form modal" data-feed-form hidden>
+        <div class="feed-form-title">
+          <div>
+            <strong id="feed-form-title">添加订阅源</strong>
+            <span id="feed-form-subtitle">配置远端订阅源，下次 NAS 同步时生效</span>
           </div>
-        </header>
-        <form id="feed-form" class="feed-form" data-feed-form hidden>
-          <div class="feed-form-title">
-            <strong id="feed-form-title">New feed</strong>
-            <div class="section-tools">
-              <button id="feed-form-save" class="primary" type="submit">Save</button>
-              <button id="feed-form-cancel" type="button">Cancel</button>
+          <button id="feed-form-close" class="ghost" type="button" aria-label="关闭">关闭</button>
+        </div>
+        <div class="form-grid">
+          <div class="form-section">
+            <div class="form-section-header">
+              <span class="form-section-title">基础信息</span>
+              <span class="form-section-note">必填</span>
             </div>
-          </div>
-          <div class="form-grid">
-            <div class="form-field">
-              <label for="feed-id">Feed ID</label>
-              <input id="feed-id" type="text" autocomplete="off">
-            </div>
-            <div class="form-field">
-              <label for="feed-provider">Provider</label>
-              <select id="feed-provider">
-                <option value="youtube">youtube</option>
-                <option value="bilibili">bilibili</option>
-              </select>
-            </div>
-            <div class="form-field wide">
-              <label for="feed-url">URL</label>
-              <input id="feed-url" type="text" autocomplete="off">
-            </div>
-            <div class="form-field">
-              <label for="feed-title-override">Title override</label>
-              <input id="feed-title-override" type="text" autocomplete="off">
-            </div>
-            <div class="form-field">
-              <label for="feed-cookie-profile">Cookie profile</label>
-              <input id="feed-cookie-profile" type="text" autocomplete="off">
-            </div>
-            <div class="form-field wide">
-              <label for="feed-description-override">Description override</label>
-              <textarea id="feed-description-override"></textarea>
-            </div>
-            <div class="form-field">
-              <label for="feed-update-period">Update period</label>
-              <input id="feed-update-period" type="text" autocomplete="off">
-            </div>
-            <div class="form-field">
-              <label for="feed-page-size">Page size</label>
-              <input id="feed-page-size" type="number" min="1" step="1">
-            </div>
-            <div class="form-field">
-              <label for="feed-keep-last">Keep last</label>
-              <input id="feed-keep-last" type="number" min="0" step="1">
-            </div>
-            <div class="form-field wide">
-              <span class="form-group-label">Publication</span>
-              <div class="check-row">
-                <label><input id="feed-enabled" type="checkbox"> Enabled</label>
-                <label><input id="feed-include-in-opml" type="checkbox"> OPML</label>
-                <label><input id="feed-private-feed" type="checkbox"> Private feed</label>
-                <label><input id="feed-bilibili-include-upower" type="checkbox"> Bilibili charged</label>
+            <div class="form-section-grid">
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-id" data-tooltip="远端配置里的唯一标识，会用于订阅路径和本地匹配；创建后不建议修改。">订阅源 ID</label>
+                <input id="feed-id" type="text" autocomplete="off" placeholder="例如 bilibili-10835521 或 youtube-maker" aria-required="true" aria-describedby="feed-id-error">
+                <div id="feed-id-error" class="field-error" aria-live="polite"></div>
+              </div>
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-provider" data-tooltip="选择来源平台，决定使用 B 站或 YouTube 的解析规则；默认 YouTube。">平台</label>
+                <select id="feed-provider" hidden aria-hidden="true" tabindex="-1">
+                  <option value="youtube">YouTube</option>
+                  <option value="bilibili">B 站</option>
+                </select>
+                <div class="custom-select" data-select-control="feed-provider">
+                  <button id="feed-provider-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="feed-provider-menu">YouTube</button>
+                  <div id="feed-provider-menu" class="select-menu" role="listbox" aria-label="平台" hidden>
+                    <button class="select-option" type="button" role="option" data-select-value="youtube" aria-selected="true">YouTube</button>
+                    <button class="select-option" type="button" role="option" data-select-value="bilibili" aria-selected="false">B 站</button>
+                  </div>
+                </div>
+              </div>
+              <div class="form-field wide">
+                <label class="tooltip-label" tabindex="0" for="feed-url" data-tooltip="要同步的视频空间、频道或播放列表地址，NAS 会按这个来源抓取内容。">来源 URL</label>
+                <input id="feed-url" type="text" autocomplete="off" placeholder="例如 space.bilibili.com/10835521 或 youtube.com/@maker" aria-required="true" aria-describedby="feed-url-error">
+                <div id="feed-url-error" class="field-error" aria-live="polite"></div>
               </div>
             </div>
-            <div class="form-field">
-              <label for="feed-filter-title">Filter title</label>
-              <input id="feed-filter-title" type="text" autocomplete="off">
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-header">
+              <span class="form-section-title">发布设置</span>
+              <span class="form-section-note">默认开启</span>
             </div>
-            <div class="form-field">
-              <label for="feed-filter-not-title">Filter not title</label>
-              <input id="feed-filter-not-title" type="text" autocomplete="off">
-            </div>
-            <div class="form-field">
-              <label for="feed-filter-description">Filter description</label>
-              <input id="feed-filter-description" type="text" autocomplete="off">
-            </div>
-            <div class="form-field">
-              <label for="feed-filter-not-description">Filter not description</label>
-              <input id="feed-filter-not-description" type="text" autocomplete="off">
-            </div>
-            <div class="form-field">
-              <label for="feed-filter-min-duration">Min duration</label>
-              <input id="feed-filter-min-duration" type="number" min="0" step="1">
-            </div>
-            <div class="form-field">
-              <label for="feed-filter-max-duration">Max duration</label>
-              <input id="feed-filter-max-duration" type="number" min="0" step="1">
-            </div>
-            <div class="form-field">
-              <label for="feed-filter-min-age">Min age</label>
-              <input id="feed-filter-min-age" type="number" min="0" step="1">
-            </div>
-            <div class="form-field">
-              <label for="feed-filter-max-age">Max age</label>
-              <input id="feed-filter-max-age" type="number" min="0" step="1">
+            <div class="form-section-grid switch-grid">
+              <div class="form-field checkbox-field">
+                <label class="tooltip-label" tabindex="0" data-tooltip="开启后 NAS 会同步这个订阅源；默认开启。"><input id="feed-enabled" type="checkbox"> 启用同步</label>
+              </div>
+              <div class="form-field checkbox-field">
+                <label class="tooltip-label" tabindex="0" data-tooltip="开启后导出的 OPML 会包含这个订阅源；默认开启。"><input id="feed-include-in-opml" type="checkbox"> 加入 OPML</label>
+              </div>
+              <div class="form-field checkbox-field">
+                <label class="tooltip-label" tabindex="0" data-tooltip="开启后生成带随机路径的订阅地址，避免公开可猜；默认开启。"><input id="feed-private-feed" type="checkbox"> 私密订阅链接</label>
+              </div>
+              <div id="feed-bilibili-options" class="form-field checkbox-field">
+                <label class="tooltip-label" tabindex="0" data-tooltip="B 站专用；需要 NAS 本地 cookie 支持充电或 UP 主专属内容，默认关闭。"><input id="feed-bilibili-include-upower" type="checkbox"> 包含 UP 主专属内容</label>
+              </div>
             </div>
           </div>
-        </form>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 34%">Feed</th>
-                <th style="width: 14%">Provider</th>
-                <th style="width: 14%">Enabled</th>
-                <th style="width: 14%">OPML</th>
-                <th style="width: 24%">Subscription</th>
-              </tr>
-            </thead>
-            <tbody id="feeds-body"></tbody>
-          </table>
-        </div>
-      </section>
 
-      <section data-region="episodes" aria-labelledby="episodes-title">
+          <div class="form-section">
+            <div class="form-section-header">
+              <span class="form-section-title">展示覆盖</span>
+              <span class="form-section-note">可选</span>
+            </div>
+            <div class="form-section-grid">
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-title-override" data-tooltip="留空时使用平台返回的标题；填写后远端订阅会优先显示这个标题。">标题覆盖</label>
+                <input id="feed-title-override" type="text" autocomplete="off" placeholder="例如 影视飓风精选">
+              </div>
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-cookie-profile" data-tooltip="NAS 本地 cookie 配置名，用于需要登录态的内容；留空表示不使用 cookie。">Cookie 配置</label>
+                <input id="feed-cookie-profile" type="text" autocomplete="off" placeholder="例如 bilibili-main">
+              </div>
+              <div class="form-field wide">
+                <label class="tooltip-label" tabindex="0" for="feed-description-override" data-tooltip="留空时使用平台返回的描述；填写后覆盖远端 RSS 的订阅描述。">描述覆盖</label>
+                <textarea id="feed-description-override" placeholder="例如 科技、影像和幕后访谈"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-header">
+              <span class="form-section-title">抓取参数</span>
+              <span class="form-section-note">有默认值</span>
+            </div>
+            <div class="form-section-grid runtime-grid">
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-update-period" data-tooltip="NAS 拉取配置后按这个间隔尝试更新；使用 Go duration 写法，默认 1h。">更新周期</label>
+                <input id="feed-update-period" type="text" autocomplete="off" placeholder="默认 1h，例如 30m、2h" aria-required="true" aria-describedby="feed-update-period-error">
+                <div id="feed-update-period-error" class="field-error" aria-live="polite"></div>
+              </div>
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-page-size" data-tooltip="每次从来源拉取的条目数量，默认 25。">每页数量</label>
+                <input id="feed-page-size" type="number" min="1" step="1" placeholder="默认 25" aria-required="true" aria-describedby="feed-page-size-error">
+                <div id="feed-page-size-error" class="field-error" aria-live="polite"></div>
+              </div>
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-keep-last" data-tooltip="远端每个订阅源保留的最近剧集数量；0 表示不限制，默认 25。">保留最近</label>
+                <input id="feed-keep-last" type="number" min="0" step="1" placeholder="默认 25，0 表示不限制" aria-required="true" aria-describedby="feed-keep-last-error">
+                <div id="feed-keep-last-error" class="field-error" aria-live="polite"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-header">
+              <span class="form-section-title">过滤规则</span>
+              <span class="form-section-note">可选，留空表示不过滤</span>
+            </div>
+            <div class="form-section-grid">
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-filter-title" data-tooltip="只保留标题匹配该正则的剧集；留空表示不限制。">标题包含</label>
+                <input id="feed-filter-title" type="text" autocomplete="off" placeholder="例如 访谈|幕后">
+              </div>
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-filter-not-title" data-tooltip="排除标题匹配该正则的剧集；留空表示不排除。">标题不包含</label>
+                <input id="feed-filter-not-title" type="text" autocomplete="off" placeholder="例如 直播|预告">
+              </div>
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-filter-description" data-tooltip="只保留描述匹配该正则的剧集；留空表示不限制。">描述包含</label>
+                <input id="feed-filter-description" type="text" autocomplete="off" placeholder="例如 嘉宾|完整版">
+              </div>
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-filter-not-description" data-tooltip="排除描述匹配该正则的剧集；留空表示不排除。">描述不包含</label>
+                <input id="feed-filter-not-description" type="text" autocomplete="off" placeholder="例如 抽奖|片段">
+              </div>
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-filter-min-duration" data-tooltip="排除短于 N 秒的剧集；留空表示不限制。">最小时长</label>
+                <input id="feed-filter-min-duration" type="number" min="0" step="1" placeholder="秒，例如 600">
+              </div>
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-filter-max-duration" data-tooltip="排除长于 N 秒的剧集；留空表示不限制。">最大时长</label>
+                <input id="feed-filter-max-duration" type="number" min="0" step="1" placeholder="秒，例如 10800">
+              </div>
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-filter-min-age" data-tooltip="跳过发布不到 N 天的新剧集；留空表示不限制。">最短发布天数</label>
+                <input id="feed-filter-min-age" type="number" min="0" step="1" placeholder="天，例如 1">
+              </div>
+              <div class="form-field">
+                <label class="tooltip-label" tabindex="0" for="feed-filter-max-age" data-tooltip="跳过发布超过 N 天的旧剧集；留空表示不限制。">最长发布天数</label>
+                <input id="feed-filter-max-age" type="number" min="0" step="1" placeholder="天，例如 90">
+              </div>
+            </div>
+          </div>
+          <div id="feed-danger-zone" class="form-section danger-zone" hidden>
+            <span class="form-group-label">危险操作</span>
+            <div class="section-tools">
+              <button id="feed-modal-disable" type="button">停用订阅源</button>
+              <button id="feed-modal-delete" class="danger" type="button">删除远端订阅源</button>
+            </div>
+            <div class="muted">删除只影响远端订阅源、XML 和待清理的 R2 对象，不会删除 NAS 本地文件。</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <span class="muted">保存后下次 NAS 拉取配置时生效</span>
+          <div class="modal-footer-actions">
+            <button id="feed-form-cancel" type="button">取消</button>
+            <button id="feed-form-save" class="primary" type="submit">保存变更</button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <div id="feed-details-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="feed-details-title">
+      <section class="modal feed-details" data-region="feed-details" aria-labelledby="feed-details-title">
         <header>
-          <h2 id="episodes-title">Episodes</h2>
-          <div class="section-tools">
-            <select id="episode-status-filter" aria-label="Episode status filter">
-              <option value="">All statuses</option>
-              <option value="visible">Visible</option>
-              <option value="hidden">Hidden</option>
-              <option value="delete_pending">Delete pending</option>
-              <option value="purged">Purged</option>
-              <option value="pending">Pending</option>
+          <div>
+            <h2 id="feed-details-title">订阅源信息</h2>
+            <div id="feed-details-subtitle" class="modal-subtitle">查看订阅源配置和发布状态</div>
+          </div>
+          <button id="feed-details-close" class="ghost" type="button" aria-label="关闭">关闭</button>
+        </header>
+        <div id="feed-details-body" class="modal-body detail-body"></div>
+        <footer class="modal-footer">
+          <span id="feed-details-footer" class="muted">-</span>
+          <button id="feed-details-footer-close" class="primary" type="button">关闭</button>
+        </footer>
+      </section>
+    </div>
+
+    <div id="episodes-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="episodes-title">
+      <section class="modal large" data-region="episodes" aria-labelledby="episodes-title">
+        <header>
+          <div>
+            <h2 id="episodes-title">剧集列表</h2>
+            <div id="episodes-subtitle" class="modal-subtitle">选择订阅源后查看剧集</div>
+          </div>
+          <button id="episodes-close" class="ghost" type="button" aria-label="关闭">关闭</button>
+        </header>
+        <div class="modal-toolbar">
+          <div class="toolbar-left">
+            <input id="episode-search" type="search" placeholder="搜索剧集..." autocomplete="off">
+            <select id="episode-status-filter" aria-label="剧集状态筛选" hidden aria-hidden="true" tabindex="-1">
+              <option value="">全部剧集</option>
+              <option value="visible">已发布</option>
+              <option value="hidden">已隐藏</option>
+              <option value="delete_pending">等待删除</option>
+              <option value="purged">已清理</option>
+              <option value="pending">待处理</option>
             </select>
-            <button id="refresh-episodes" type="button">Reload</button>
+            <div class="custom-select" data-select-control="episode-status-filter">
+              <button id="episode-status-filter-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="episode-status-filter-menu">全部剧集</button>
+              <div id="episode-status-filter-menu" class="select-menu" role="listbox" aria-label="剧集状态筛选" hidden>
+                <button class="select-option" type="button" role="option" data-select-value="" aria-selected="true">全部剧集</button>
+                <button class="select-option" type="button" role="option" data-select-value="visible" aria-selected="false">已发布</button>
+                <button class="select-option" type="button" role="option" data-select-value="hidden" aria-selected="false">已隐藏</button>
+                <button class="select-option" type="button" role="option" data-select-value="delete_pending" aria-selected="false">等待删除</button>
+                <button class="select-option" type="button" role="option" data-select-value="purged" aria-selected="false">已清理</button>
+                <button class="select-option" type="button" role="option" data-select-value="pending" aria-selected="false">待处理</button>
+              </div>
+            </div>
+          </div>
+          <div class="toolbar-right"><button id="refresh-episodes" type="button">刷新剧集</button></div>
+        </div>
+        <div class="modal-body">
+          <div class="table-wrap">
+            <table class="episode-table">
+              <thead>
+                <tr>
+                  <th style="width: 36%">剧集</th>
+                  <th style="width: 16%">发布时间</th>
+                  <th style="width: 9%">时长</th>
+                  <th style="width: 10%">大小</th>
+                  <th style="width: 12%">状态</th>
+                  <th style="width: 17%">操作</th>
+                </tr>
+              </thead>
+              <tbody id="episodes-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <footer class="modal-footer">
+          <span id="episodes-pagination" class="muted">-</span>
+          <button id="episodes-footer-close" class="primary" type="button">关闭</button>
+        </footer>
+      </section>
+    </div>
+
+    <div id="logs-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="events-title">
+      <section class="modal logs" data-region="events" aria-labelledby="events-title">
+        <header>
+          <div>
+            <h2 id="events-title">运行日志</h2>
+            <div id="logs-subtitle" class="modal-subtitle">从最近联系打开</div>
           </div>
         </header>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 36%">Episode</th>
-                <th style="width: 14%">Status</th>
-                <th style="width: 18%">Time</th>
-                <th style="width: 12%">Media</th>
-                <th style="width: 20%">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="episodes-body"></tbody>
-          </table>
+        <div class="modal-toolbar">
+          <div class="toolbar-left">
+            <select id="event-level-filter" aria-label="日志等级筛选" hidden aria-hidden="true" tabindex="-1">
+              <option value="">全部等级</option>
+              <option value="info">信息</option>
+              <option value="success">成功</option>
+              <option value="warning">警告</option>
+              <option value="error">错误</option>
+            </select>
+            <div class="custom-select" data-select-control="event-level-filter">
+              <button id="event-level-filter-trigger" class="select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="event-level-filter-menu">全部等级</button>
+              <div id="event-level-filter-menu" class="select-menu" role="listbox" aria-label="日志等级筛选" hidden>
+                <button class="select-option" type="button" role="option" data-select-value="" aria-selected="true">全部等级</button>
+                <button class="select-option" type="button" role="option" data-select-value="info" aria-selected="false">信息</button>
+                <button class="select-option" type="button" role="option" data-select-value="success" aria-selected="false">成功</button>
+                <button class="select-option" type="button" role="option" data-select-value="warning" aria-selected="false">警告</button>
+                <button class="select-option" type="button" role="option" data-select-value="error" aria-selected="false">错误</button>
+              </div>
+            </div>
+            <button id="copy-logs" type="button">复制日志</button>
+          </div>
+          <button id="refresh-logs" type="button">刷新</button>
         </div>
+        <div class="modal-body">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th style="width: 22%">时间</th><th style="width: 10%">等级</th><th style="width: 24%">来源</th><th style="width: 44%">消息</th></tr>
+              </thead>
+              <tbody id="events-body"></tbody>
+            </table>
+          </div>
+          <div id="logs-empty-filter" class="log-empty" hidden>
+            <strong>没有匹配的日志</strong>
+            <div>可以尝试切换等级筛选。</div>
+            <button id="reset-event-filter" type="button">重置筛选</button>
+          </div>
+        </div>
+        <footer class="modal-footer">
+          <span class="muted">展示最近 100 条关键事件</span>
+          <button id="logs-footer-close" type="button">关闭</button>
+        </footer>
       </section>
     </div>
 
-    <div class="lower">
-      <section data-region="subscriptions" aria-labelledby="subscriptions-title">
-        <header><h2 id="subscriptions-title">Subscriptions</h2></header>
-        <div class="url-list">
-          <div>
-            <div class="muted">Feed URLs</div>
-            <div id="subscription-feeds" class="stack"></div>
+    <div id="confirm-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <section class="modal small" aria-labelledby="confirm-title">
+        <header>
+          <h2 id="confirm-title">确认操作</h2>
+          <button id="confirm-close" class="ghost" type="button" aria-label="关闭">关闭</button>
+        </header>
+        <div class="modal-body" style="padding: 18px 22px;"><p id="confirm-message" class="muted" style="margin: 0;"></p></div>
+        <footer class="modal-footer">
+          <span></span>
+          <div class="modal-footer-actions">
+            <button id="confirm-cancel" type="button">取消</button>
+            <button id="confirm-ok" class="danger" type="button">确认</button>
           </div>
-          <div>
-            <div class="muted">OPML URLs</div>
-            <div id="subscription-opml" class="stack"></div>
-          </div>
-        </div>
-      </section>
-
-      <section data-region="runs" aria-labelledby="runs-title">
-        <header><h2 id="runs-title">Recent Runs</h2></header>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>Run</th><th>Status</th><th>Counts</th></tr>
-            </thead>
-            <tbody id="runs-body"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section data-region="events" aria-labelledby="events-title">
-        <header><h2 id="events-title">Recent Events</h2></header>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>Event</th><th>Target</th><th>Detail</th></tr>
-            </thead>
-            <tbody id="events-body"></tbody>
-          </table>
-        </div>
+        </footer>
       </section>
     </div>
+
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <div id="dashboard-status" class="status" role="status" aria-live="polite" hidden></div>
   </main>
 
   <script>
@@ -649,10 +1316,18 @@ function dashboardHTML(): string {
         events: [],
         selectedFeedID: "",
         episodeStatus: "",
+        episodeSearch: "",
+        feedSearch: "",
+        providerFilter: "",
+        feedStateFilter: "",
+        eventLevelFilter: "",
+        feedDetailsOpen: false,
+        detailsFeedID: "",
         feedFormOpen: false,
         feedFormMode: "create",
         editingFeedID: "",
-        busy: false
+        busy: false,
+        confirmAction: null
       };
 
       var feedFormFieldIDs = [
@@ -679,9 +1354,7 @@ function dashboardHTML(): string {
         "feed-filter-max-age"
       ];
 
-      function byID(id) {
-        return document.getElementById(id);
-      }
+      function byID(id) { return document.getElementById(id); }
 
       function el(tag, className, text) {
         var node = document.createElement(tag);
@@ -694,10 +1367,13 @@ function dashboardHTML(): string {
         var node = byID("dashboard-status");
         node.className = "status" + (kind ? " " + kind : "");
         node.textContent = message;
+        node.hidden = true;
       }
 
       function showError(error) {
-        setStatus(error instanceof Error ? error.message : String(error), "error");
+        var message = error instanceof Error ? error.message : String(error);
+        setStatus(message, "error");
+        showToast(message, "error");
       }
 
       async function api(path, options) {
@@ -719,13 +1395,19 @@ function dashboardHTML(): string {
         });
       }
 
+      function setDisabled(id, value) {
+        var node = byID(id);
+        if (node) node.disabled = value;
+      }
+
       function setBusy(value) {
         state.busy = value;
-        byID("refresh-dashboard").disabled = value;
-        byID("refresh-episodes").disabled = value || !state.selectedFeedID;
-        byID("new-feed").disabled = value;
-        byID("feed-form-save").disabled = value || !state.feedFormOpen;
-        byID("feed-form-cancel").disabled = value;
+        setDisabled("refresh-dashboard", value);
+        setDisabled("refresh-episodes", value || !state.selectedFeedID);
+        setDisabled("new-feed", value);
+        setDisabled("feed-form-save", value || !state.feedFormOpen);
+        setDisabled("feed-form-cancel", value);
+        setDisabled("copy-opml", value);
       }
 
       function emptyRow(colspan, message) {
@@ -736,8 +1418,9 @@ function dashboardHTML(): string {
         return row;
       }
 
-      function appendCell(row, childOrText, className) {
+      function appendCell(row, childOrText, className, label) {
         var cell = el("td", className || "");
+        if (label) cell.setAttribute("data-label", label);
         if (childOrText instanceof Node) {
           cell.appendChild(childOrText);
         } else if (childOrText !== undefined && childOrText !== null) {
@@ -754,6 +1437,19 @@ function dashboardHTML(): string {
         return date.toLocaleString();
       }
 
+      function formatRelative(value) {
+        if (!value) return "暂无记录";
+        var date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value);
+        var seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+        if (seconds < 60) return "刚刚";
+        var minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return minutes + " 分钟前";
+        var hours = Math.floor(minutes / 60);
+        if (hours < 24) return hours + " 小时前";
+        return Math.floor(hours / 24) + " 天前";
+      }
+
       function formatBytes(value) {
         if (!value || value <= 0) return "-";
         var units = ["B", "KB", "MB", "GB"];
@@ -764,6 +1460,21 @@ function dashboardHTML(): string {
           unit++;
         }
         return size.toFixed(unit === 0 ? 0 : 1) + " " + units[unit];
+      }
+
+      function formatDuration(value) {
+        if (!value || value <= 0) return "-";
+        var minutes = Math.round(Number(value) / 60);
+        if (!Number.isFinite(minutes) || minutes <= 0) return "-";
+        return minutes + " 分钟";
+      }
+
+      function displayValue(value) {
+        return value === null || value === undefined || value === "" ? "-" : String(value);
+      }
+
+      function formatBoolean(value) {
+        return value ? "是" : "否";
       }
 
       function safeExternalURL(value) {
@@ -777,19 +1488,6 @@ function dashboardHTML(): string {
         return "";
       }
 
-      function copyText(value) {
-        if (!value) return;
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(value).then(function () {
-            setStatus("Copied URL", "ok");
-          }).catch(function () {
-            fallbackCopy(value);
-          });
-          return;
-        }
-        fallbackCopy(value);
-      }
-
       function fallbackCopy(value) {
         var input = document.createElement("input");
         input.value = value;
@@ -800,11 +1498,76 @@ function dashboardHTML(): string {
         input.select();
         document.execCommand("copy");
         input.remove();
-        setStatus("Copied URL", "ok");
+        setStatus("已复制", "ok");
+        showToast("已复制到剪贴板", "success");
+      }
+
+      function copyText(value) {
+        if (!value) return;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(value).then(function () {
+            setStatus("已复制", "ok");
+            showToast("已复制到剪贴板", "success");
+          }).catch(function () {
+            fallbackCopy(value);
+          });
+          return;
+        }
+        fallbackCopy(value);
+      }
+
+      function showToast(message, kind) {
+        var region = byID("toast-region");
+        var toast = el("div", "toast " + (kind || "info"));
+        toast.appendChild(el("span", "", message));
+        var close = el("button", "ghost", "关闭");
+        close.type = "button";
+        close.addEventListener("click", function () { toast.remove(); });
+        toast.appendChild(close);
+        region.appendChild(toast);
+        window.setTimeout(function () { toast.remove(); }, 4200);
       }
 
       function findFeedByID(feedID) {
         return state.feeds.find(function (feed) { return feed.feed_id === feedID; }) || null;
+      }
+
+      function linkValue(value) {
+        var text = displayValue(value);
+        var safeURL = safeExternalURL(value);
+        if (!safeURL) return text;
+        var link = el("a", "", text);
+        link.href = safeURL;
+        link.rel = "noopener noreferrer";
+        link.target = "_blank";
+        return link;
+      }
+
+      function appendDetailItem(container, label, value, wide) {
+        var item = el("div", "detail-item" + (wide ? " wide" : ""));
+        item.appendChild(el("dt", "detail-label", label));
+        var detail = el("dd", "detail-value");
+        if (value instanceof Node) {
+          detail.appendChild(value);
+        } else {
+          detail.textContent = displayValue(value);
+        }
+        item.appendChild(detail);
+        container.appendChild(item);
+      }
+
+      function feedFilterSummary(feed) {
+        var filters = feed.filters || {};
+        var parts = [];
+        if (filters.title) parts.push("标题包含：" + filters.title);
+        if (filters.not_title) parts.push("标题不包含：" + filters.not_title);
+        if (filters.description) parts.push("描述包含：" + filters.description);
+        if (filters.not_description) parts.push("描述不包含：" + filters.not_description);
+        if (filters.min_duration !== null && filters.min_duration !== undefined) parts.push("最小时长：" + filters.min_duration);
+        if (filters.max_duration !== null && filters.max_duration !== undefined) parts.push("最大时长：" + filters.max_duration);
+        if (filters.min_age !== null && filters.min_age !== undefined) parts.push("最短发布天数：" + filters.min_age);
+        if (filters.max_age !== null && filters.max_age !== undefined) parts.push("最长发布天数：" + filters.max_age);
+        return parts.length ? parts.join("；") : "无";
       }
 
       function emptyFilters() {
@@ -882,8 +1645,72 @@ function dashboardHTML(): string {
         byID(id).checked = Boolean(value);
       }
 
+      var feedFormValidationFields = ["feed-id", "feed-url", "feed-update-period", "feed-page-size", "feed-keep-last"];
+
+      function setFieldError(id, message) {
+        var field = byID(id);
+        var error = byID(id + "-error");
+        var wrapper = field ? field.closest(".form-field") : null;
+        if (!field || !error) return;
+        error.textContent = message || "";
+        field.setAttribute("aria-invalid", message ? "true" : "false");
+        if (wrapper) wrapper.classList.toggle("has-error", Boolean(message));
+      }
+
+      function clearFeedFormErrors() {
+        feedFormValidationFields.forEach(function (id) { setFieldError(id, ""); });
+      }
+
+      function focusFeedFormField(id) {
+        var node = byID(id + "-trigger") || byID(id);
+        if (node && typeof node.focus === "function") node.focus();
+      }
+
+      function validateRequiredTextField(id, label) {
+        if (byID(id).value.trim() !== "") return true;
+        setFieldError(id, "请填写" + label);
+        return false;
+      }
+
+      function validateRequiredIntegerField(id, label, min) {
+        var raw = byID(id).value.trim();
+        if (raw === "") {
+          setFieldError(id, "请填写" + label);
+          return false;
+        }
+        if (!/^[0-9]+$/.test(raw)) {
+          setFieldError(id, label + "必须是整数");
+          return false;
+        }
+        var value = Number(raw);
+        if (!Number.isSafeInteger(value) || value < min) {
+          setFieldError(id, label + "不能小于 " + min);
+          return false;
+        }
+        return true;
+      }
+
+      function validateFeedFormRequiredFields() {
+        clearFeedFormErrors();
+        var firstInvalid = "";
+        function markInvalid(id, valid) {
+          if (!valid && !firstInvalid) firstInvalid = id;
+        }
+        if (state.feedFormMode !== "edit") markInvalid("feed-id", validateRequiredTextField("feed-id", "订阅源 ID"));
+        markInvalid("feed-url", validateRequiredTextField("feed-url", "来源 URL"));
+        markInvalid("feed-update-period", validateRequiredTextField("feed-update-period", "更新周期"));
+        markInvalid("feed-page-size", validateRequiredIntegerField("feed-page-size", "每页数量", 1));
+        markInvalid("feed-keep-last", validateRequiredIntegerField("feed-keep-last", "保留最近", 0));
+        if (firstInvalid) {
+          focusFeedFormField(firstInvalid);
+          return false;
+        }
+        return true;
+      }
+
       function setFeedFormValues(feed) {
         var filters = feed.filters || emptyFilters();
+        clearFeedFormErrors();
         setTextField("feed-id", feed.feed_id);
         setTextField("feed-provider", feed.provider);
         setTextField("feed-url", feed.url);
@@ -914,24 +1741,24 @@ function dashboardHTML(): string {
 
       function requiredText(id, label) {
         var value = byID(id).value.trim();
-        if (value === "") throw new Error(label + " is required");
+        if (value === "") throw new Error(label + " 必填");
         return value;
       }
 
       function requiredInteger(id, label, min) {
         var raw = byID(id).value.trim();
-        if (!/^\\d+$/.test(raw)) throw new Error(label + " must be an integer");
+        if (!/^[0-9]+$/.test(raw)) throw new Error(label + " 必须是整数");
         var value = Number(raw);
-        if (!Number.isSafeInteger(value) || value < min) throw new Error(label + " is invalid");
+        if (!Number.isSafeInteger(value) || value < min) throw new Error(label + " 无效");
         return value;
       }
 
       function optionalInteger(id, label) {
         var raw = byID(id).value.trim();
         if (raw === "") return null;
-        if (!/^\\d+$/.test(raw)) throw new Error(label + " must be an integer");
+        if (!/^[0-9]+$/.test(raw)) throw new Error(label + " 必须是整数");
         var value = Number(raw);
-        if (!Number.isSafeInteger(value)) throw new Error(label + " is invalid");
+        if (!Number.isSafeInteger(value)) throw new Error(label + " 无效");
         return value;
       }
 
@@ -940,26 +1767,26 @@ function dashboardHTML(): string {
         var provider;
         if (state.feedFormMode === "edit") {
           var original = findFeedByID(state.editingFeedID);
-          if (!original) throw new Error("Original feed is missing");
+          if (!original) throw new Error("原始订阅源不存在");
           feedID = state.editingFeedID;
           provider = original.provider;
         } else {
-          feedID = requiredText("feed-id", "Feed ID");
+          feedID = requiredText("feed-id", "订阅源 ID");
           provider = byID("feed-provider").value;
         }
-        if (provider !== "youtube" && provider !== "bilibili") throw new Error("Provider is invalid");
+        if (provider !== "youtube" && provider !== "bilibili") throw new Error("平台无效");
         return {
           feed_id: feedID,
           provider: provider,
-          url: requiredText("feed-url", "URL"),
+          url: requiredText("feed-url", "来源 URL"),
           title_override: textOrNull("feed-title-override"),
           description_override: textOrNull("feed-description-override"),
           enabled: byID("feed-enabled").checked,
           include_in_opml: byID("feed-include-in-opml").checked,
           private_feed: byID("feed-private-feed").checked,
-          update_period: requiredText("feed-update-period", "Update period"),
-          page_size: requiredInteger("feed-page-size", "Page size", 1),
-          keep_last: requiredInteger("feed-keep-last", "Keep last", 0),
+          update_period: requiredText("feed-update-period", "更新周期"),
+          page_size: requiredInteger("feed-page-size", "每页数量", 1),
+          keep_last: requiredInteger("feed-keep-last", "保留最近", 0),
           cookie_profile: textOrNull("feed-cookie-profile"),
           bilibili: {
             include_upower_exclusive: provider === "bilibili" && byID("feed-bilibili-include-upower").checked
@@ -969,27 +1796,31 @@ function dashboardHTML(): string {
             not_title: textOrNull("feed-filter-not-title"),
             description: textOrNull("feed-filter-description"),
             not_description: textOrNull("feed-filter-not-description"),
-            min_duration: optionalInteger("feed-filter-min-duration", "Min duration"),
-            max_duration: optionalInteger("feed-filter-max-duration", "Max duration"),
-            min_age: optionalInteger("feed-filter-min-age", "Min age"),
-            max_age: optionalInteger("feed-filter-max-age", "Max age")
+            min_duration: optionalInteger("feed-filter-min-duration", "最小时长"),
+            max_duration: optionalInteger("feed-filter-max-duration", "最大时长"),
+            min_age: optionalInteger("feed-filter-min-age", "最短发布天数"),
+            max_age: optionalInteger("feed-filter-max-age", "最长发布天数")
           }
         };
       }
 
       function renderFeedForm() {
         var form = byID("feed-form");
+        byID("feed-modal").hidden = !state.feedFormOpen;
         form.hidden = !state.feedFormOpen;
-        byID("feed-form-title").textContent = state.feedFormMode === "edit" ? "Edit feed" : "New feed";
+        byID("feed-form-title").textContent = state.feedFormMode === "edit" ? "编辑订阅源" : "添加订阅源";
+        byID("feed-form-subtitle").textContent = state.feedFormMode === "edit" ? state.editingFeedID : "配置远端订阅源，下次 NAS 同步时生效";
         var editing = state.feedFormMode === "edit";
-        feedFormFieldIDs.forEach(function (id) {
-          byID(id).disabled = state.busy;
-        });
+        feedFormFieldIDs.forEach(function (id) { byID(id).disabled = state.busy; });
         byID("feed-id").readOnly = editing;
         byID("feed-provider").disabled = state.busy || editing;
-        byID("feed-bilibili-include-upower").disabled = state.busy || byID("feed-provider").value !== "bilibili";
+        var isBilibili = byID("feed-provider").value === "bilibili";
+        byID("feed-bilibili-options").hidden = !isBilibili;
+        byID("feed-bilibili-include-upower").disabled = state.busy || !isBilibili;
         byID("feed-form-save").disabled = state.busy || !state.feedFormOpen;
         byID("feed-form-cancel").disabled = state.busy;
+        byID("feed-danger-zone").hidden = !editing;
+        syncCustomSelect("feed-provider");
       }
 
       function openNewFeedForm() {
@@ -998,13 +1829,13 @@ function dashboardHTML(): string {
         state.editingFeedID = "";
         setFeedFormValues(defaultFeedFormValues());
         renderFeedForm();
-        setStatus("New feed ready");
+        setStatus("正在添加订阅源");
       }
 
       function openEditFeedForm(feedID) {
         var feed = findFeedByID(feedID);
         if (!feed) {
-          showError("Feed not found");
+          showError("订阅源不存在");
           return;
         }
         state.feedFormOpen = true;
@@ -1012,7 +1843,7 @@ function dashboardHTML(): string {
         state.editingFeedID = feed.feed_id;
         setFeedFormValues(feedFormValuesFromFeed(feed));
         renderFeedForm();
-        setStatus("Editing " + feed.feed_id);
+        setStatus("正在编辑 " + feed.feed_id);
       }
 
       function closeFeedForm() {
@@ -1022,119 +1853,295 @@ function dashboardHTML(): string {
         renderFeedForm();
       }
 
+      function providerLabel(provider) {
+        return provider === "bilibili" ? "B 站" : "YouTube";
+      }
+
+      function providerPillClass(provider) {
+        return "pill " + (provider === "bilibili" ? "provider-bilibili" : "provider-youtube");
+      }
+
+      function needsCookie(feed) {
+        return feed.provider === "bilibili" && !feed.cookie_profile;
+      }
+
+      function feedState(feed) {
+        if (!feed.enabled) return { label: "已停用", className: "disabled" };
+        if (needsCookie(feed)) return { label: "需要 Cookie", className: "warning" };
+        return { label: "已启用", className: "success" };
+      }
+
+      function feedLastActivity(feedID) {
+        var event = state.events.find(function (item) { return item.feed_id === feedID; });
+        return event ? formatRelative(event.event_time) : "-";
+      }
+
+      function iconButton(className, label, icon) {
+        var button = el("button", "icon-button " + className);
+        button.type = "button";
+        button.setAttribute("aria-label", label);
+        button.setAttribute("data-tooltip", label);
+        button.appendChild(iconSVG(icon));
+        return button;
+      }
+
+      function iconSVG(name) {
+        var svgNS = "http" + "://www.w3.org/2000/svg";
+        var svg = document.createElementNS(svgNS, "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("aria-hidden", "true");
+        function path(d) {
+          var node = document.createElementNS(svgNS, "path");
+          node.setAttribute("d", d);
+          svg.appendChild(node);
+        }
+        function line(x1, y1, x2, y2) {
+          var node = document.createElementNS(svgNS, "line");
+          node.setAttribute("x1", x1);
+          node.setAttribute("y1", y1);
+          node.setAttribute("x2", x2);
+          node.setAttribute("y2", y2);
+          svg.appendChild(node);
+        }
+        if (name === "pause") {
+          line("8", "5", "8", "19");
+          line("16", "5", "16", "19");
+        } else if (name === "play") {
+          path("M8 5v14l11-7z");
+        } else if (name === "edit") {
+          path("M12 20h9");
+          path("M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z");
+        } else if (name === "copy") {
+          path("M8 8h11v11H8z");
+          path("M5 16H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1");
+        } else if (name === "list") {
+          line("8", "6", "21", "6");
+          line("8", "12", "21", "12");
+          line("8", "18", "21", "18");
+          line("3", "6", "3.01", "6");
+          line("3", "12", "3.01", "12");
+          line("3", "18", "3.01", "18");
+        } else if (name === "hide") {
+          path("M3 3l18 18");
+          path("M10.6 10.6a2 2 0 0 0 2.8 2.8");
+          path("M9.9 4.2A10.9 10.9 0 0 1 12 4c5 0 9 5 9 5a17.8 17.8 0 0 1-3.2 3.8");
+          path("M6.6 6.6C4.4 8 3 10 3 10s4 5 9 5c1.1 0 2.1-.2 3.1-.5");
+        } else if (name === "restore") {
+          path("M3 12a9 9 0 1 0 3-6.7");
+          path("M3 4v6h6");
+        } else {
+          path("M3 6h18");
+          path("M8 6V4h8v2");
+          path("M6 6l1 14h10l1-14");
+          line("10", "11", "10", "17");
+          line("14", "11", "14", "17");
+        }
+        return svg;
+      }
+
+      function filteredFeeds() {
+        return state.feeds.filter(function (feed) {
+          var text = [feed.feed_id, feed.title, feed.url, feed.cookie_profile].filter(Boolean).join(" ").toLowerCase();
+          if (state.feedSearch && text.indexOf(state.feedSearch.toLowerCase()) === -1) return false;
+          if (state.providerFilter && feed.provider !== state.providerFilter) return false;
+          if (state.feedStateFilter === "enabled" && !feed.enabled) return false;
+          if (state.feedStateFilter === "disabled" && feed.enabled) return false;
+          if (state.feedStateFilter === "needs_cookie" && !needsCookie(feed)) return false;
+          return true;
+        });
+      }
+
       function renderSummary() {
         var enabled = state.feeds.filter(function (feed) { return feed.enabled; }).length;
-        var inOpml = state.feeds.filter(function (feed) { return feed.include_in_opml; }).length;
         var latest = state.syncRuns[0];
+        var latestEvent = state.events[0];
+        var recentFailures = latest ? Number(latest.errors_count || 0) : state.events.filter(function (event) { return event.level === "error"; }).length;
+        var lastContact = latestEvent ? latestEvent.event_time : (latest ? latest.finished_at || latest.started_at : "");
         byID("metric-feeds").textContent = String(state.feeds.length);
         byID("metric-enabled").textContent = String(enabled);
-        byID("metric-opml").textContent = String(inOpml);
-        byID("metric-run").textContent = latest ? latest.status : "-";
+        byID("metric-failures").textContent = String(recentFailures);
+        byID("metric-logs").textContent = String(state.events.length);
+        var health = byID("metric-health");
+        health.textContent = recentFailures > 0 ? "需关注" : "健康";
+        health.className = recentFailures > 0 ? "metric-health-warning" : "metric-health-ok";
+        var healthTooltip = recentFailures > 0
+          ? "最近一次同步存在失败或错误日志，需要查看日志排查。"
+          : "最近一次同步没有失败或错误日志。";
+        byID("metric-health-card").setAttribute("data-tooltip", healthTooltip);
+        byID("metric-health-card").setAttribute("aria-label", "远端发布：" + health.textContent + "。" + healthTooltip);
+        byID("logs-subtitle").textContent = "最近 NAS 联系：" + formatRelative(lastContact);
       }
 
       function renderFeeds() {
         var body = byID("feeds-body");
         body.replaceChildren();
+        var feeds = filteredFeeds();
         if (state.feeds.length === 0) {
-          body.appendChild(emptyRow(5, "No feeds configured."));
-          byID("selected-feed-label").textContent = "No feed selected";
+          body.appendChild(emptyRow(7, "还没有订阅源。"));
           return;
         }
-        state.feeds.forEach(function (feed) {
-          var row = el("tr", feed.feed_id === state.selectedFeedID ? "selected" : "");
-
-          var name = el("button", "", feed.title || feed.feed_id);
+        if (feeds.length === 0) {
+          body.appendChild(emptyRow(7, "没有匹配的订阅源。"));
+          return;
+        }
+        feeds.forEach(function (feed) {
+          var row = el("tr", (feed.feed_id === state.selectedFeedID ? "selected " : "") + (!feed.enabled ? "disabled-row" : ""));
+          var provider = providerLabel(feed.provider);
+          var status = feedState(feed);
+          var lastActivity = feedLastActivity(feed.feed_id);
+          var name = el("button", "ghost feed-title-button", feed.title || feed.feed_id);
           name.type = "button";
           name.title = feed.url || feed.feed_id;
-          name.addEventListener("click", function () {
-            selectFeed(feed.feed_id);
-          });
-          var nameStack = el("div", "stack");
+          name.addEventListener("click", function () { openFeedDetailsModal(feed.feed_id); });
+          var nameStack = el("div", "stack feed-name-stack");
           nameStack.appendChild(name);
-          nameStack.appendChild(el("span", "mono muted", feed.feed_id));
-          appendCell(row, nameStack);
-          appendCell(row, el("span", "pill", feed.provider));
-
-          var enabled = document.createElement("input");
-          enabled.type = "checkbox";
-          enabled.checked = Boolean(feed.enabled);
-          enabled.disabled = state.busy;
-          enabled.addEventListener("change", function () {
-            updateFeedStatus(feed.feed_id, { enabled: enabled.checked });
-          });
-          appendCell(row, enabled);
-
-          var opml = document.createElement("input");
-          opml.type = "checkbox";
-          opml.checked = Boolean(feed.include_in_opml);
-          opml.disabled = state.busy;
-          opml.addEventListener("change", function () {
-            updateFeedStatus(feed.feed_id, { include_in_opml: opml.checked });
-          });
-          appendCell(row, opml);
-
-          var actions = el("div", "actions");
-          var copy = el("button", "", "Copy");
+          var mobileMeta = el("div", "mobile-feed-meta");
+          mobileMeta.appendChild(el("span", providerPillClass(feed.provider), provider));
+          mobileMeta.appendChild(el("span", "pill " + status.className, status.label));
+          mobileMeta.appendChild(el("span", "pill", lastActivity));
+          nameStack.appendChild(mobileMeta);
+          appendCell(row, nameStack, "", "订阅源");
+          appendCell(row, el("span", providerPillClass(feed.provider), provider), "provider-cell", "平台");
+          appendCell(row, el("span", "pill " + status.className, status.label), "status-cell", "状态");
+          var episodes = el("button", "small", "查看剧集");
+          episodes.type = "button";
+          episodes.addEventListener("click", function () { openEpisodesModal(feed.feed_id); });
+          appendCell(row, episodes, "episodes-cell", "剧集");
+          appendCell(row, lastActivity, "activity-cell", "最近活动");
+          var copy = el("button", "small", "复制");
           copy.type = "button";
           copy.disabled = !feed.public_feed_url;
-          copy.title = feed.public_feed_url || "No public URL";
-          copy.addEventListener("click", function () {
-            copyText(feed.public_feed_url);
-          });
-          actions.appendChild(copy);
-          var edit = el("button", "", "Edit");
-          edit.type = "button";
+          copy.title = feed.public_feed_url || "暂无公开订阅地址";
+          copy.addEventListener("click", function () { copyText(feed.public_feed_url); });
+          appendCell(row, copy, "subscription-cell", "订阅");
+          var actions = el("div", "actions");
+          var mobileEpisodes = iconButton("list mobile-only", "查看剧集", "list");
+          mobileEpisodes.disabled = state.busy;
+          mobileEpisodes.addEventListener("click", function () { openEpisodesModal(feed.feed_id); });
+          actions.appendChild(mobileEpisodes);
+          var mobileCopy = iconButton("copy mobile-only", "复制订阅地址", "copy");
+          mobileCopy.disabled = state.busy || !feed.public_feed_url;
+          mobileCopy.setAttribute("data-tooltip", feed.public_feed_url ? "复制订阅地址" : "暂无公开订阅地址");
+          mobileCopy.addEventListener("click", function () { copyText(feed.public_feed_url); });
+          actions.appendChild(mobileCopy);
+          var toggle = iconButton(feed.enabled ? "pause" : "play", feed.enabled ? "停用订阅源" : "启用订阅源", feed.enabled ? "pause" : "play");
+          toggle.disabled = state.busy;
+          toggle.addEventListener("click", function () { updateFeedStatus(feed.feed_id, { enabled: !feed.enabled }); });
+          actions.appendChild(toggle);
+          var edit = iconButton("edit", "编辑订阅源", "edit");
           edit.disabled = state.busy;
-          edit.addEventListener("click", function () {
-            openEditFeedForm(feed.feed_id);
-          });
+          edit.addEventListener("click", function () { openEditFeedForm(feed.feed_id); });
           actions.appendChild(edit);
-          var del = el("button", "danger", "Delete");
-          del.type = "button";
+          var del = iconButton("delete", "删除订阅源", "delete");
           del.disabled = state.busy;
-          del.title = "Remove this feed from remote subscriptions and mark remote episodes for delayed deletion.";
-          del.addEventListener("click", function () {
-            deleteFeed(feed.feed_id);
-          });
+          del.setAttribute("data-tooltip", "删除订阅源");
+          del.setAttribute("aria-label", "删除订阅源");
+          del.addEventListener("click", function () { deleteFeed(feed.feed_id); });
           actions.appendChild(del);
-          appendCell(row, actions);
+          appendCell(row, actions, "actions-cell", "操作");
           body.appendChild(row);
         });
-        var selected = state.feeds.find(function (feed) { return feed.feed_id === state.selectedFeedID; });
-        byID("selected-feed-label").textContent = selected ? selected.feed_id : "No feed selected";
+      }
+
+      function renderFeedDetails() {
+        var modal = byID("feed-details-modal");
+        var body = byID("feed-details-body");
+        modal.hidden = !state.feedDetailsOpen;
+        if (!state.feedDetailsOpen) return;
+        body.replaceChildren();
+        var feed = findFeedByID(state.detailsFeedID);
+        if (!feed) {
+          byID("feed-details-title").textContent = "订阅源信息";
+          byID("feed-details-subtitle").textContent = "订阅源不存在";
+          byID("feed-details-footer").textContent = "-";
+          body.appendChild(el("div", "empty", "订阅源不存在或已被删除。"));
+          return;
+        }
+
+        byID("feed-details-title").textContent = feed.title || feed.feed_id;
+        byID("feed-details-subtitle").textContent = feed.feed_id;
+        byID("feed-details-footer").textContent = "最近活动：" + feedLastActivity(feed.feed_id);
+
+        var chips = el("div", "detail-chips");
+        chips.appendChild(el("span", providerPillClass(feed.provider), providerLabel(feed.provider)));
+        var status = feedState(feed);
+        chips.appendChild(el("span", "pill " + status.className, status.label));
+        if (feed.include_in_opml) chips.appendChild(el("span", "pill success", "OPML"));
+        if (feed.private_feed) chips.appendChild(el("span", "pill", "私密"));
+        if (feed.cookie_profile) chips.appendChild(el("span", "pill", "Cookie"));
+        if (feed.bilibili && feed.bilibili.include_upower_exclusive) chips.appendChild(el("span", "pill success", "UP 主专属"));
+        body.appendChild(chips);
+
+        var grid = el("dl", "detail-grid");
+        appendDetailItem(grid, "来源 URL", linkValue(feed.url), true);
+        appendDetailItem(grid, "订阅 URL", linkValue(feed.public_feed_url), true);
+        appendDetailItem(grid, "平台", providerLabel(feed.provider));
+        appendDetailItem(grid, "状态", status.label);
+        appendDetailItem(grid, "更新周期", feed.update_period);
+        appendDetailItem(grid, "每页数量", feed.page_size);
+        appendDetailItem(grid, "保留最近", feed.keep_last);
+        appendDetailItem(grid, "Cookie 配置", feed.cookie_profile);
+        appendDetailItem(grid, "加入 OPML", formatBoolean(feed.include_in_opml));
+        appendDetailItem(grid, "私密订阅", formatBoolean(feed.private_feed));
+        appendDetailItem(grid, "UP 主专属", formatBoolean(feed.bilibili && feed.bilibili.include_upower_exclusive));
+        appendDetailItem(grid, "最近活动", feedLastActivity(feed.feed_id));
+        appendDetailItem(grid, "标题覆盖", feed.title_override, true);
+        appendDetailItem(grid, "描述", feed.description || feed.description_override, true);
+        appendDetailItem(grid, "过滤条件", feedFilterSummary(feed), true);
+        body.appendChild(grid);
+      }
+
+      function episodeStatusLabel(status) {
+        var labels = { pending: "待处理", visible: "已发布", hidden: "已隐藏", delete_pending: "等待删除", purged: "已清理" };
+        return labels[status] || status;
+      }
+
+      function filteredEpisodes() {
+        return state.episodes.filter(function (episode) {
+          var text = [episode.title, episode.local_episode_id, episode.source_episode_id].filter(Boolean).join(" ").toLowerCase();
+          if (state.episodeSearch && text.indexOf(state.episodeSearch.toLowerCase()) === -1) return false;
+          return true;
+        });
       }
 
       function renderEpisodes() {
         var body = byID("episodes-body");
         body.replaceChildren();
         if (!state.selectedFeedID) {
-          body.appendChild(emptyRow(5, "Select a feed to inspect episodes."));
+          body.appendChild(emptyRow(6, "选择订阅源后查看剧集。"));
           return;
         }
+        var feed = findFeedByID(state.selectedFeedID);
+        byID("episodes-subtitle").textContent = (feed ? (feed.title || feed.feed_id) : state.selectedFeedID) + " · " + state.episodes.length + " 个剧集";
+        var episodes = filteredEpisodes();
+        byID("episodes-pagination").textContent = episodes.length ? "1-" + episodes.length + " / " + state.episodes.length : "0 / " + state.episodes.length;
         if (state.episodes.length === 0) {
-          body.appendChild(emptyRow(5, "No episodes match this view."));
+          body.appendChild(emptyRow(6, "这个订阅源还没有同步到剧集。"));
           return;
         }
-        state.episodes.forEach(function (episode) {
+        if (episodes.length === 0) {
+          body.appendChild(emptyRow(6, "没有匹配的剧集。"));
+          return;
+        }
+        episodes.forEach(function (episode) {
           var row = el("tr");
-          var episodeStack = el("div", "stack");
           var title = episode.title || episode.local_episode_id;
           var safeSourceURL = safeExternalURL(episode.source_url);
+          var titleNode;
           if (safeSourceURL) {
-            var link = el("a", "", title);
-            link.href = safeSourceURL;
-            link.rel = "noopener noreferrer";
-            link.target = "_blank";
-            episodeStack.appendChild(link);
+            titleNode = el("a", "episode-title-link", title);
+            titleNode.href = safeSourceURL;
+            titleNode.rel = "noopener noreferrer";
+            titleNode.target = "_blank";
           } else {
-            episodeStack.appendChild(el("span", "", title));
+            titleNode = el("span", "episode-title-link", title);
           }
-          episodeStack.appendChild(el("span", "mono muted", episode.local_episode_id));
-          appendCell(row, episodeStack);
-          appendCell(row, el("span", "pill " + episode.status, episode.status));
+          appendCell(row, titleNode, "episode-title-cell");
           appendCell(row, formatDate(episode.published_at || episode.updated_at));
-          appendCell(row, episode.has_media ? formatBytes(episode.size) : "No media");
-          appendCell(row, episodeActions(episode));
+          appendCell(row, formatDuration(episode.duration));
+          appendCell(row, episode.has_media ? formatBytes(episode.size) : "-");
+          appendCell(row, el("span", "pill " + episode.status, episodeStatusLabel(episode.status)));
+          appendCell(row, episodeActions(episode), "actions-cell");
           body.appendChild(row);
         });
       }
@@ -1142,29 +2149,31 @@ function dashboardHTML(): string {
       function episodeActions(episode) {
         var actions = el("div", "actions");
         var list = [];
+        if (episode.source_url) list.push(["copy", "复制"]);
         if (episode.status === "pending" || episode.status === "visible") {
-          list.push(["hide", "Hide"]);
-          list.push(["delete", "Remote delete"]);
+          list.push(["hide", "隐藏"]);
+          list.push(["delete", "删除"]);
         } else if (episode.status === "hidden") {
-          list.push(["restore", "Restore"]);
-          list.push(["delete", "Remote delete"]);
+          list.push(["restore", "恢复"]);
+          list.push(["delete", "删除"]);
         } else if (episode.status === "delete_pending") {
-          list.push(["restore", "Restore"]);
+          list.push(["restore", "恢复"]);
         }
         if (list.length === 0) {
-          actions.appendChild(el("span", "muted", "No actions"));
+          actions.appendChild(el("span", "muted", "无操作"));
           return actions;
         }
         list.forEach(function (item) {
           var action = item[0];
           var label = item[1];
-          var button = el("button", action === "delete" ? "danger" : "", label);
-          button.type = "button";
-          if (action === "delete") {
-            button.title = "Remote RSS hides immediately; R2 media is purged later. NAS local files are not deleted.";
-          }
+          var button = iconButton(action, label, action);
+          if (action === "delete") button.setAttribute("data-tooltip", "删除远端剧集");
           button.disabled = state.busy;
           button.addEventListener("click", function () {
+            if (action === "copy") {
+              copyText(episode.source_url);
+              return;
+            }
             updateEpisodeStatus(episode.local_episode_id, action);
           });
           actions.appendChild(button);
@@ -1172,38 +2181,36 @@ function dashboardHTML(): string {
         return actions;
       }
 
-      function renderSubscriptions() {
-        renderUrlList(byID("subscription-feeds"), state.subscriptions.feeds || [], "feed_id");
-        renderUrlList(byID("subscription-opml"), state.subscriptions.opml || [], "label");
-      }
-
       function renderUrlList(container, rows, labelField) {
         container.replaceChildren();
         if (!rows.length) {
-          container.appendChild(el("div", "empty", "No URLs."));
+          container.appendChild(el("div", "empty", "暂无地址。"));
           return;
         }
         rows.forEach(function (row) {
           var wrapper = el("div", "url-row");
           var stack = el("div", "stack");
-          stack.appendChild(el("span", "", row.title || row[labelField] || "subscription"));
+          stack.appendChild(el("span", "", row.title || row[labelField] || "订阅地址"));
           stack.appendChild(el("span", "mono muted", row.xml_url));
-          var button = el("button", "", "Copy");
+          var button = el("button", "", "复制");
           button.type = "button";
-          button.addEventListener("click", function () {
-            copyText(row.xml_url);
-          });
+          button.addEventListener("click", function () { copyText(row.xml_url); });
           wrapper.appendChild(stack);
           wrapper.appendChild(button);
           container.appendChild(wrapper);
         });
       }
 
+      function renderSubscriptions() {
+        renderUrlList(byID("subscription-feeds"), state.subscriptions.feeds || [], "feed_id");
+        renderUrlList(byID("subscription-opml"), state.subscriptions.opml || [], "label");
+      }
+
       function renderRuns() {
         var body = byID("runs-body");
         body.replaceChildren();
         if (!state.syncRuns.length) {
-          body.appendChild(emptyRow(3, "No sync runs reported."));
+          body.appendChild(emptyRow(3, "暂无同步记录。"));
           return;
         }
         state.syncRuns.forEach(function (run) {
@@ -1213,25 +2220,39 @@ function dashboardHTML(): string {
           runStack.appendChild(el("span", "muted", formatDate(run.started_at)));
           appendCell(row, runStack);
           appendCell(row, el("span", "pill " + run.status, run.status));
-          appendCell(row, "feeds " + run.feeds_updated + " / downloads " + run.episodes_downloaded + " / uploads " + run.episodes_uploaded + " / errors " + run.errors_count);
+          appendCell(row, "订阅源 " + run.feeds_updated + " / 下载 " + run.episodes_downloaded + " / 上传 " + run.episodes_uploaded + " / 错误 " + run.errors_count);
           body.appendChild(row);
         });
+      }
+
+      function levelClass(level) {
+        if (level === "error") return "danger";
+        if (level === "warning" || level === "warn") return "warning";
+        if (level === "success") return "success";
+        return "info";
+      }
+
+      function levelLabel(level) {
+        if (level === "error") return "错误";
+        if (level === "warning" || level === "warn") return "警告";
+        if (level === "success") return "成功";
+        return "信息";
       }
 
       function renderEvents() {
         var body = byID("events-body");
         body.replaceChildren();
-        if (!state.events.length) {
-          body.appendChild(emptyRow(3, "No events reported."));
+        var events = state.eventLevelFilter ? state.events.filter(function (event) { return event.level === state.eventLevelFilter; }) : state.events;
+        byID("logs-empty-filter").hidden = events.length > 0 || !state.eventLevelFilter;
+        if (!events.length) {
+          body.appendChild(emptyRow(4, state.eventLevelFilter ? "没有匹配的日志。" : "暂无运行日志。"));
           return;
         }
-        state.events.forEach(function (event) {
+        events.forEach(function (event) {
           var row = el("tr");
-          var eventStack = el("div", "stack");
-          eventStack.appendChild(el("span", "pill " + event.level, event.level));
-          eventStack.appendChild(el("span", "mono muted", event.type));
-          appendCell(row, eventStack);
-          appendCell(row, [event.feed_id, event.local_episode_id].filter(Boolean).join(" / ") || "-");
+          appendCell(row, formatDate(event.event_time));
+          appendCell(row, el("span", "pill " + levelClass(event.level), levelLabel(event.level)));
+          appendCell(row, event.feed_id || event.type || "-");
           appendCell(row, event.error_detail || event.message || event.error_code || formatDate(event.event_time));
           body.appendChild(row);
         });
@@ -1240,6 +2261,7 @@ function dashboardHTML(): string {
       function renderAll() {
         renderSummary();
         renderFeeds();
+        renderFeedDetails();
         renderFeedForm();
         renderEpisodes();
         renderSubscriptions();
@@ -1249,7 +2271,7 @@ function dashboardHTML(): string {
 
       async function loadDashboard() {
         setBusy(true);
-        setStatus("Loading...");
+        setStatus("加载中...");
         try {
           var results = await Promise.all([
             api(paths.feeds),
@@ -1261,14 +2283,12 @@ function dashboardHTML(): string {
           state.subscriptions = results[1] || { feeds: [], opml: [] };
           state.syncRuns = results[2].sync_runs || [];
           state.events = results[3].events || [];
-          if (!state.selectedFeedID && state.feeds.length > 0) {
-            state.selectedFeedID = state.feeds[0].feed_id;
-          }
+          if (!state.selectedFeedID && state.feeds.length > 0) state.selectedFeedID = state.feeds[0].feed_id;
           if (state.selectedFeedID && !state.feeds.some(function (feed) { return feed.feed_id === state.selectedFeedID; })) {
             state.selectedFeedID = state.feeds.length > 0 ? state.feeds[0].feed_id : "";
           }
           await loadEpisodes(false);
-          setStatus("Loaded " + new Date().toLocaleTimeString(), "ok");
+          setStatus("已更新 " + new Date().toLocaleTimeString(), "ok");
         } catch (error) {
           showError(error);
           renderAll();
@@ -1283,14 +2303,14 @@ function dashboardHTML(): string {
           renderAll();
           return;
         }
-        if (showLoading) setStatus("Loading episodes...");
+        if (showLoading) setStatus("正在加载剧集...");
         var query = "?feed_id=" + encodeURIComponent(state.selectedFeedID) + "&limit=50";
         if (state.episodeStatus) query += "&status=" + encodeURIComponent(state.episodeStatus);
         try {
           var result = await api(paths.episodes + query);
           state.episodes = result.episodes || [];
           renderAll();
-          if (showLoading) setStatus("Episodes loaded", "ok");
+          if (showLoading) setStatus("剧集已加载", "ok");
         } catch (error) {
           showError(error);
         }
@@ -1303,12 +2323,48 @@ function dashboardHTML(): string {
         loadEpisodes(true);
       }
 
+      function openEpisodesModal(feedID) {
+        state.selectedFeedID = feedID;
+        state.episodeStatus = "";
+        state.episodeSearch = "";
+        byID("episode-status-filter").value = "";
+        byID("episode-search").value = "";
+        syncCustomSelect("episode-status-filter");
+        byID("episodes-modal").hidden = false;
+        selectFeed(feedID);
+      }
+
+      function openFeedDetailsModal(feedID) {
+        state.detailsFeedID = feedID;
+        state.feedDetailsOpen = true;
+        renderFeedDetails();
+      }
+
+      function closeFeedDetailsModal() {
+        state.feedDetailsOpen = false;
+        state.detailsFeedID = "";
+        renderFeedDetails();
+      }
+
+      function closeEpisodesModal() { byID("episodes-modal").hidden = true; }
+      function openLogsModal() { byID("logs-modal").hidden = false; renderEvents(); }
+      function closeLogsModal() { byID("logs-modal").hidden = true; }
+
       async function submitFeedForm(event) {
         event.preventDefault();
+        if (!validateFeedFormRequiredFields()) {
+          showError("请先填写必填项");
+          return;
+        }
         var payload;
         try {
           payload = readFeedFormValues();
+          clearFeedFormErrors();
         } catch (error) {
+          if (String(error && error.message || error).indexOf("URL") >= 0) {
+            setFieldError("feed-url", "请输入有效的 B 站空间或 YouTube 地址。");
+            focusFeedFormField("feed-url");
+          }
           showError(error);
           return;
         }
@@ -1322,7 +2378,8 @@ function dashboardHTML(): string {
           state.feedFormMode = "create";
           state.editingFeedID = "";
           await loadDashboard();
-          setStatus("Saved feed " + saved.feed_id, "ok");
+          setStatus("已保存订阅源 " + saved.feed_id, "ok");
+          showToast("订阅源已保存", "success");
         } catch (error) {
           showError(error);
         } finally {
@@ -1336,6 +2393,7 @@ function dashboardHTML(): string {
         try {
           await postJSON(paths.feedStatus, Object.assign({ feed_id: feedID }, patch));
           await loadDashboard();
+          showToast("订阅源状态已更新", "success");
         } catch (error) {
           showError(error);
         } finally {
@@ -1343,9 +2401,17 @@ function dashboardHTML(): string {
         }
       }
 
-      async function deleteFeed(feedID) {
-        var ok = window.confirm("Delete feed " + feedID + "? This removes it from remote subscriptions and marks remote episodes for delayed R2 purge. NAS local files are not deleted. Continue?");
-        if (!ok) return;
+      function deleteFeed(feedID) {
+        openConfirmDialog({
+          title: "删除远端订阅源？",
+          message: "这会从远端订阅、XML 和 OPML 中移除 " + feedID + "，并标记相关 R2 媒体等待清理。不会删除 NAS 本地文件。",
+          label: "删除",
+          danger: true,
+          onConfirm: function () { performDeleteFeed(feedID); }
+        });
+      }
+
+      async function performDeleteFeed(feedID) {
         setBusy(true);
         try {
           await postJSON(paths.feedDelete, { feed_id: feedID });
@@ -1354,7 +2420,8 @@ function dashboardHTML(): string {
             state.episodes = [];
           }
           await loadDashboard();
-          setStatus("Deleted feed " + feedID, "ok");
+          setStatus("已删除远端订阅源 " + feedID, "ok");
+          showToast("远端订阅源已删除", "success");
         } catch (error) {
           showError(error);
         } finally {
@@ -1362,12 +2429,22 @@ function dashboardHTML(): string {
         }
       }
 
-      async function updateEpisodeStatus(localEpisodeID, action) {
+      function updateEpisodeStatus(localEpisodeID, action) {
         if (!state.selectedFeedID) return;
         if (action === "delete") {
-          var ok = window.confirm("Remote delete hides this episode from remote RSS and schedules delayed R2 purge. NAS local files are not deleted. Continue?");
-          if (!ok) return;
+          openConfirmDialog({
+            title: "删除远端剧集？",
+            message: "远端 RSS 会立即隐藏该剧集，并安排 R2 媒体稍后清理。不会删除 NAS 本地文件。",
+            label: "删除",
+            danger: true,
+            onConfirm: function () { performEpisodeStatusUpdate(localEpisodeID, action); }
+          });
+          return;
         }
+        performEpisodeStatusUpdate(localEpisodeID, action);
+      }
+
+      async function performEpisodeStatusUpdate(localEpisodeID, action) {
         setBusy(true);
         try {
           await postJSON(paths.episodeStatus, {
@@ -1376,6 +2453,7 @@ function dashboardHTML(): string {
             action: action
           });
           await loadEpisodes(true);
+          showToast("剧集状态已更新", "success");
         } catch (error) {
           showError(error);
         } finally {
@@ -1383,18 +2461,183 @@ function dashboardHTML(): string {
         }
       }
 
+      function openConfirmDialog(options) {
+        state.confirmAction = options.onConfirm;
+        byID("confirm-title").textContent = options.title;
+        byID("confirm-message").textContent = options.message;
+        byID("confirm-ok").textContent = options.label || "确认";
+        byID("confirm-ok").className = options.danger ? "danger" : "primary";
+        byID("confirm-modal").hidden = false;
+      }
+
+      function closeConfirmDialog() {
+        state.confirmAction = null;
+        byID("confirm-modal").hidden = true;
+      }
+
+      function closeModalFromBackdrop(event) {
+        if (event.target !== event.currentTarget) return;
+        closeCustomSelects("");
+        var modalID = event.currentTarget.id;
+        if (modalID === "feed-modal") closeFeedForm();
+        if (modalID === "feed-details-modal") closeFeedDetailsModal();
+        if (modalID === "episodes-modal") closeEpisodesModal();
+        if (modalID === "logs-modal") closeLogsModal();
+        if (modalID === "confirm-modal") closeConfirmDialog();
+      }
+
+      function runConfirmAction() {
+        var action = state.confirmAction;
+        closeConfirmDialog();
+        if (action) action();
+      }
+
+      function copyOpmlURL() {
+        var rows = state.subscriptions.opml || [];
+        if (!rows.length) {
+          showToast("暂无 OPML 地址", "warning");
+          return;
+        }
+        copyText(rows[0].xml_url);
+      }
+
+      function copyLogs() {
+        var text = state.events.map(function (event) {
+          return [formatDate(event.event_time), levelLabel(event.level), event.feed_id || event.type || "-", event.error_detail || event.message || event.error_code || ""].join(" | ");
+        }).join("\\n");
+        copyText(text);
+      }
+
+      function syncCustomSelect(selectID) {
+        var select = byID(selectID);
+        var trigger = byID(selectID + "-trigger");
+        var menu = byID(selectID + "-menu");
+        if (!select || !trigger || !menu) return;
+        var selected = select.options[select.selectedIndex];
+        trigger.textContent = selected ? selected.textContent : "";
+        trigger.disabled = select.disabled;
+        trigger.setAttribute("aria-disabled", select.disabled ? "true" : "false");
+        if (select.disabled) {
+          menu.hidden = true;
+          trigger.setAttribute("aria-expanded", "false");
+        }
+        var control = document.querySelector('[data-select-control="' + selectID + '"]');
+        if (control) control.classList.toggle("is-disabled", select.disabled);
+        Array.prototype.forEach.call(menu.querySelectorAll("[data-select-value]"), function (option) {
+          option.setAttribute("aria-selected", option.getAttribute("data-select-value") === select.value ? "true" : "false");
+        });
+      }
+
+      function closeCustomSelects(exceptID) {
+        Array.prototype.forEach.call(document.querySelectorAll("[data-select-control]"), function (control) {
+          var selectID = control.getAttribute("data-select-control");
+          if (!selectID || selectID === exceptID) return;
+          var trigger = byID(selectID + "-trigger");
+          var menu = byID(selectID + "-menu");
+          if (menu) menu.hidden = true;
+          if (trigger) trigger.setAttribute("aria-expanded", "false");
+        });
+      }
+
+      function setupCustomSelect(selectID) {
+        var select = byID(selectID);
+        var trigger = byID(selectID + "-trigger");
+        var menu = byID(selectID + "-menu");
+        if (!select || !trigger || !menu) return;
+        trigger.addEventListener("click", function (event) {
+          event.stopPropagation();
+          if (select.disabled) return;
+          var willOpen = menu.hidden;
+          closeCustomSelects(selectID);
+          menu.hidden = !willOpen;
+          trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+          if (willOpen) {
+            var selectedOption = menu.querySelector('[aria-selected="true"]');
+            if (selectedOption) selectedOption.focus();
+          }
+        });
+        Array.prototype.forEach.call(menu.querySelectorAll("[data-select-value]"), function (option) {
+          option.addEventListener("click", function (event) {
+            event.stopPropagation();
+            select.value = option.getAttribute("data-select-value") || "";
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+            closeCustomSelects("");
+            trigger.focus();
+          });
+        });
+        select.addEventListener("change", function () { syncCustomSelect(selectID); });
+        syncCustomSelect(selectID);
+      }
+
       byID("refresh-dashboard").addEventListener("click", loadDashboard);
       byID("new-feed").addEventListener("click", openNewFeedForm);
       byID("feed-form").addEventListener("submit", submitFeedForm);
       byID("feed-form-cancel").addEventListener("click", closeFeedForm);
+      byID("feed-form-close").addEventListener("click", closeFeedForm);
       byID("feed-provider").addEventListener("change", renderFeedForm);
-      byID("refresh-episodes").addEventListener("click", function () {
-        loadEpisodes(true);
+      feedFormValidationFields.forEach(function (id) {
+        byID(id).addEventListener("input", function () { setFieldError(id, ""); });
       });
-      byID("episode-status-filter").addEventListener("change", function (event) {
-        state.episodeStatus = event.target.value;
-        loadEpisodes(true);
+      byID("feed-details-close").addEventListener("click", closeFeedDetailsModal);
+      byID("feed-details-footer-close").addEventListener("click", closeFeedDetailsModal);
+      byID("refresh-episodes").addEventListener("click", function () { loadEpisodes(true); });
+      byID("episode-status-filter").addEventListener("change", function (event) { state.episodeStatus = event.target.value; loadEpisodes(true); });
+      byID("episode-search").addEventListener("input", function (event) { state.episodeSearch = event.target.value; renderEpisodes(); });
+      byID("episodes-close").addEventListener("click", closeEpisodesModal);
+      byID("episodes-footer-close").addEventListener("click", closeEpisodesModal);
+      byID("open-logs").addEventListener("click", openLogsModal);
+      byID("logs-footer-close").addEventListener("click", closeLogsModal);
+      byID("refresh-logs").addEventListener("click", loadDashboard);
+      byID("copy-logs").addEventListener("click", copyLogs);
+      byID("event-level-filter").addEventListener("change", function (event) { state.eventLevelFilter = event.target.value; renderEvents(); });
+      byID("reset-event-filter").addEventListener("click", function () {
+        state.eventLevelFilter = "";
+        byID("event-level-filter").value = "";
+        syncCustomSelect("event-level-filter");
+        renderEvents();
       });
+      byID("feed-search").addEventListener("input", function (event) { state.feedSearch = event.target.value; renderFeeds(); });
+      byID("provider-filter").addEventListener("change", function (event) { state.providerFilter = event.target.value; renderFeeds(); });
+      byID("feed-state-filter").addEventListener("change", function (event) { state.feedStateFilter = event.target.value; renderFeeds(); });
+      byID("reset-feed-filters").addEventListener("click", function () {
+        state.feedSearch = "";
+        state.providerFilter = "";
+        state.feedStateFilter = "";
+        byID("feed-search").value = "";
+        byID("provider-filter").value = "";
+        byID("feed-state-filter").value = "";
+        syncCustomSelect("provider-filter");
+        syncCustomSelect("feed-state-filter");
+        renderFeeds();
+      });
+      byID("copy-opml").addEventListener("click", copyOpmlURL);
+      byID("feed-modal-disable").addEventListener("click", function () { if (state.editingFeedID) updateFeedStatus(state.editingFeedID, { enabled: false }); });
+      byID("feed-modal-delete").addEventListener("click", function () { if (state.editingFeedID) deleteFeed(state.editingFeedID); });
+      byID("confirm-cancel").addEventListener("click", closeConfirmDialog);
+      byID("confirm-close").addEventListener("click", closeConfirmDialog);
+      byID("confirm-ok").addEventListener("click", runConfirmAction);
+      Array.prototype.forEach.call(document.querySelectorAll(".modal-backdrop"), function (backdrop) {
+        backdrop.addEventListener("click", closeModalFromBackdrop);
+      });
+      document.addEventListener("keydown", function (event) {
+        if (event.key !== "Escape") return;
+        closeCustomSelects("");
+        closeConfirmDialog();
+        closeLogsModal();
+        closeEpisodesModal();
+        closeFeedDetailsModal();
+        closeFeedForm();
+      });
+      document.addEventListener("click", function (event) {
+        var target = event.target;
+        if (target && target.closest && target.closest("[data-select-control]")) return;
+        closeCustomSelects("");
+      });
+      setupCustomSelect("provider-filter");
+      setupCustomSelect("feed-state-filter");
+      setupCustomSelect("feed-provider");
+      setupCustomSelect("episode-status-filter");
+      setupCustomSelect("event-level-filter");
 
       loadDashboard();
     }());
