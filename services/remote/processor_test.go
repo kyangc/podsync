@@ -234,7 +234,7 @@ func TestProcessorPreservesTombstoneFailureWhenMediaMissingAfterDue(t *testing.T
 	})
 	task := newProcessorTask("feed", "episode")
 	require.NoError(t, database.EnqueueRemotePublishTask(ctx, task))
-	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	now := remotePublishTaskDueTime(t, ctx, database, task.ID)
 	store := hookMediaStore{
 		store: LocalMediaStore{Root: root},
 		beforeOpen: func() {
@@ -321,7 +321,7 @@ func TestProcessorRecordsPreUploadErrorInBadger(t *testing.T) {
 	})
 	task := newProcessorTask("feed", "episode")
 	require.NoError(t, database.EnqueueRemotePublishTask(ctx, task))
-	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	now := remotePublishTaskDueTime(t, ctx, database, task.ID)
 	processor := &Processor{
 		Outbox:    database,
 		Publisher: &fakeProcessorPublisher{},
@@ -399,13 +399,14 @@ func TestProcessorWithBadgerLocalStoreAndMockPublisher(t *testing.T) {
 	task := newProcessorTask("feed", "episode")
 	writeProcessorMedia(t, root, task.MediaPath, []byte("audio bytes"))
 	require.NoError(t, database.EnqueueRemotePublishTask(ctx, task))
+	now := remotePublishTaskDueTime(t, ctx, database, task.ID)
 	processor := &Processor{
 		Outbox:    database,
 		Publisher: &fakeProcessorPublisher{},
 		Store:     LocalMediaStore{Root: root},
 		Prefix:    "audio",
 		Limit:     10,
-		Now:       func() time.Time { return time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC) },
+		Now:       func() time.Time { return now },
 	}
 
 	err = processor.ProcessDue(ctx)
@@ -664,6 +665,14 @@ func newProcessorTask(feedID, episodeID string) *model.RemotePublishTask {
 		PublishedAt:     time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
 		Status:          model.RemotePublishPending,
 	}
+}
+
+func remotePublishTaskDueTime(t *testing.T, ctx context.Context, database *poddb.Badger, taskID string) time.Time {
+	t.Helper()
+	task, err := database.GetRemotePublishTask(ctx, taskID)
+	require.NoError(t, err)
+	require.False(t, task.NextAttemptAt.IsZero())
+	return task.NextAttemptAt
 }
 
 func writeProcessorMedia(t *testing.T, root string, name string, data []byte) {
