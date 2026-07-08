@@ -1401,6 +1401,7 @@ function dashboardHTML(): string {
       }
 
       function setBusy(value) {
+        var changed = state.busy !== value;
         state.busy = value;
         setDisabled("refresh-dashboard", value);
         setDisabled("refresh-episodes", value || !state.selectedFeedID);
@@ -1408,6 +1409,10 @@ function dashboardHTML(): string {
         setDisabled("feed-form-save", value || !state.feedFormOpen);
         setDisabled("feed-form-cancel", value);
         setDisabled("copy-opml", value);
+        if (changed && !value) {
+          renderFeeds();
+          renderEpisodes();
+        }
       }
 
       function emptyRow(colspan, message) {

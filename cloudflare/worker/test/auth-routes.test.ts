@@ -305,6 +305,9 @@ describe("route auth boundaries", () => {
     expect(body).toContain("iconButton(feed.enabled ? \"pause\" : \"play\", feed.enabled ? \"停用订阅源\" : \"启用订阅源\"");
     expect(body).toContain("iconButton(\"edit\", \"编辑订阅源\", \"edit\")");
     expect(body).toContain("iconButton(\"delete\", \"删除订阅源\", \"delete\")");
+    expect(body).toContain("var changed = state.busy !== value");
+    expect(body).toContain("if (changed && !value)");
+    expect(body).toContain("renderFeeds();\n          renderEpisodes();");
     expect(body).toContain("section[data-region=\"feeds\"] tbody td::before");
     expect(body).toContain("section[data-region=\"feeds\"] .mobile-feed-meta");
     expect(body).toContain("section[data-region=\"feeds\"] .episodes-cell");
