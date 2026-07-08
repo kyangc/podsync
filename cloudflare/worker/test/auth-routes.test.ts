@@ -224,6 +224,9 @@ describe("route auth boundaries", () => {
     expect(body).toContain("function renderFeedDetails");
     expect(body).toContain("class=\"tooltip-label\"");
     expect(body).toContain(".form-section[hidden] { display: none; }");
+    expect(body).toContain(".field-error:not(:empty)");
+    expect(body).not.toContain("默认开启</span>");
+    expect(body).not.toContain("有默认值</span>");
     expect(body).not.toContain("id=\"metric-failures\"");
     expect(body).not.toContain("id=\"metric-health-card\"");
     expect(body).not.toContain("id=\"metric-health\">");
@@ -345,6 +348,10 @@ describe("route auth boundaries", () => {
     expect(body).toContain("function copyLogs");
     expect(body).toContain("openConfirmDialog({");
     expect(body).toContain("performDeleteFeed(feedID)");
+    expect(body).toContain("删除订阅源");
+    expect(body).not.toContain("删除远端订阅源");
+    expect(body).toContain("停用会保留订阅源和已发布内容");
+    expect(body).toContain("删除会从远端配置、RSS 和 OPML 中移除订阅源");
     expect(body).toContain("不会删除 NAS 本地文件");
     expect(body).toContain("postJSON(paths.feedDelete, { feed_id: feedID })");
     expect(body).toContain("state.selectedFeedID = \"\"");

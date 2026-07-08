@@ -416,7 +416,15 @@ function dashboardHTML(): string {
       flex: 0 0 auto;
       white-space: nowrap;
     }
-    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; padding: 18px 22px; }
+    .form-grid {
+      width: 100%;
+      max-width: 100%;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px 16px;
+      padding: 18px 22px;
+      overflow-x: hidden;
+    }
     .form-field { display: grid; gap: 4px; min-width: 0; }
     .form-field.wide, .form-section { grid-column: 1 / -1; }
     .form-field label, .form-group-label { color: var(--muted); font-size: 12px; font-weight: 600; }
@@ -483,12 +491,12 @@ function dashboardHTML(): string {
       border-color: var(--danger);
       box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.1);
     }
-    .form-section { border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); padding: 14px; display: grid; gap: 12px; }
+    .form-section { min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); padding: 14px; display: grid; gap: 10px; }
     .form-section[hidden] { display: none; }
     .form-section-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
     .form-section-title { color: var(--text); font-size: 13px; font-weight: 700; }
     .form-section-note { color: var(--muted); font-size: 12px; white-space: nowrap; }
-    .form-section-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; align-items: start; }
+    .form-section-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; align-items: start; }
     .form-section-grid.runtime-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .form-section-grid.switch-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
     .form-section.danger-zone { background: #fef2f2; border-color: #fecaca; }
@@ -597,7 +605,8 @@ function dashboardHTML(): string {
     .pill.provider-bilibili { color: #0369a1; border-color: #bae6fd; background: #f0f9ff; }
     .pill.provider-youtube { color: #b91c1c; border-color: #fecdd3; background: #fff1f2; }
     .empty { padding: 16px; color: var(--muted); text-align: center; }
-    .field-error { color: var(--danger); font-size: 12px; min-height: 16px; }
+    .field-error { color: var(--danger); font-size: 12px; }
+    .field-error:not(:empty) { min-height: 16px; margin-top: 2px; }
     .modal-backdrop {
       position: fixed;
       inset: 0;
@@ -1108,7 +1117,6 @@ function dashboardHTML(): string {
           <div class="form-section">
             <div class="form-section-header">
               <span class="form-section-title">发布设置</span>
-              <span class="form-section-note">默认开启</span>
             </div>
             <div class="form-section-grid switch-grid">
               <div class="form-field checkbox-field">
@@ -1150,7 +1158,6 @@ function dashboardHTML(): string {
           <div class="form-section">
             <div class="form-section-header">
               <span class="form-section-title">抓取参数</span>
-              <span class="form-section-note">有默认值</span>
             </div>
             <div class="form-section-grid runtime-grid">
               <div class="form-field">
@@ -1215,9 +1222,9 @@ function dashboardHTML(): string {
             <span class="form-group-label">危险操作</span>
             <div class="section-tools">
               <button id="feed-modal-disable" type="button">停用订阅源</button>
-              <button id="feed-modal-delete" class="danger" type="button">删除远端订阅源</button>
+              <button id="feed-modal-delete" class="danger" type="button">删除订阅源</button>
             </div>
-            <div class="muted">删除只影响远端订阅源、XML 和待清理的 R2 对象，不会删除 NAS 本地文件。</div>
+            <div class="muted">停用会保留订阅源和已发布内容，只让 NAS 后续不再同步这个源。删除会从远端配置、RSS 和 OPML 中移除订阅源，并把相关 R2 媒体标记为待清理；不会删除 NAS 本地文件。</div>
           </div>
         </div>
         <div class="modal-footer">
@@ -2554,8 +2561,8 @@ function dashboardHTML(): string {
 
       function deleteFeed(feedID) {
         openConfirmDialog({
-          title: "删除远端订阅源？",
-          message: "这会从远端订阅、XML 和 OPML 中移除 " + feedID + "，并标记相关 R2 媒体等待清理。不会删除 NAS 本地文件。",
+          title: "删除订阅源？",
+          message: "这会从远端配置、RSS 和 OPML 中移除 " + feedID + "，并标记相关 R2 媒体等待清理。不会删除 NAS 本地文件。",
           label: "删除",
           danger: true,
           onConfirm: function () { performDeleteFeed(feedID); }
@@ -2571,8 +2578,8 @@ function dashboardHTML(): string {
             state.episodes = [];
           }
           await loadDashboard();
-          setStatus("已删除远端订阅源 " + feedID, "ok");
-          showToast("远端订阅源已删除", "success");
+          setStatus("已删除订阅源 " + feedID, "ok");
+          showToast("订阅源已删除", "success");
         } catch (error) {
           showError(error);
         } finally {
