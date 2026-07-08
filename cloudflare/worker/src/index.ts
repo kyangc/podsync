@@ -1224,7 +1224,7 @@ function dashboardHTML(): string {
               <button id="feed-modal-disable" type="button">停用订阅源</button>
               <button id="feed-modal-delete" class="danger" type="button">删除订阅源</button>
             </div>
-            <div class="muted">停用会保留订阅源和已发布内容，只让 NAS 后续不再同步这个源。删除会从远端配置、RSS 和 OPML 中移除订阅源，并把相关 R2 媒体标记为待清理；不会删除 NAS 本地文件。</div>
+            <div class="muted">停用：保留远端配置、RSS/OPML 和已发布内容，只让 NAS 后续不再抓取这个源，可随时恢复。删除：从远端配置、RSS 和 OPML 中移除订阅源，并把相关 R2 媒体标记为待清理；不会删除 NAS 本地文件。</div>
           </div>
         </div>
         <div class="modal-footer">

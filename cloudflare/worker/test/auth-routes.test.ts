@@ -350,8 +350,8 @@ describe("route auth boundaries", () => {
     expect(body).toContain("performDeleteFeed(feedID)");
     expect(body).toContain("删除订阅源");
     expect(body).not.toContain("删除远端订阅源");
-    expect(body).toContain("停用会保留订阅源和已发布内容");
-    expect(body).toContain("删除会从远端配置、RSS 和 OPML 中移除订阅源");
+    expect(body).toContain("停用：保留远端配置、RSS/OPML 和已发布内容");
+    expect(body).toContain("删除：从远端配置、RSS 和 OPML 中移除订阅源");
     expect(body).toContain("不会删除 NAS 本地文件");
     expect(body).toContain("postJSON(paths.feedDelete, { feed_id: feedID })");
     expect(body).toContain("state.selectedFeedID = \"\"");
