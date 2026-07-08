@@ -1063,8 +1063,8 @@ function dashboardHTML(): string {
               <th style="width: 32%">订阅源</th>
               <th style="width: 8%">平台</th>
               <th style="width: 9%">状态</th>
+              <th style="width: 15%">最近更新</th>
               <th style="width: 11%">剧集</th>
-              <th style="width: 15%">最近活动</th>
               <th style="width: 8%">订阅</th>
               <th style="width: 17%">操作</th>
             </tr>
@@ -1985,7 +1985,10 @@ function dashboardHTML(): string {
         return { label: "已启用", className: "success" };
       }
 
-      function feedLastActivity(feedID) {
+      function feedLastUpdated(feed) {
+        if (feed.last_source_update_at) return formatRelative(feed.last_source_update_at);
+        if (feed.metadata_reported_at) return formatRelative(feed.metadata_reported_at);
+        var feedID = feed.feed_id;
         var event = state.events.find(function (item) { return item.feed_id === feedID; });
         return event ? formatRelative(event.event_time) : "-";
       }
@@ -2102,7 +2105,7 @@ function dashboardHTML(): string {
           var row = el("tr", (feed.feed_id === state.selectedFeedID ? "selected " : "") + (!feed.enabled ? "disabled-row" : ""));
           var provider = providerLabel(feed.provider);
           var status = feedState(feed);
-          var lastActivity = feedLastActivity(feed.feed_id);
+          var lastUpdated = feedLastUpdated(feed);
           var name = el("button", "ghost feed-title-button", feed.title || feed.feed_id);
           name.type = "button";
           name.title = feed.url || feed.feed_id;
@@ -2112,16 +2115,16 @@ function dashboardHTML(): string {
           var mobileMeta = el("div", "mobile-feed-meta");
           mobileMeta.appendChild(el("span", providerPillClass(feed.provider), provider));
           mobileMeta.appendChild(el("span", "pill " + status.className, status.label));
-          mobileMeta.appendChild(el("span", "pill", lastActivity));
+          mobileMeta.appendChild(el("span", "pill", lastUpdated));
           nameStack.appendChild(mobileMeta);
           appendCell(row, nameStack, "", "订阅源");
           appendCell(row, el("span", providerPillClass(feed.provider), provider), "provider-cell", "平台");
           appendCell(row, el("span", "pill " + status.className, status.label), "status-cell", "状态");
+          appendCell(row, lastUpdated, "activity-cell", "最近更新");
           var episodes = el("button", "small", "查看剧集");
           episodes.type = "button";
           episodes.addEventListener("click", function () { openEpisodesModal(feed.feed_id); });
           appendCell(row, episodes, "episodes-cell", "剧集");
-          appendCell(row, lastActivity, "activity-cell", "最近活动");
           var copy = el("button", "small", "复制");
           copy.type = "button";
           copy.disabled = !feed.public_feed_url;
@@ -2174,7 +2177,7 @@ function dashboardHTML(): string {
 
         byID("feed-details-title").textContent = feed.title || feed.feed_id;
         byID("feed-details-subtitle").textContent = feed.feed_id;
-        byID("feed-details-footer").textContent = "最近活动：" + feedLastActivity(feed.feed_id);
+        byID("feed-details-footer").textContent = "最近更新：" + feedLastUpdated(feed);
 
         var chips = el("div", "detail-chips");
         chips.appendChild(el("span", providerPillClass(feed.provider), providerLabel(feed.provider)));
@@ -2198,7 +2201,7 @@ function dashboardHTML(): string {
         appendDetailItem(grid, "加入 OPML", formatBoolean(feed.include_in_opml));
         appendDetailItem(grid, "私密订阅", formatBoolean(feed.private_feed));
         appendDetailItem(grid, "UP 主专属", formatBoolean(feed.bilibili && feed.bilibili.include_upower_exclusive));
-        appendDetailItem(grid, "最近活动", feedLastActivity(feed.feed_id));
+        appendDetailItem(grid, "最近更新", feedLastUpdated(feed));
         appendDetailItem(grid, "标题覆盖", feed.title_override, true);
         appendDetailItem(grid, "描述", feed.description || feed.description_override, true);
         appendDetailItem(grid, "过滤条件", feedFilterSummary(feed), true);
@@ -3765,6 +3768,7 @@ async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
             f.page_size, f.keep_last, f.cookie_profile, f.bilibili_include_upower_exclusive,
             f.public_path,
             m.title AS metadata_title, m.description AS metadata_description,
+            m.last_source_update_at AS metadata_last_source_update_at, m.reported_at AS metadata_reported_at,
             ff.title, ff.not_title, ff.description, ff.not_description,
             ff.min_duration, ff.max_duration, ff.min_age, ff.max_age
        FROM feeds f
@@ -3783,6 +3787,8 @@ async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
       description_override: feed.description_override,
       title: feed.metadata_title ?? feed.title_override ?? feed.feed_id,
       description: feed.metadata_description ?? feed.description_override ?? null,
+      last_source_update_at: feed.metadata_last_source_update_at,
+      metadata_reported_at: feed.metadata_reported_at,
       enabled: jsonBoolean(feed.enabled),
       include_in_opml: jsonBoolean(feed.include_in_opml),
       private_feed: jsonBoolean(feed.private_feed),

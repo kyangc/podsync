@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FeedTomlRow } from "../src/db";
 import worker from "../src/index";
-import { fakeD1, fakeEpisodeKey, type FakeEpisodeRow } from "./fake-d1";
+import { fakeD1, fakeEpisodeKey, type FakeEpisodeRow, type FakeFeedMetadataRow } from "./fake-d1";
 
 function adminGet(path: string, init: RequestInit = {}): Request {
   const { headers, ...rest } = init;
@@ -72,6 +72,25 @@ function episode(overrides: Partial<FakeEpisodeRow> = {}): FakeEpisodeRow {
   };
 }
 
+function metadata(overrides: Partial<FakeFeedMetadataRow> = {}): FakeFeedMetadataRow {
+  return {
+    feed_id: "feed",
+    provider: "youtube",
+    source_url: "https://www.youtube.com/channel/channel",
+    title: "Feed Metadata",
+    description: "Metadata description",
+    image_url: null,
+    link: null,
+    author: null,
+    category: null,
+    language: null,
+    explicit: null,
+    last_source_update_at: "2026-07-06T12:00:00Z",
+    reported_at: "2026-07-06T12:05:00Z",
+    ...overrides,
+  };
+}
+
 describe("admin read APIs", () => {
   it("requires Cloudflare Access for admin feeds", async () => {
     const response = await worker.fetch(new Request("https://podcast.example.com/api/admin/feeds"), {
@@ -102,13 +121,22 @@ describe("admin read APIs", () => {
       adminGet("/api/admin/feeds"),
       {
         DB: fakeD1({
+          feedMetadataByID: new Map([
+            ["bili", metadata({
+              feed_id: "bili",
+              provider: "bilibili",
+              source_url: "https://space.bilibili.com/10835521",
+              title: "Bilibili Metadata",
+              description: "Bilibili description",
+              last_source_update_at: "2026-07-06T13:00:00Z",
+              reported_at: "2026-07-06T13:05:00Z",
+            })],
+          ]),
           tomlFeeds: [
             feedRow({
               feed_id: "bili",
               provider: "bilibili",
               url: "https://space.bilibili.com/10835521",
-              metadata_title: "Bilibili Metadata",
-              metadata_description: "Bilibili description",
               not_title: "直播",
               bilibili_include_upower_exclusive: 1,
               public_path: "/f/bili.xml",
@@ -161,6 +189,8 @@ describe("admin read APIs", () => {
         include_in_opml: true,
         private_feed: true,
         bilibili: { include_upower_exclusive: true },
+        last_source_update_at: "2026-07-06T13:00:00Z",
+        metadata_reported_at: "2026-07-06T13:05:00Z",
         public_feed_url: "https://podcast.example.com/f/bili.xml",
       }),
       expect.objectContaining({

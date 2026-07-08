@@ -297,8 +297,10 @@ describe("route auth boundaries", () => {
     expect(body).toContain("mobileMeta.appendChild(el(\"span\", providerPillClass(feed.provider), provider))");
     expect(body).toContain("appendCell(row, el(\"span\", providerPillClass(feed.provider), provider), \"provider-cell\", \"平台\")");
     expect(body).toContain("chips.appendChild(el(\"span\", providerPillClass(feed.provider), providerLabel(feed.provider)))");
-    expect(body).toContain("appendCell(row, lastActivity, \"activity-cell\", \"最近活动\")");
+    expect(body.indexOf("<th style=\"width: 15%\">最近更新</th>")).toBeLessThan(body.indexOf("<th style=\"width: 11%\">剧集</th>"));
+    expect(body).toContain("appendCell(row, lastUpdated, \"activity-cell\", \"最近更新\")");
     expect(body).toContain("appendCell(row, episodes, \"episodes-cell\", \"剧集\")");
+    expect(body.indexOf("appendCell(row, lastUpdated, \"activity-cell\", \"最近更新\")")).toBeLessThan(body.indexOf("appendCell(row, episodes, \"episodes-cell\", \"剧集\")"));
     expect(body).toContain("appendCell(row, copy, \"subscription-cell\", \"订阅\")");
     expect(body).toContain("iconButton(\"list mobile-only\", \"查看剧集\", \"list\")");
     expect(body).toContain("iconButton(\"copy mobile-only\", \"复制订阅地址\", \"copy\")");

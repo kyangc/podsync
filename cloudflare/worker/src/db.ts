@@ -66,6 +66,8 @@ export interface AdminFeedListRow {
   public_path: string | null;
   metadata_title: string | null;
   metadata_description: string | null;
+  metadata_last_source_update_at: string | null;
+  metadata_reported_at: string | null;
   title: string | null;
   not_title: string | null;
   description: string | null;
