@@ -319,7 +319,17 @@ describe("route auth boundaries", () => {
     expect(body).toContain("section[data-region=\"feeds\"] .episodes-cell");
     expect(body).toContain("section[data-region=\"feeds\"] .actions-cell .mobile-only");
     expect(body).toContain("section[data-region=\"episodes\"].modal");
+    expect(body).toContain("class=\"modal-title-row\"");
+    expect(body).toContain("id=\"refresh-episodes\" class=\"icon-button refresh\"");
+    expect(body).not.toContain("<button id=\"refresh-episodes\" type=\"button\">刷新剧集</button>");
+    expect(body).toContain("section[data-region=\"episodes\"] .modal-toolbar .toolbar-left");
+    expect(body).toContain("section[data-region=\"episodes\"] #episode-search { flex: 1 1 auto; min-width: 0; }");
+    expect(body).toContain("section[data-region=\"episodes\"] .custom-select { flex: 0 0 132px; min-width: 132px; }");
     expect(body).toContain("section[data-region=\"episodes\"] tbody tr");
+    expect(body).toContain("grid-template-columns: minmax(0, max-content) max-content max-content minmax(0, 1fr)");
+    expect(body).toContain("section[data-region=\"episodes\"] .episode-published-cell");
+    expect(body).toContain("section[data-region=\"episodes\"] .episode-duration-cell");
+    expect(body).toContain("section[data-region=\"episodes\"] .episode-size-cell");
     expect(body).toContain("section[data-region=\"episodes\"] .episode-title-cell");
     expect(body).toContain("section[data-region=\"episodes\"] .episode-status-cell");
     expect(body).toContain("section[data-region=\"episodes\"] .modal-footer");

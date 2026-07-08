@@ -634,7 +634,11 @@ function dashboardHTML(): string {
     .modal header, .modal-footer, .modal-toolbar { flex: 0 0 auto; }
     .modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; background: #ffffff; }
     .modal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: var(--panel-soft); }
+    .modal-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .modal-subtitle { color: var(--muted); font-size: 13px; margin-top: 3px; }
+    section[data-region="episodes"] .modal-toolbar .toolbar-left { flex: 1 1 auto; flex-wrap: nowrap; min-width: 0; }
+    section[data-region="episodes"] #episode-search { flex: 1 1 auto; min-width: 0; }
+    section[data-region="episodes"] .custom-select { flex: 0 0 132px; min-width: 132px; }
     .detail-body { padding: 18px 22px; }
     .detail-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
     .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; margin: 0; }
@@ -730,6 +734,7 @@ function dashboardHTML(): string {
     .icon-button.play { color: #15803d; border-color: #bbf7d0; background: #ecfdf3; }
     .icon-button.edit { color: #2563eb; border-color: #bfdbfe; background: #eff6ff; }
     .icon-button.copy, .icon-button.list { color: #2563eb; border-color: #bfdbfe; background: #eff6ff; }
+    .icon-button.refresh { color: #2563eb; border-color: var(--line-strong); background: #ffffff; }
     .icon-button.hide { color: #b45309; border-color: #fed7aa; background: #fff7ed; }
     .icon-button.restore { color: #15803d; border-color: #bbf7d0; background: #ecfdf3; }
     .icon-button.delete { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
@@ -747,6 +752,9 @@ function dashboardHTML(): string {
       .feed-filter-bar { align-items: stretch; flex-wrap: wrap; }
       .feed-filter-bar .search { width: 100%; flex: 1 0 100%; }
       .modal-toolbar .custom-select { flex: 0 0 auto; width: 100%; }
+      section[data-region="episodes"] .modal-toolbar { align-items: center; flex-direction: row; }
+      section[data-region="episodes"] .modal-toolbar .toolbar-left { width: 100%; }
+      section[data-region="episodes"] .custom-select { flex: 0 0 132px; width: 132px; min-width: 132px; }
       .status { text-align: left; }
     }
     @media (max-width: 720px) {
@@ -878,20 +886,29 @@ function dashboardHTML(): string {
         padding: 4px 6px;
       }
       section[data-region="episodes"] .modal-toolbar {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        align-items: start;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
         gap: 8px;
         padding: 12px 14px;
         background: #ffffff;
       }
       section[data-region="episodes"] .toolbar-left {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
+        display: flex;
+        align-items: center;
+        flex-wrap: nowrap;
         gap: 8px;
+        width: 100%;
+        min-width: 0;
       }
-      section[data-region="episodes"] .toolbar-right {
-        justify-content: flex-end;
+      section[data-region="episodes"] #episode-search {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      section[data-region="episodes"] .custom-select {
+        flex: 0 0 132px;
+        width: 132px;
+        min-width: 132px;
       }
       section[data-region="episodes"] .table-wrap {
         overflow: visible;
@@ -907,16 +924,21 @@ function dashboardHTML(): string {
         display: grid;
         gap: 10px;
         padding: 12px 14px;
+        min-width: 0;
       }
       section[data-region="episodes"] tbody tr {
-        display: flex;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        display: grid;
+        grid-template-columns: minmax(0, max-content) max-content max-content minmax(0, 1fr);
         align-items: center;
-        flex-wrap: wrap;
         gap: 8px;
         border: 1px solid var(--line);
         border-radius: 6px;
         background: #ffffff;
         padding: 12px;
+        overflow: hidden;
       }
       section[data-region="episodes"] tbody td {
         display: inline-flex;
@@ -930,6 +952,8 @@ function dashboardHTML(): string {
         color: var(--text);
         font-size: 12px;
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       section[data-region="episodes"] tbody td::before {
         content: attr(data-label);
@@ -949,23 +973,38 @@ function dashboardHTML(): string {
         content: none;
       }
       section[data-region="episodes"] .episode-title-cell {
-        flex: 1 0 100%;
+        grid-column: 1 / -1;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
         display: block;
         padding: 0;
         background: transparent;
       }
       section[data-region="episodes"] .episode-title-link {
+        width: 100%;
         max-width: 100%;
         font-size: 14px;
       }
+      section[data-region="episodes"] .episode-published-cell {
+        grid-column: 1;
+        max-width: 100%;
+      }
+      section[data-region="episodes"] .episode-duration-cell {
+        grid-column: 2;
+      }
+      section[data-region="episodes"] .episode-size-cell {
+        grid-column: 3;
+      }
       section[data-region="episodes"] .episode-status-cell {
+        grid-column: 1;
         padding: 0;
         background: transparent;
       }
       section[data-region="episodes"] .actions-cell {
-        flex: 1 0 100%;
+        grid-column: 2 / -1;
         justify-content: flex-start;
-        padding: 2px 0 0;
+        padding: 0;
         background: transparent;
       }
       section[data-region="episodes"] .actions-cell .actions {
@@ -1258,7 +1297,12 @@ function dashboardHTML(): string {
       <section class="modal large" data-region="episodes" aria-labelledby="episodes-title">
         <header>
           <div>
-            <h2 id="episodes-title">剧集列表</h2>
+            <div class="modal-title-row">
+              <h2 id="episodes-title">剧集列表</h2>
+              <button id="refresh-episodes" class="icon-button refresh" type="button" aria-label="刷新剧集" data-tooltip="刷新剧集">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+              </button>
+            </div>
             <div id="episodes-subtitle" class="modal-subtitle">选择订阅源后查看剧集</div>
           </div>
           <button id="episodes-close" class="ghost" type="button" aria-label="关闭">关闭</button>
@@ -1286,7 +1330,6 @@ function dashboardHTML(): string {
               </div>
             </div>
           </div>
-          <div class="toolbar-right"><button id="refresh-episodes" type="button">刷新剧集</button></div>
         </div>
         <div class="modal-body">
           <div class="table-wrap">
