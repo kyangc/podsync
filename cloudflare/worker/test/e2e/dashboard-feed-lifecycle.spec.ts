@@ -30,7 +30,7 @@ test.describe("dashboard feed lifecycle", () => {
 
     const feedUrl = await publicFeedUrl(request, server.url);
     await seedEpisode(request, server.url);
-    await feedRow(page).getByRole("button", { name: "查看剧集" }).click();
+    await feedRow(page).getByRole("button", { name: "查看" }).click();
     await expect(page.locator("#episodes-modal")).toBeVisible();
     await expect(page.getByText("UI E2E Episode")).toBeVisible();
     await page.locator("#episodes-footer-close").click();

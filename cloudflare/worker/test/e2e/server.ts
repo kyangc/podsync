@@ -12,7 +12,12 @@ export interface E2EServer {
   close(): Promise<void>;
 }
 
-export async function startE2EServer(): Promise<E2EServer> {
+export interface E2EServerOptions {
+  adminToken?: string | undefined;
+  injectAccessHeader?: boolean | undefined;
+}
+
+export async function startE2EServer(options: E2EServerOptions = {}): Promise<E2EServer> {
   const opmlTokenHash = await sha256Hex("e2e-opml");
   const env: Env = {
     DB: fakeD1({
@@ -26,9 +31,10 @@ export async function startE2EServer(): Promise<E2EServer> {
     MEDIA_PUBLIC_BASE_URL: "https://media.example.com",
     NAS_TOKEN: nasToken,
   };
+  if (options.adminToken !== undefined) env.ADMIN_TOKEN = options.adminToken;
 
   const server = createServer((request, response) => {
-    handleRequest(request, response, env).catch((error: unknown) => {
+    handleRequest(request, response, env, options).catch((error: unknown) => {
       response.statusCode = 500;
       response.end(error instanceof Error ? error.stack : String(error));
     });
@@ -41,7 +47,12 @@ export async function startE2EServer(): Promise<E2EServer> {
   };
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, env: Env): Promise<void> {
+async function handleRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  env: Env,
+  options: E2EServerOptions,
+): Promise<void> {
   const origin = `http://${request.headers.host}`;
   const url = new URL(request.url ?? "/", origin);
 
@@ -65,6 +76,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
     const body = await readJSON(request);
     const seed = await worker.fetch(nasJSONRequest(origin, "/api/nas/events/batch", eventBatchBody(body)), env);
+    await forwardResponse(seed, response);
+    return;
+  }
+
+  if (url.pathname === "/__test/seed-feed-metadata") {
+    if (request.method !== "POST") {
+      response.statusCode = 405;
+      response.end("method not allowed");
+      return;
+    }
+    const body = await readJSON(request);
+    const seed = await worker.fetch(nasJSONRequest(origin, "/api/nas/feed-metadata/upsert", feedMetadataBody(body)), env);
     await forwardResponse(seed, response);
     return;
   }
@@ -94,7 +117,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       headers.set(key, value);
     }
   }
-  headers.set("cf-access-jwt-assertion", "present");
+  if (options.injectAccessHeader !== false) headers.set("cf-access-jwt-assertion", "present");
 
   const workerRequestInit: RequestInit = {
     method: request.method ?? "GET",
@@ -177,6 +200,25 @@ function eventBatchBody(overrides: Record<string, unknown>) {
         message: "Remote failed",
       },
     ],
+  };
+}
+
+function feedMetadataBody(overrides: Record<string, unknown>) {
+  return {
+    feed_id: "ui-e2e-feed",
+    provider: "youtube",
+    source_url: "https://www.youtube.com/channel/UCrLtQJG-ZNJeU08N0SNIJzw",
+    title: "UI E2E Feed",
+    description: "Feed metadata from browser e2e",
+    image_url: "https://img.example.com/ui-e2e-feed.jpg",
+    link: "https://www.youtube.com/channel/UCrLtQJG-ZNJeU08N0SNIJzw",
+    author: "UI E2E",
+    category: "Technology",
+    language: "en",
+    explicit: false,
+    last_source_update_at: "2026-07-08T12:00:00Z",
+    reported_at: "2026-07-08T12:05:00Z",
+    ...overrides,
   };
 }
 

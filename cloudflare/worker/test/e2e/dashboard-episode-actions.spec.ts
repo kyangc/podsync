@@ -19,7 +19,7 @@ test.describe("dashboard episode actions", () => {
     await expectRssContains(request, feedUrl, "Episode Actions Target");
 
     await page.goto(`${server.url}/dashboard/`);
-    await feedRow(page).getByRole("button", { name: "查看剧集" }).click();
+    await feedRow(page).getByRole("button", { name: "查看" }).click();
     await expect(page.locator("#episodes-modal")).toBeVisible();
     await expect(episodeRow(page)).toBeVisible();
     await expect(episodeStatus(page, "已发布")).toBeVisible();

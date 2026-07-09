@@ -29,7 +29,7 @@ test.describe("dashboard online smoke", () => {
     await page.locator("#feed-details-modal").click({ position: { x: 8, y: 8 } });
     await expect(page.locator("#feed-details-modal")).toBeHidden();
 
-    await firstRow.getByRole("button", { name: "查看剧集" }).click();
+    await firstRow.getByRole("button", { name: "查看" }).click();
     await expect(page.locator("#episodes-modal")).toBeVisible();
     await expect(page.locator("#episodes-title")).toHaveText("剧集列表");
     await page.locator("#episodes-modal").click({ position: { x: 8, y: 8 } });

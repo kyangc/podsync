@@ -64,6 +64,7 @@ test.describe("dashboard interactions", () => {
 
     await page.goto(`${server.url}/dashboard/`);
     await expect(firstFeedTitle(page)).toHaveText("Zed Bili");
+    await expect(feedRow(page, "Zed Bili").locator(".episodes-cell").getByRole("button", { name: "查看(1)", exact: true })).toBeVisible();
 
     await selectCustomOption(page, "provider-filter", "B 站");
     await expect(feedRow(page, "Zed Bili")).toBeVisible();
@@ -122,7 +123,7 @@ test.describe("dashboard interactions", () => {
     await expect(row.locator(".mobile-feed-meta").getByText("YouTube")).toBeVisible();
     await expect(row.locator(".mobile-feed-meta").getByText("已启用")).toBeVisible();
 
-    await row.locator(".actions-cell").getByRole("button", { name: "查看剧集" }).click();
+    await row.locator(".actions-cell").getByRole("button", { name: "查看" }).click();
     await expect(page.locator("#episodes-modal")).toBeVisible();
     await expect(page.getByText("Mobile Episode")).toBeVisible();
 

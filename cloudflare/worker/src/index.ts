@@ -2265,7 +2265,8 @@ function dashboardHTML(): string {
           appendCell(row, el("span", providerPillClass(feed.provider), provider), "provider-cell", "平台");
           appendCell(row, el("span", "pill " + status.className, status.label), "status-cell", "状态");
           appendCell(row, lastUpdated, "activity-cell", "最近更新");
-          var episodes = el("button", "small", "查看剧集");
+          var episodeLabel = "查看(" + Number(feed.episode_count || 0) + ")";
+          var episodes = el("button", "small", episodeLabel);
           episodes.type = "button";
           episodes.addEventListener("click", function () { openEpisodesModal(feed.feed_id); });
           appendCell(row, episodes, "episodes-cell", "剧集");
@@ -2276,7 +2277,7 @@ function dashboardHTML(): string {
           copy.addEventListener("click", function () { copyText(feed.public_feed_url); });
           appendCell(row, copy, "subscription-cell", "订阅");
           var actions = el("div", "actions");
-          var mobileEpisodes = iconButton("list mobile-only", "查看剧集", "list");
+          var mobileEpisodes = iconButton("list mobile-only", episodeLabel, "list");
           mobileEpisodes.disabled = state.busy;
           mobileEpisodes.addEventListener("click", function () { openEpisodesModal(feed.feed_id); });
           actions.appendChild(mobileEpisodes);
