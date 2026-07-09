@@ -77,6 +77,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     return;
   }
 
+  if (url.pathname === "/__test/tombstones") {
+    const tombstones = await worker.fetch(new Request(`${origin}/api/nas/tombstones${url.search}`, {
+      headers: { authorization: `Bearer ${nasToken}` },
+    }), env);
+    await forwardResponse(tombstones, response);
+    return;
+  }
+
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : await readBody(request);
   const headers = new Headers();
   for (const [key, value] of Object.entries(request.headers)) {

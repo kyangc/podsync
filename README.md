@@ -63,6 +63,7 @@ brew install yt-dlp ffmpeg go
 - [获取 Vimeo API token](./docs/how_to_get_vimeo_token.md)
 - [在 QNAP NAS 上运行 Podsync](./docs/how_to_setup_podsync_on_qnap_nas.md)
 - [在 Synology NAS 上运行 Podsync](./docs/how_to_setup_podsync_on_synology_nas.md)
+- [Dashboard E2E 测试](./docs/dashboard-e2e.md)
 
 ## Nightly 镜像
 
