@@ -21,8 +21,8 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/zackradisic/soundcloud-api v0.1.8
 	golang.org/x/oauth2 v0.36.0
-	golang.org/x/sync v0.21.0
-	google.golang.org/api v0.285.0
+	golang.org/x/sync v0.22.0
+	google.golang.org/api v0.287.1
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
@@ -43,7 +43,7 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.16 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.17 // indirect
 	github.com/googleapis/gax-go/v2 v2.22.0 // indirect
 	github.com/grafov/m3u8 v0.11.1 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
@@ -58,8 +58,8 @@ require (
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260610212136-7ab31c22f7ad // indirect
-	google.golang.org/grpc v1.81.1 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260630182238-925bb5da69e7 // indirect
+	google.golang.org/grpc v1.82.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
