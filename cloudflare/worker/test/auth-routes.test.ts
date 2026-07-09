@@ -181,9 +181,12 @@ describe("route auth boundaries", () => {
     expect(body).toContain("剧集列表");
     expect(body).toContain("运行日志");
     expect(body).not.toContain("id=\"logs-close\"");
-    expect(body).toContain(".modal.logs { width: min(820px, 100%); }");
+    expect(body).toContain("--modal-available-width: calc(100vw - (var(--modal-gap) * 2));");
+    expect(body).toContain("body.modal-open { overflow: hidden; }");
+    expect(body).toContain(".modal.logs { width: min(820px, var(--modal-available-width)); }");
     expect(body).toContain(".modal.logs .table-wrap table { min-width: 760px; }");
     expect(body).toContain(".modal.logs th, .modal.logs td");
+    expect(body).toContain("class=\"modal-close\" type=\"button\" aria-label=\"关闭\">x</button>");
     expect(body).toContain("white-space: nowrap;");
     expect(body).toContain("<tr><th style=\"width: 22%\">时间</th><th style=\"width: 10%\">等级</th><th style=\"width: 24%\">来源</th><th style=\"width: 44%\">消息</th></tr>");
     expect(body).toContain("id=\"feed-details-modal\"");
@@ -206,7 +209,9 @@ describe("route auth boundaries", () => {
     expect(body).toContain("function setupCustomSelect");
     expect(body).toContain("function closeCustomSelects");
     expect(body).toContain("function closeModalFromBackdrop");
+    expect(body).toContain("function syncModalScrollLock");
     expect(body).toContain("if (event.target !== event.currentTarget) return;");
+    expect(body).toContain("document.body.classList.toggle(\"modal-open\", hasOpenModal)");
     expect(body).toContain("document.querySelectorAll(\".modal-backdrop\")");
     expect(body).toContain("backdrop.addEventListener(\"click\", closeModalFromBackdrop)");
     expect(body).toContain("/api/admin/feeds");

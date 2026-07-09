@@ -168,6 +168,9 @@ function dashboardHTML(): string {
       --ok: #16a34a;
       --disabled: #98a2b3;
       --shadow: 0 18px 45px rgba(16, 24, 40, 0.18);
+      --modal-gap: 24px;
+      --modal-available-width: calc(100vw - (var(--modal-gap) * 2));
+      --modal-available-height: calc(100dvh - (var(--modal-gap) * 2));
     }
     * { box-sizing: border-box; }
     body {
@@ -176,6 +179,7 @@ function dashboardHTML(): string {
       color: var(--text);
       font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
+    body.modal-open { overflow: hidden; }
     button, input, select, textarea { font: inherit; }
     button {
       border: 1px solid var(--line);
@@ -523,7 +527,7 @@ function dashboardHTML(): string {
     .feed-form-title strong { font-size: 18px; }
     .feed-form-title span { display: block; margin-top: 3px; color: var(--muted); font-size: 13px; }
     .feed-form .feed-form-title, .feed-form .modal-footer { flex: 0 0 auto; }
-    .feed-form .form-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+    .feed-form .form-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
     .modal-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 22px; border-top: 1px solid var(--line); background: var(--panel-soft); border-radius: 0 0 6px 6px; }
     .modal-footer-actions { display: flex; justify-content: flex-end; gap: 8px; }
     .table-wrap { overflow-x: auto; }
@@ -631,13 +635,15 @@ function dashboardHTML(): string {
       z-index: 40;
       display: grid;
       place-items: center;
-      padding: 24px;
+      padding: var(--modal-gap);
       background: rgba(52, 64, 84, 0.62);
+      overflow: hidden;
+      overscroll-behavior: contain;
     }
     .modal-backdrop[hidden] { display: none; }
     .modal {
-      width: min(640px, 100%);
-      max-height: min(780px, calc(100vh - 48px));
+      width: min(640px, var(--modal-available-width));
+      max-height: min(780px, var(--modal-available-height));
       display: flex;
       flex-direction: column;
       border: 1px solid var(--line-strong);
@@ -646,11 +652,31 @@ function dashboardHTML(): string {
       box-shadow: var(--shadow);
       overflow: hidden;
     }
-    .modal.large { width: min(920px, 100%); }
-    .modal.logs { width: min(820px, 100%); }
-    .modal.small { width: min(440px, 100%); }
+    .modal.large { width: min(920px, var(--modal-available-width)); }
+    .modal.logs { width: min(820px, var(--modal-available-width)); }
+    .modal.small { width: min(440px, var(--modal-available-width)); }
     .modal header, .modal-footer, .modal-toolbar { flex: 0 0 auto; }
-    .modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; background: #ffffff; }
+    .modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; background: #ffffff; overscroll-behavior: contain; }
+    .modal-close {
+      width: 30px;
+      height: 30px;
+      min-height: 30px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      border: 1px solid var(--line-strong);
+      background: #ffffff;
+      color: var(--muted-strong);
+      font-size: 18px;
+      line-height: 1;
+    }
+    .modal-close:hover:not(:disabled) {
+      border-color: var(--accent);
+      background: #eff6ff;
+      color: var(--accent);
+    }
     .modal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: var(--panel-soft); }
     .modal-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .modal-subtitle { color: var(--muted); font-size: 13px; margin-top: 3px; }
@@ -746,6 +772,15 @@ function dashboardHTML(): string {
       display: block;
       transform: translate(-50%, 0);
     }
+    .modal header .icon-button[data-tooltip]::after {
+      top: calc(100% + 7px);
+      bottom: auto;
+      transform: translate(-50%, -2px);
+    }
+    .modal header .icon-button[data-tooltip]:hover::after,
+    .modal header .icon-button[data-tooltip]:focus-visible::after {
+      transform: translate(-50%, 0);
+    }
     .icon-button svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .icon-button.play svg { fill: currentColor; stroke: none; }
     .icon-button.pause { color: #b45309; border-color: #fed7aa; background: #fff7ed; }
@@ -758,6 +793,7 @@ function dashboardHTML(): string {
     .icon-button.restore { color: #15803d; border-color: #bbf7d0; background: #ecfdf3; }
     .icon-button.delete { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
     @media (max-width: 980px) {
+      :root { --modal-gap: 18px; }
       main { padding: 0 14px 20px; }
       .topbar { align-items: center; flex-direction: row; margin: 0 -14px 14px; padding: 12px 14px; }
       .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -893,8 +929,8 @@ function dashboardHTML(): string {
         display: inline-grid;
       }
       section[data-region="episodes"].modal {
-        width: min(420px, calc(100vw - 28px));
-        max-height: calc(100vh - 42px);
+        width: min(420px, var(--modal-available-width));
+        max-height: var(--modal-available-height);
       }
       section[data-region="episodes"] header {
         align-items: flex-start;
@@ -1045,6 +1081,7 @@ function dashboardHTML(): string {
       }
     }
     @media (max-width: 360px) {
+      :root { --modal-gap: 10px; }
       section[data-region="feeds"] .feed-filter-bar {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       }
@@ -1147,7 +1184,7 @@ function dashboardHTML(): string {
             <strong id="feed-form-title">添加订阅源</strong>
             <span id="feed-form-subtitle">配置远端订阅源，下次 NAS 同步时生效</span>
           </div>
-          <button id="feed-form-close" class="ghost" type="button" aria-label="关闭">关闭</button>
+          <button id="feed-form-close" class="modal-close" type="button" aria-label="关闭">x</button>
         </div>
         <div class="form-grid">
           <div class="form-section">
@@ -1313,7 +1350,7 @@ function dashboardHTML(): string {
             <h2 id="feed-details-title">订阅源信息</h2>
             <div id="feed-details-subtitle" class="modal-subtitle">查看订阅源配置和发布状态</div>
           </div>
-          <button id="feed-details-close" class="ghost" type="button" aria-label="关闭">关闭</button>
+          <button id="feed-details-close" class="modal-close" type="button" aria-label="关闭">x</button>
         </header>
         <div id="feed-details-body" class="modal-body detail-body"></div>
         <footer class="modal-footer">
@@ -1335,7 +1372,7 @@ function dashboardHTML(): string {
             </div>
             <div id="episodes-subtitle" class="modal-subtitle">选择订阅源后查看剧集</div>
           </div>
-          <button id="episodes-close" class="ghost" type="button" aria-label="关闭">关闭</button>
+          <button id="episodes-close" class="modal-close" type="button" aria-label="关闭">x</button>
         </header>
         <div class="modal-toolbar">
           <div class="toolbar-left">
@@ -1442,7 +1479,7 @@ function dashboardHTML(): string {
       <section class="modal small" aria-labelledby="confirm-title">
         <header>
           <h2 id="confirm-title">确认操作</h2>
-          <button id="confirm-close" class="ghost" type="button" aria-label="关闭">关闭</button>
+          <button id="confirm-close" class="modal-close" type="button" aria-label="关闭">x</button>
         </header>
         <div class="modal-body" style="padding: 18px 22px;"><p id="confirm-message" class="muted" style="margin: 0;"></p></div>
         <footer class="modal-footer">
@@ -2001,6 +2038,7 @@ function dashboardHTML(): string {
         byID("feed-form-cancel").disabled = state.busy;
         byID("feed-danger-zone").hidden = !editing;
         syncCustomSelect("feed-provider");
+        syncModalScrollLock();
       }
 
       function openNewFeedForm() {
@@ -2535,6 +2573,14 @@ function dashboardHTML(): string {
         renderSubscriptions();
         renderRuns();
         renderEvents();
+        syncModalScrollLock();
+      }
+
+      function syncModalScrollLock() {
+        var hasOpenModal = Array.prototype.some.call(document.querySelectorAll(".modal-backdrop"), function (modal) {
+          return !modal.hidden;
+        });
+        document.body.classList.toggle("modal-open", hasOpenModal);
       }
 
       async function loadDashboard() {
@@ -2599,6 +2645,7 @@ function dashboardHTML(): string {
         byID("episode-search").value = "";
         syncCustomSelect("episode-status-filter");
         byID("episodes-modal").hidden = false;
+        syncModalScrollLock();
         selectFeed(feedID);
       }
 
@@ -2606,17 +2653,29 @@ function dashboardHTML(): string {
         state.detailsFeedID = feedID;
         state.feedDetailsOpen = true;
         renderFeedDetails();
+        syncModalScrollLock();
       }
 
       function closeFeedDetailsModal() {
         state.feedDetailsOpen = false;
         state.detailsFeedID = "";
         renderFeedDetails();
+        syncModalScrollLock();
       }
 
-      function closeEpisodesModal() { byID("episodes-modal").hidden = true; }
-      function openLogsModal() { byID("logs-modal").hidden = false; renderEvents(); }
-      function closeLogsModal() { byID("logs-modal").hidden = true; }
+      function closeEpisodesModal() {
+        byID("episodes-modal").hidden = true;
+        syncModalScrollLock();
+      }
+      function openLogsModal() {
+        byID("logs-modal").hidden = false;
+        renderEvents();
+        syncModalScrollLock();
+      }
+      function closeLogsModal() {
+        byID("logs-modal").hidden = true;
+        syncModalScrollLock();
+      }
 
       async function submitFeedForm(event) {
         event.preventDefault();
@@ -2736,11 +2795,13 @@ function dashboardHTML(): string {
         byID("confirm-ok").textContent = options.label || "确认";
         byID("confirm-ok").className = options.danger ? "danger" : "primary";
         byID("confirm-modal").hidden = false;
+        syncModalScrollLock();
       }
 
       function closeConfirmDialog() {
         state.confirmAction = null;
         byID("confirm-modal").hidden = true;
+        syncModalScrollLock();
       }
 
       function closeModalFromBackdrop(event) {

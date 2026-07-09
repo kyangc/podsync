@@ -59,6 +59,27 @@ test.describe("dashboard episode filtering", () => {
     await expectRssOmits(request, feedUrl, "Hidden Candidate Episode");
     await expectRssOmits(request, feedUrl, "Delete Candidate Episode");
   });
+
+  test("keeps episode modal inside narrow viewport with unclipped header tooltip", async ({ page, request }) => {
+    await page.setViewportSize({ width: 370, height: 890 });
+    await createFeed(request, server.url);
+    await seedEpisode(request, server.url, "mobile-video", "Mobile Episode Layout");
+
+    await page.goto(`${server.url}/dashboard/`);
+    await feedRow(page).getByRole("button", { name: "查看(1)" }).click();
+
+    await expect(page.locator("#episodes-modal")).toBeVisible();
+    await expect(page.locator("body")).toHaveClass(/modal-open/);
+    await expect(page.locator("#episodes-close")).toHaveText("x");
+    await expectModalInsideViewport(page, "#episodes-modal .modal", 10);
+
+    const tooltipPosition = await page.locator("#refresh-episodes").evaluate((element) => {
+      const style = window.getComputedStyle(element, "::after");
+      return { top: style.top, bottom: style.bottom };
+    });
+    expect(tooltipPosition.top).not.toBe("auto");
+    expect(tooltipPosition.bottom).toBe("auto");
+  });
 });
 
 function feedRow(page: Page) {
@@ -141,4 +162,13 @@ async function expectRssOmits(request: APIRequestContext, feedUrl: string, text:
   const response = await request.get(feedUrl);
   expect(response.status()).toBe(200);
   await expect(response.text()).resolves.not.toContain(text);
+}
+
+async function expectModalInsideViewport(page: Page, selector: string, minimumGap: number): Promise<void> {
+  const box = await page.locator(selector).boundingBox();
+  expect(box).not.toBeNull();
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(minimumGap);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width - minimumGap);
 }

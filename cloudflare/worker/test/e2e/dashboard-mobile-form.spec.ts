@@ -45,6 +45,17 @@ test.describe("dashboard mobile feed form", () => {
     await expect(feedRow(page, "Mobile Form Feed Edited")).toBeVisible();
     await expect(feedRow(page, "Mobile Form Feed")).toHaveCount(0);
   });
+
+  test("keeps feed modal inside narrow viewport and locks page scroll", async ({ page }) => {
+    await page.setViewportSize({ width: 370, height: 890 });
+    await page.goto(`${server.url}/dashboard/`);
+
+    await page.getByRole("button", { name: "添加订阅源" }).click();
+    await expect(page.locator("#feed-modal")).toBeVisible();
+    await expect(page.locator("body")).toHaveClass(/modal-open/);
+    await expect(page.locator("#feed-form-close")).toHaveText("x");
+    await expectModalInsideViewport(page, "#feed-form", 10);
+  });
 });
 
 function feedRow(page: Page, title: string) {
@@ -55,4 +66,13 @@ async function scrollFeedFormToBottom(page: Page): Promise<void> {
   await page.locator("#feed-form .form-grid").evaluate((element) => {
     element.scrollTop = element.scrollHeight;
   });
+}
+
+async function expectModalInsideViewport(page: Page, selector: string, minimumGap: number): Promise<void> {
+  const box = await page.locator(selector).boundingBox();
+  expect(box).not.toBeNull();
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(minimumGap);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width - minimumGap);
 }
