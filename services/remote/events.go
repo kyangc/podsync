@@ -29,6 +29,7 @@ type EventRecorder struct {
 	mu                 sync.Mutex
 	runID              string
 	startedAt          time.Time
+	maxRunDuration     time.Duration
 	reporter           EventBatchReporter
 	now                func() time.Time
 	redactions         []string
@@ -42,12 +43,13 @@ type EventRecorder struct {
 }
 
 type EventRecorderConfig struct {
-	RunID      string
-	StartedAt  time.Time
-	Reporter   EventBatchReporter
-	Now        func() time.Time
-	Redactions []string
-	BatchSize  int
+	RunID          string
+	StartedAt      time.Time
+	Reporter       EventBatchReporter
+	Now            func() time.Time
+	Redactions     []string
+	BatchSize      int
+	MaxRunDuration time.Duration
 }
 
 func NewEventRecorder(cfg EventRecorderConfig) *EventRecorder {
@@ -64,21 +66,26 @@ func NewEventRecorder(cfg EventRecorderConfig) *EventRecorder {
 	}
 	runID := strings.TrimSpace(cfg.RunID)
 	if runID == "" {
-		runID = fmt.Sprintf("%s-%d", startedAt.UTC().Format("20060102T150405Z"), os.Getpid())
+		runID = defaultRemoteRunID(startedAt)
 	}
 	batchSize := cfg.BatchSize
 	if batchSize <= 0 || batchSize > defaultEventBatchSize {
 		batchSize = defaultEventBatchSize
 	}
 	return &EventRecorder{
-		runID:        runID,
-		startedAt:    startedAt.UTC(),
-		reporter:     cfg.Reporter,
-		now:          now,
-		redactions:   cfg.Redactions,
-		nextSequence: 1,
-		batchSize:    batchSize,
+		runID:          runID,
+		startedAt:      startedAt.UTC(),
+		maxRunDuration: cfg.MaxRunDuration,
+		reporter:       cfg.Reporter,
+		now:            now,
+		redactions:     cfg.Redactions,
+		nextSequence:   1,
+		batchSize:      batchSize,
 	}
+}
+
+func defaultRemoteRunID(startedAt time.Time) string {
+	return fmt.Sprintf("%s-%d", startedAt.UTC().Format("20060102T150405Z"), os.Getpid())
 }
 
 func (r *EventRecorder) RecordRemoteEvent(event model.RemoteEventDraft) {
@@ -125,6 +132,17 @@ func (r *EventRecorder) Flush(ctx context.Context, status model.RemoteSyncRunSta
 	r.flushMu.Lock()
 	defer r.flushMu.Unlock()
 
+	if status == model.RemoteSyncRunRunning && r.shouldRotateRun() {
+		if err := r.flushCurrentRun(ctx, r.FinalStatus()); err != nil {
+			return err
+		}
+		r.startNewRun(r.now().UTC())
+		r.RecordRemoteEvent(model.RemoteEventDraft{Level: model.RemoteEventInfo, Type: model.RemoteEventSyncRunStarted})
+	}
+	return r.flushCurrentRun(ctx, status)
+}
+
+func (r *EventRecorder) flushCurrentRun(ctx context.Context, status model.RemoteSyncRunStatus) error {
 	final := status != model.RemoteSyncRunRunning
 	for {
 		batch, sequences, empty, err := r.nextBatch(status, final)
@@ -147,6 +165,28 @@ func (r *EventRecorder) Flush(ctx context.Context, status model.RemoteSyncRunSta
 			return nil
 		}
 	}
+}
+
+func (r *EventRecorder) shouldRotateRun() bool {
+	if r.maxRunDuration <= 0 {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !r.startedAt.IsZero() && !r.now().UTC().Before(r.startedAt.Add(r.maxRunDuration))
+}
+
+func (r *EventRecorder) startNewRun(startedAt time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.runID = defaultRemoteRunID(startedAt)
+	r.startedAt = startedAt.UTC()
+	r.nextSequence = 1
+	r.pending = nil
+	r.feedsUpdated = 0
+	r.episodesDownloaded = 0
+	r.episodesUploaded = 0
+	r.errorsCount = 0
 }
 
 func (r *EventRecorder) FinalStatus() model.RemoteSyncRunStatus {

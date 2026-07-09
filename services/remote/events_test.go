@@ -195,6 +195,40 @@ func TestEventRecorderUsesRFC3339SecondResolution(t *testing.T) {
 	assert.Equal(t, "2026-07-06T12:00:05Z", *reporter.batches[1].Run.FinishedAt)
 }
 
+func TestEventRecorderRotatesRunningRunAfterMaxDuration(t *testing.T) {
+	reporter := &fakeEventReporter{}
+	now := fixedEventClock()
+	recorder := NewEventRecorder(EventRecorderConfig{
+		RunID:          "run-1",
+		StartedAt:      now.Now(),
+		Reporter:       reporter,
+		Now:            now.Now,
+		MaxRunDuration: time.Hour,
+	})
+
+	recorder.RecordRemoteEvent(model.RemoteEventDraft{Type: model.RemoteEventFeedUpdateFinished})
+	require.NoError(t, recorder.Flush(context.Background(), model.RemoteSyncRunRunning))
+
+	now.Advance(time.Hour)
+	recorder.RecordRemoteEvent(model.RemoteEventDraft{Level: model.RemoteEventError, Type: model.RemoteEventDownloadFailed, ErrorDetail: "network failed"})
+	require.NoError(t, recorder.Flush(context.Background(), model.RemoteSyncRunRunning))
+
+	require.Len(t, reporter.batches, 3)
+	assert.Equal(t, "run-1", reporter.batches[0].Run.ID)
+	assert.Equal(t, model.RemoteSyncRunRunning, reporter.batches[0].Run.Status)
+	assert.Equal(t, 1, reporter.batches[0].Run.FeedsUpdated)
+	assert.Equal(t, "run-1", reporter.batches[1].Run.ID)
+	assert.Equal(t, model.RemoteSyncRunPartial, reporter.batches[1].Run.Status)
+	require.NotNil(t, reporter.batches[1].Run.FinishedAt)
+	assert.Equal(t, 1, reporter.batches[1].Run.ErrorsCount)
+	assert.NotEqual(t, "run-1", reporter.batches[2].Run.ID)
+	assert.Equal(t, model.RemoteSyncRunRunning, reporter.batches[2].Run.Status)
+	assert.Equal(t, 0, reporter.batches[2].Run.ErrorsCount)
+	require.Len(t, reporter.batches[2].Events, 1)
+	assert.Equal(t, 1, reporter.batches[2].Events[0].Sequence)
+	assert.Equal(t, model.RemoteEventSyncRunStarted, reporter.batches[2].Events[0].Type)
+}
+
 func TestNilEventRecorderIsNoop(t *testing.T) {
 	var recorder *EventRecorder
 

@@ -12,7 +12,10 @@ import (
 	remotepublish "github.com/mxpv/podsync/services/remote"
 )
 
-const defaultRemoteEventInterval = time.Minute
+const (
+	defaultRemoteEventInterval    = time.Minute
+	defaultRemoteEventRunDuration = time.Hour
+)
 
 type remoteEventRecorder interface {
 	remotepublish.EventSink
@@ -41,10 +44,11 @@ func buildRemoteEventRecorder(cfg *Config, newReporter remoteEventReporterFactor
 	started := time.Now().UTC()
 	runID := fmt.Sprintf("%s-%d", started.Format("20060102T150405Z"), os.Getpid())
 	return remotepublish.NewEventRecorder(remotepublish.EventRecorderConfig{
-		RunID:      runID,
-		StartedAt:  started,
-		Reporter:   reporter,
-		Redactions: collectRemoteEventRedactions(cfg),
+		RunID:          runID,
+		StartedAt:      started,
+		Reporter:       reporter,
+		Redactions:     collectRemoteEventRedactions(cfg),
+		MaxRunDuration: defaultRemoteEventRunDuration,
 	}), nil
 }
 
