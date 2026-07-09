@@ -14,6 +14,7 @@ function publicFeed(overrides: Partial<PublicFeedRow> = {}): PublicFeedRow {
     page_size: 25,
     title: "Bilibili Feed",
     description: "A feed",
+    image_url: null,
     link: "https://space.bilibili.com/10835521",
     deleted_at: null,
     ...overrides,
@@ -88,6 +89,30 @@ describe("public feed contracts", () => {
     expect(body).toContain("<channel>");
     expect(body).toContain("<title>Bilibili Feed</title>");
     expect(body).not.toContain("<item>");
+  });
+
+  it("renders channel artwork from feed metadata", async () => {
+    const tokenHash = await sha256Hex("feed-secret");
+    const response = await worker.fetch(
+      new Request("https://podcast.example.com/f/feed-secret.xml"),
+      {
+        DB: fakeD1({
+          publicFeedsByHash: new Map([
+            [tokenHash, publicFeed({
+              image_url: "https://img.example.com/cover.jpg?x=1&size=large",
+            })],
+          ]),
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain("<image>");
+    expect(body).toContain("<url>https://img.example.com/cover.jpg?x=1&amp;size=large</url>");
+    expect(body).toContain("<title>Bilibili Feed</title>");
+    expect(body).toContain("<link>https://space.bilibili.com/10835521</link>");
+    expect(body).toContain('<itunes:image href="https://img.example.com/cover.jpg?x=1&amp;size=large"></itunes:image>');
   });
 
   it("renders visible episodes with enclosures", async () => {

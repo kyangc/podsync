@@ -256,6 +256,8 @@ describe("NAS feed metadata upsert API", () => {
     expect(rssBody).toContain("<title>Reported Title</title>");
     expect(rssBody).toContain("<description>Reported description</description>");
     expect(rssBody).toContain("<link>https://example.com/reported</link>");
+    expect(rssBody).toContain("<url>https://example.com/cover.jpg</url>");
+    expect(rssBody).toContain('<itunes:image href="https://example.com/cover.jpg"></itunes:image>');
 
     const admin = await worker.fetch(
       new Request("https://podcast.example.com/api/admin/feeds", {

@@ -4646,7 +4646,7 @@ async function handleFeedXml(pathname: string, request: Request, env: Env): Prom
   const tokenHash = await sha256Hex(token);
   const feed = await env.DB.prepare(
     `SELECT f.feed_id, f.provider, f.url, f.title_override, f.description_override, f.page_size,
-            f.deleted_at, m.title, m.description, m.link
+            f.deleted_at, m.title, m.description, m.image_url, m.link
        FROM feeds f
        LEFT JOIN feed_metadata m ON m.feed_id = f.feed_id
       WHERE f.feed_token_hash = ?`,
@@ -4670,9 +4670,10 @@ async function handleFeedXml(pathname: string, request: Request, env: Env): Prom
   try {
     return text(
       renderRss({
-      title: feed.title ?? feed.title_override ?? feed.feed_id,
-      link: feed.link ?? feed.url ?? new URL(request.url).origin,
-      description: feed.description ?? feed.description_override ?? "Podsync feed",
+        title: feed.title ?? feed.title_override ?? feed.feed_id,
+        link: feed.link ?? feed.url ?? new URL(request.url).origin,
+        description: feed.description ?? feed.description_override ?? "Podsync feed",
+        imageURL: feed.image_url,
       }, episodes, { mediaBaseURL: episodes.length > 0 ? env.MEDIA_PUBLIC_BASE_URL : undefined }),
       200,
       "application/rss+xml; charset=utf-8",

@@ -57,6 +57,7 @@ function publicFeed(overrides: Partial<PublicFeedRow> = {}): PublicFeedRow {
     page_size: 25,
     title: "Feed",
     description: "Description",
+    image_url: null,
     link: "https://www.youtube.com/channel/channel",
     ...overrides,
   };

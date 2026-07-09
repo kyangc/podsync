@@ -45,6 +45,7 @@ export interface PublicFeedRow {
   page_size: number;
   title: string | null;
   description: string | null;
+  image_url: string | null;
   link: string | null;
   deleted_at?: string | null;
 }

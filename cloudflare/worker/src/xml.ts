@@ -23,6 +23,7 @@ export interface ChannelMetadata {
   title: string;
   link: string;
   description: string;
+  imageURL?: string | null;
 }
 
 export interface RssEpisode {
@@ -113,6 +114,14 @@ function renderEpisodeItem(episode: RssEpisode, options: RenderRssOptions): stri
 export function renderRss(metadata: ChannelMetadata, episodes: RssEpisode[], options: RenderRssOptions = {}): string {
   const now = new Date().toUTCString();
   const items = episodes.map((episode) => renderEpisodeItem(episode, options)).join("\n");
+  const imageURL = metadata.imageURL?.trim();
+  const image = imageURL ? `    <image>
+      <url>${escapeXml(imageURL)}</url>
+      <title>${escapeXml(metadata.title)}</title>
+      <link>${escapeXml(metadata.link)}</link>
+    </image>
+    <itunes:image href="${escapeXml(imageURL)}"></itunes:image>
+` : "";
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
   <channel>
@@ -121,7 +130,7 @@ export function renderRss(metadata: ChannelMetadata, episodes: RssEpisode[], opt
     <description>${escapeXml(metadata.description)}</description>
     <lastBuildDate>${escapeXml(now)}</lastBuildDate>
     <generator>podsync-cf</generator>
-${items ? `${items}\n` : ""}  </channel>
+${image}${items ? `${items}\n` : ""}  </channel>
 </rss>
 `;
 }

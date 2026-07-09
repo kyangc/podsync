@@ -970,6 +970,7 @@ function publicFeedRow(feed: FakeReadableFeed): PublicFeedRow {
     page_size: feed.page_size,
     title: feed.metadata_title,
     description: feed.metadata_description,
+    image_url: feed.metadata_image_url,
     link: feed.metadata_link,
     deleted_at: feed.deleted_at,
   };
