@@ -42,11 +42,16 @@ export interface PublicFeedRow {
   url: string;
   title_override: string | null;
   description_override: string | null;
+  private_feed: number;
   page_size: number;
   title: string | null;
   description: string | null;
   image_url: string | null;
   link: string | null;
+  author: string | null;
+  category: string | null;
+  language: string | null;
+  explicit: number | null;
   deleted_at?: string | null;
 }
 
@@ -313,6 +318,7 @@ export interface EpisodeStatusRow {
 export interface PublicEpisodeRow {
   local_episode_id: string;
   source_url: string | null;
+  thumbnail: string | null;
   title: string | null;
   description: string | null;
   published_at: string | null;

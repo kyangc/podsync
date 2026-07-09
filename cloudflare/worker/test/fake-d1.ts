@@ -117,6 +117,10 @@ interface FakeReadableFeed {
   metadata_description: string | null;
   metadata_image_url: string | null;
   metadata_link: string | null;
+  metadata_author: string | null;
+  metadata_category: string | null;
+  metadata_language: string | null;
+  metadata_explicit: number | null;
   metadata_last_source_update_at: string | null;
   metadata_reported_at: string | null;
   latest_episode_published_at: string | null;
@@ -950,6 +954,7 @@ function publicEpisodeRow(episode: FakeEpisodeRow): PublicEpisodeRow {
   return {
     local_episode_id: episode.local_episode_id,
     source_url: episode.source_url,
+    thumbnail: episode.thumbnail,
     title: episode.title,
     description: episode.description,
     published_at: episode.published_at,
@@ -967,11 +972,16 @@ function publicFeedRow(feed: FakeReadableFeed): PublicFeedRow {
     url: feed.url,
     title_override: feed.title_override,
     description_override: feed.description_override,
+    private_feed: feed.private_feed,
     page_size: feed.page_size,
     title: feed.metadata_title,
     description: feed.metadata_description,
     image_url: feed.metadata_image_url,
     link: feed.metadata_link,
+    author: feed.metadata_author,
+    category: feed.metadata_category,
+    language: feed.metadata_language,
+    explicit: feed.metadata_explicit,
     deleted_at: feed.deleted_at,
   };
 }
@@ -1019,6 +1029,10 @@ function fakeReadableFeedFromToml(feed: FeedTomlRow, options: FakeD1Options): Fa
     metadata_description: metadata?.description ?? extras.metadata_description ?? null,
     metadata_image_url: metadata?.image_url ?? null,
     metadata_link: metadata?.link ?? null,
+    metadata_author: metadata?.author ?? null,
+    metadata_category: metadata?.category ?? null,
+    metadata_language: metadata?.language ?? null,
+    metadata_explicit: metadata?.explicit ?? null,
     metadata_last_source_update_at: metadata?.last_source_update_at ?? null,
     metadata_reported_at: metadata?.reported_at ?? null,
     latest_episode_published_at: latestEpisodePublishedAt(options, feed.feed_id),
@@ -1057,6 +1071,10 @@ function fakeReadableFeedFromPartial(feed: FakeFeedRow, options: FakeD1Options):
     metadata_description: metadata?.description ?? feed.metadata_description ?? null,
     metadata_image_url: metadata?.image_url ?? null,
     metadata_link: metadata?.link ?? null,
+    metadata_author: metadata?.author ?? null,
+    metadata_category: metadata?.category ?? null,
+    metadata_language: metadata?.language ?? null,
+    metadata_explicit: metadata?.explicit ?? null,
     metadata_last_source_update_at: metadata?.last_source_update_at ?? null,
     metadata_reported_at: metadata?.reported_at ?? null,
     latest_episode_published_at: latestEpisodePublishedAt(options, feed.feed_id),

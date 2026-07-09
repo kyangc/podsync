@@ -24,11 +24,17 @@ export interface ChannelMetadata {
   link: string;
   description: string;
   imageURL?: string | null;
+  author?: string | null;
+  category?: string | null;
+  language?: string | null;
+  explicit?: boolean | null;
+  privateFeed?: boolean | null;
 }
 
 export interface RssEpisode {
   local_episode_id: string;
   source_url: string | null;
+  thumbnail: string | null;
   title: string | null;
   description: string | null;
   published_at: string | null;
@@ -40,6 +46,8 @@ export interface RssEpisode {
 
 export interface RenderRssOptions {
   mediaBaseURL?: string | undefined;
+  author?: string | undefined;
+  explicit?: boolean | undefined;
 }
 
 function parseMediaBaseURL(mediaBaseURL: string | undefined): URL {
@@ -84,16 +92,33 @@ function episodeMediaURL(mediaBaseURL: string | undefined, r2Key: string): strin
   return new URL(encodeR2Key(r2Key), parseMediaBaseURL(mediaBaseURL)).toString();
 }
 
-function renderEpisodeItem(episode: RssEpisode, options: RenderRssOptions): string {
+function formatItunesDuration(seconds: number): string {
+  const duration = Math.floor(seconds);
+  const hours = Math.floor(duration / 3600);
+  const minutes = Math.floor((duration % 3600) / 60);
+  const remainingSeconds = duration % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+  }
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function renderEpisodeItem(episode: RssEpisode, options: RenderRssOptions, index: number): string {
   const title = episode.title ?? episode.local_episode_id;
   const description = episode.description ?? "";
   const pubDate = episode.published_at ? new Date(episode.published_at) : null;
+  const author = options.author?.trim();
   const lines = [
     "    <item>",
     `      <title>${escapeXml(title)}</title>`,
     `      <description>${escapeXml(description)}</description>`,
   ];
 
+  if (author) {
+    lines.push(`      <itunes:author>${escapeXml(author)}</itunes:author>`);
+  }
+  lines.push(`      <itunes:subtitle>${escapeXml(title)}</itunes:subtitle>`);
+  lines.push(`      <itunes:summary>${escapeXml(description)}</itunes:summary>`);
   if (episode.source_url) {
     lines.push(`      <link>${escapeXml(episode.source_url)}</link>`);
   }
@@ -104,16 +129,25 @@ function renderEpisodeItem(episode: RssEpisode, options: RenderRssOptions): stri
   lines.push(
     `      <enclosure url="${escapeXml(episodeMediaURL(options.mediaBaseURL, episode.r2_key))}" length="${escapeXml(String(episode.size))}" type="${escapeXml(episode.mime_type)}" />`,
   );
-  if (episode.duration !== null && episode.duration > 0) {
-    lines.push(`      <itunes:duration>${escapeXml(String(Math.floor(episode.duration)))}</itunes:duration>`);
+  const thumbnail = episode.thumbnail?.trim();
+  if (thumbnail) {
+    lines.push(`      <itunes:image href="${escapeXml(thumbnail)}"></itunes:image>`);
   }
+  if (episode.duration !== null && episode.duration > 0) {
+    lines.push(`      <itunes:duration>${escapeXml(formatItunesDuration(episode.duration))}</itunes:duration>`);
+  }
+  lines.push(`      <itunes:explicit>${options.explicit ? "true" : "false"}</itunes:explicit>`);
+  lines.push(`      <itunes:order>${escapeXml(String(index + 1))}</itunes:order>`);
   lines.push("    </item>");
   return lines.join("\n");
 }
 
 export function renderRss(metadata: ChannelMetadata, episodes: RssEpisode[], options: RenderRssOptions = {}): string {
   const now = new Date().toUTCString();
-  const items = episodes.map((episode) => renderEpisodeItem(episode, options)).join("\n");
+  const author = metadata.author?.trim() || metadata.title;
+  const category = metadata.category?.trim() || "TV & Film";
+  const renderOptions = { ...options, author, explicit: metadata.explicit === true };
+  const items = episodes.map((episode, index) => renderEpisodeItem(episode, renderOptions, index)).join("\n");
   const imageURL = metadata.imageURL?.trim();
   const image = imageURL ? `    <image>
       <url>${escapeXml(imageURL)}</url>
@@ -122,13 +156,19 @@ export function renderRss(metadata: ChannelMetadata, episodes: RssEpisode[], opt
     </image>
     <itunes:image href="${escapeXml(imageURL)}"></itunes:image>
 ` : "";
+  const language = metadata.language?.trim();
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
   <channel>
     <title>${escapeXml(metadata.title)}</title>
     <link>${escapeXml(metadata.link)}</link>
     <description>${escapeXml(metadata.description)}</description>
-    <lastBuildDate>${escapeXml(now)}</lastBuildDate>
+    <itunes:author>${escapeXml(author)}</itunes:author>
+    <itunes:subtitle>${escapeXml(metadata.title)}</itunes:subtitle>
+    <itunes:summary>${escapeXml(metadata.description)}</itunes:summary>
+${metadata.privateFeed ? "    <itunes:block>yes</itunes:block>\n" : ""}    <itunes:explicit>${metadata.explicit ? "true" : "false"}</itunes:explicit>
+    <itunes:category text="${escapeXml(category)}"></itunes:category>
+${language ? `    <language>${escapeXml(language)}</language>\n` : ""}    <lastBuildDate>${escapeXml(now)}</lastBuildDate>
     <generator>podsync-cf</generator>
 ${image}${items ? `${items}\n` : ""}  </channel>
 </rss>

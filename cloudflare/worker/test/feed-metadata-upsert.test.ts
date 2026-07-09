@@ -227,10 +227,10 @@ describe("NAS feed metadata upsert API", () => {
         description: "Reported description",
         image_url: "https://example.com/cover.jpg",
         link: "https://example.com/reported",
-        author: null,
-        category: null,
-        language: null,
-        explicit: null,
+        author: "Reported Creator",
+        category: "Technology",
+        language: "zh-CN",
+        explicit: 0,
         last_source_update_at: null,
         reported_at: "2026-07-06T12:05:00Z",
       }],
@@ -258,6 +258,10 @@ describe("NAS feed metadata upsert API", () => {
     expect(rssBody).toContain("<link>https://example.com/reported</link>");
     expect(rssBody).toContain("<url>https://example.com/cover.jpg</url>");
     expect(rssBody).toContain('<itunes:image href="https://example.com/cover.jpg"></itunes:image>');
+    expect(rssBody).toContain("<itunes:author>Reported Creator</itunes:author>");
+    expect(rssBody).toContain('<itunes:category text="Technology"></itunes:category>');
+    expect(rssBody).toContain("<itunes:explicit>false</itunes:explicit>");
+    expect(rssBody).toContain("<language>zh-CN</language>");
 
     const admin = await worker.fetch(
       new Request("https://podcast.example.com/api/admin/feeds", {

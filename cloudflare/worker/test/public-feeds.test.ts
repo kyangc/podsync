@@ -11,11 +11,16 @@ function publicFeed(overrides: Partial<PublicFeedRow> = {}): PublicFeedRow {
     url: "https://space.bilibili.com/10835521",
     title_override: null,
     description_override: null,
+    private_feed: 1,
     page_size: 25,
     title: "Bilibili Feed",
     description: "A feed",
     image_url: null,
     link: "https://space.bilibili.com/10835521",
+    author: null,
+    category: null,
+    language: null,
+    explicit: null,
     deleted_at: null,
     ...overrides,
   };
@@ -115,10 +120,48 @@ describe("public feed contracts", () => {
     expect(body).toContain('<itunes:image href="https://img.example.com/cover.jpg?x=1&amp;size=large"></itunes:image>');
   });
 
+  it("renders channel iTunes metadata from feed metadata", async () => {
+    const tokenHash = await sha256Hex("feed-secret");
+    const response = await worker.fetch(
+      new Request("https://podcast.example.com/f/feed-secret.xml"),
+      {
+        DB: fakeD1({
+          publicFeedsByHash: new Map([
+            [tokenHash, publicFeed({
+              private_feed: 1,
+              author: "Creator & Host",
+              category: "TV & Film",
+              language: "zh-CN",
+              explicit: 0,
+            })],
+          ]),
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain("<itunes:author>Creator &amp; Host</itunes:author>");
+    expect(body).toContain("<itunes:subtitle>Bilibili Feed</itunes:subtitle>");
+    expect(body).toContain("<itunes:summary>A feed</itunes:summary>");
+    expect(body).toContain("<itunes:block>yes</itunes:block>");
+    expect(body).toContain("<itunes:explicit>false</itunes:explicit>");
+    expect(body).toContain('<itunes:category text="TV &amp; Film"></itunes:category>');
+    expect(body).toContain("<language>zh-CN</language>");
+  });
+
   it("renders visible episodes with enclosures", async () => {
     const tokenHash = await sha256Hex("feed-secret");
     const episodesByKey = new Map([
-      [fakeEpisodeKey("bili", "BV1"), visibleEpisode()],
+      [
+        fakeEpisodeKey("bili", "BV1"),
+        visibleEpisode({
+          title: "Episode & Title",
+          description: "Description <one>",
+          thumbnail: "https://img.example.com/video.jpg?x=1&size=large",
+          duration: 123,
+        }),
+      ],
     ]);
     const response = await worker.fetch(
       new Request("https://podcast.example.com/f/feed-secret.xml"),
@@ -142,7 +185,13 @@ describe("public feed contracts", () => {
     expect(body).toContain(
       '<enclosure url="https://media.example.com/base/audio/bili/episode%20%26%20one.mp3" length="456" type="audio/mpeg" />',
     );
-    expect(body).toContain("<itunes:duration>123</itunes:duration>");
+    expect(body).toContain("<itunes:author>Bilibili Feed</itunes:author>");
+    expect(body).toContain("<itunes:subtitle>Episode &amp; Title</itunes:subtitle>");
+    expect(body).toContain("<itunes:summary>Description &lt;one&gt;</itunes:summary>");
+    expect(body).toContain('<itunes:image href="https://img.example.com/video.jpg?x=1&amp;size=large"></itunes:image>');
+    expect(body).toContain("<itunes:duration>2:03</itunes:duration>");
+    expect(body).toContain("<itunes:explicit>false</itunes:explicit>");
+    expect(body).toContain("<itunes:order>1</itunes:order>");
   });
 
   it("preserves R2 key path separators while encoding path segments", async () => {
