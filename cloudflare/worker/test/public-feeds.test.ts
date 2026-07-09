@@ -150,6 +150,53 @@ describe("public feed contracts", () => {
     expect(body).toContain("<language>zh-CN</language>");
   });
 
+  it("uses feed title when reported author is not found", async () => {
+    const tokenHash = await sha256Hex("feed-secret");
+    const response = await worker.fetch(
+      new Request("https://podcast.example.com/f/feed-secret.xml"),
+      {
+        DB: fakeD1({
+          publicFeedsByHash: new Map([
+            [tokenHash, publicFeed({
+              author: "<notfound>",
+            })],
+          ]),
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain("<itunes:author>Bilibili Feed</itunes:author>");
+    expect(body).not.toContain("&lt;notfound&gt;");
+  });
+
+  it("uses feed title for episode authors when reported author is not found", async () => {
+    const tokenHash = await sha256Hex("feed-secret");
+    const episodesByKey = new Map([
+      [fakeEpisodeKey("bili", "BV1"), visibleEpisode()],
+    ]);
+    const response = await worker.fetch(
+      new Request("https://podcast.example.com/f/feed-secret.xml"),
+      {
+        DB: fakeD1({
+          publicFeedsByHash: new Map([
+            [tokenHash, publicFeed({
+              author: "<notfound>",
+            })],
+          ]),
+          episodesByKey,
+        }),
+        MEDIA_PUBLIC_BASE_URL: "https://media.example.com/base",
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain("<itunes:author>Bilibili Feed</itunes:author>");
+    expect(body).not.toContain("&lt;notfound&gt;");
+  });
+
   it("renders visible episodes with enclosures", async () => {
     const tokenHash = await sha256Hex("feed-secret");
     const episodesByKey = new Map([

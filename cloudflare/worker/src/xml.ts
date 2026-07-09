@@ -92,6 +92,12 @@ function episodeMediaURL(mediaBaseURL: string | undefined, r2Key: string): strin
   return new URL(encodeR2Key(r2Key), parseMediaBaseURL(mediaBaseURL)).toString();
 }
 
+function normalizeAuthor(author: string | null | undefined, fallback: string): string {
+  const normalized = author?.trim();
+  if (!normalized || normalized === "<notfound>") return fallback;
+  return normalized;
+}
+
 function formatItunesDuration(seconds: number): string {
   const duration = Math.floor(seconds);
   const hours = Math.floor(duration / 3600);
@@ -144,7 +150,7 @@ function renderEpisodeItem(episode: RssEpisode, options: RenderRssOptions, index
 
 export function renderRss(metadata: ChannelMetadata, episodes: RssEpisode[], options: RenderRssOptions = {}): string {
   const now = new Date().toUTCString();
-  const author = metadata.author?.trim() || metadata.title;
+  const author = normalizeAuthor(metadata.author, metadata.title);
   const category = metadata.category?.trim() || "TV & Film";
   const renderOptions = { ...options, author, explicit: metadata.explicit === true };
   const items = episodes.map((episode, index) => renderEpisodeItem(episode, renderOptions, index)).join("\n");
