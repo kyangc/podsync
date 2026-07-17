@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
-import worker from "../src/index";
+import deployedWorker from "../src/index";
 import { sha256Hex } from "../src/tokens";
+import { accessAssertion, accessEnv } from "./access";
 import { fakeD1, type FakeFeedMetadataRow } from "./fake-d1";
 
 const token = "secret-token";
+const worker = {
+  ...deployedWorker,
+  fetch: (request: Request, env: Parameters<typeof deployedWorker.fetch>[1]) =>
+    deployedWorker.fetch(request, { ...accessEnv, ...env }),
+};
 
 function request(body: unknown, init: RequestInit = {}): Request {
   const { headers, ...rest } = init;
@@ -265,7 +271,7 @@ describe("NAS feed metadata upsert API", () => {
 
     const admin = await worker.fetch(
       new Request("https://podcast.example.com/api/admin/feeds", {
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       env,
     );

@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
-import worker from "../src/index";
+import deployedWorker from "../src/index";
 import { sha256Hex } from "../src/tokens";
+import { accessAssertion, accessEnv } from "./access";
 import { fakeD1 } from "./fake-d1";
 
 const adminOrigin = "https://podcast.example.com";
 const nasToken = "secret";
+const worker = {
+  ...deployedWorker,
+  fetch: (request: Request, env: Parameters<typeof deployedWorker.fetch>[1]) =>
+    deployedWorker.fetch(request, { ...accessEnv, ...env }),
+};
 
 function adminRequest(path: string, body: unknown): Request {
   return new Request(`${adminOrigin}${path}`, {
     method: "POST",
     headers: {
-      "cf-access-jwt-assertion": "present",
+      "cf-access-jwt-assertion": accessAssertion,
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
@@ -19,7 +25,7 @@ function adminRequest(path: string, body: unknown): Request {
 
 function adminGet(path: string): Request {
   return new Request(`${adminOrigin}${path}`, {
-    headers: { "cf-access-jwt-assertion": "present" },
+    headers: { "cf-access-jwt-assertion": accessAssertion },
   });
 }
 

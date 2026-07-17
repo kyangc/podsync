@@ -3,9 +3,17 @@ import type { AddressInfo } from "node:net";
 import worker from "../../src/index";
 import type { Env } from "../../src/env";
 import { sha256Hex } from "../../src/tokens";
+import { accessAssertion, accessEnv, accessJwks, accessJwksURL, requestURL } from "../access";
 import { fakeD1 } from "../fake-d1";
 
 const nasToken = "secret";
+const originalFetch = globalThis.fetch;
+
+globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const url = requestURL(input);
+  if (url === accessJwksURL) return Response.json(accessJwks);
+  return originalFetch(input, init);
+};
 
 export interface E2EServer {
   url: string;
@@ -13,13 +21,13 @@ export interface E2EServer {
 }
 
 export interface E2EServerOptions {
-  adminToken?: string | undefined;
   injectAccessHeader?: boolean | undefined;
 }
 
 export async function startE2EServer(options: E2EServerOptions = {}): Promise<E2EServer> {
   const opmlTokenHash = await sha256Hex("e2e-opml");
   const env: Env = {
+    ...accessEnv,
     DB: fakeD1({
       feedsByID: new Map(),
       episodesByKey: new Map(),
@@ -31,8 +39,6 @@ export async function startE2EServer(options: E2EServerOptions = {}): Promise<E2
     MEDIA_PUBLIC_BASE_URL: "https://media.example.com",
     NAS_TOKEN: nasToken,
   };
-  if (options.adminToken !== undefined) env.ADMIN_TOKEN = options.adminToken;
-
   const server = createServer((request, response) => {
     handleRequest(request, response, env, options).catch((error: unknown) => {
       response.statusCode = 500;
@@ -117,7 +123,7 @@ async function handleRequest(
       headers.set(key, value);
     }
   }
-  if (options.injectAccessHeader !== false) headers.set("cf-access-jwt-assertion", "present");
+  if (options.injectAccessHeader !== false) headers.set("cf-access-jwt-assertion", accessAssertion);
 
   const workerRequestInit: RequestInit = {
     method: request.method ?? "GET",

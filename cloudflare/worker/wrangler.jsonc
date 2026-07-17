@@ -13,7 +13,9 @@
     "crons": ["17 */6 * * *"]
   },
   "vars": {
-    "MEDIA_PUBLIC_BASE_URL": "https://pub-158db865a511464b9291bf7278abf15e.r2.dev"
+    "MEDIA_PUBLIC_BASE_URL": "https://pub-158db865a511464b9291bf7278abf15e.r2.dev",
+    "ACCESS_ISSUER": "https://kyangc.cloudflareaccess.com",
+    "ACCESS_AUD": "e24a501be5edaa0c6d6d4b915358823be8b4d76edbda1ad846338c9fb582867b"
   },
   "d1_databases": [
     {

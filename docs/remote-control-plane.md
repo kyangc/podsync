@@ -665,19 +665,36 @@ GET /opml/<opml_token>.xml
 
 ## 鉴权
 
-- Dashboard：优先使用 `ADMIN_TOKEN`。访问 `/dashboard/?token=<ADMIN_TOKEN>` 后写入 `HttpOnly` cookie，再跳转回干净的 `/dashboard/`。
-- Admin API：优先使用 `ADMIN_TOKEN`，支持 `Authorization: Bearer <ADMIN_TOKEN>` 或 dashboard cookie。只有未配置 `ADMIN_TOKEN` 时才退回 Cloudflare Access header。
+- Dashboard 和 Admin API：使用 Cloudflare Access。Worker 会验证 `Cf-Access-Jwt-Assertion` 的 RS256 签名、issuer、audience 和过期时间；仅有同名 header 不视为已登录。
+- 旧 `ADMIN_TOKEN` bearer、cookie 和 `?token=` 登录均不再支持；已通过 Access 的旧链接只会移除 `token` query，再跳转到干净 URL。
 - NAS API：单个全局 `NAS_TOKEN`，通过 `Authorization: Bearer`。
 - Public RSS/OPML：长随机 path token。
 - R2 audio：不可猜 object key + 公开媒体域名。
 
+Worker 的 Access 配置：
+
+```text
+ACCESS_ISSUER=https://<team-name>.cloudflareaccess.com
+ACCESS_AUD=<Application Audience AUD Tag>
+```
+
+Cloudflare Zero Trust 中只为网页管理面创建 self-hosted Access application，使用 One-time PIN 和完整邮箱 allowlist。应用 destinations：
+
+```text
+podsync.kyangc.net/dashboard
+podsync.kyangc.net/dashboard/*
+podsync.kyangc.net/api/admin
+podsync.kyangc.net/api/admin/*
+```
+
+不要为 `podsync.kyangc.net/*` 创建整站 Access 规则。
+
 路由边界：
 
 ```text
-/dashboard/*
+/dashboard*
 /api/admin/*
-  -> ADMIN_TOKEN bearer/cookie
-  -> fallback Cloudflare Access only when ADMIN_TOKEN is unset
+  -> verified Cloudflare Access JWT
 
 /api/nas/*
   -> Bearer NAS_TOKEN
@@ -690,7 +707,13 @@ GET /opml/<opml_token>.xml
   -> public object URL with unguessable key
 ```
 
-如果直接暴露 workers.dev，必须配置 `ADMIN_TOKEN`，否则客户端可伪造 Access header。Cloudflare Access 规则不能覆盖 public RSS/OPML，否则 podcast 客户端无法订阅。
+Cloudflare Access 规则不能覆盖 NAS API、public RSS/OPML、`/health` 或 R2 媒体地址，否则非浏览器客户端会被登录流程阻断。`workers.dev` 和 preview URL 不会经过自定义域名的 Access application，因此无法生成通过 Worker 验证的 Access JWT。
+
+上线验收：
+
+1. 验证 One-time PIN 登录后 dashboard 和 Admin API 正常。
+2. 验证 NAS 配置拉取、RSS、OPML、`/health` 和媒体地址保持正常。
+3. 确认 Worker secrets 中只有 `NAS_TOKEN`，旧 bearer、cookie 和 `?token=` 不再授权。
 
 ## 关键事件日志
 

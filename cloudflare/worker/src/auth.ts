@@ -1,8 +1,9 @@
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { Env } from "./env";
 import { sha256Hex } from "./tokens";
 
 const encoder = new TextEncoder();
-const adminCookieName = "podsync_admin_token";
+const accessJwksByIssuer = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
 async function timingSafeTokenEqual(actual: string, expected: string): Promise<boolean> {
   const [actualHash, expectedHash] = await Promise.all([sha256Hex(actual), sha256Hex(expected)]);
@@ -27,29 +28,33 @@ export async function isAuthorizedNasRequest(request: Request, env: Env): Promis
   return timingSafeTokenEqual(token, expected);
 }
 
-export function hasCloudflareAccessIdentity(request: Request): boolean {
-  return (request.headers.get("cf-access-jwt-assertion") ?? "").trim() !== "";
+async function hasCloudflareAccessIdentity(request: Request, env: Env): Promise<boolean> {
+  const assertion = (request.headers.get("cf-access-jwt-assertion") ?? "").trim();
+  const issuer = env.ACCESS_ISSUER?.replace(/\/$/, "");
+  const audience = env.ACCESS_AUD?.trim();
+  if (!assertion || !issuer || !audience) return false;
+
+  let jwks = accessJwksByIssuer.get(issuer);
+  if (!jwks) {
+    jwks = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`));
+    accessJwksByIssuer.set(issuer, jwks);
+  }
+
+  try {
+    await jwtVerify(assertion, jwks, {
+      issuer,
+      audience,
+      algorithms: ["RS256"],
+      requiredClaims: ["exp"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function isAuthorizedAdminRequest(request: Request, env: Env): Promise<boolean> {
-  const expected = env.ADMIN_TOKEN;
-  if (!expected) return hasCloudflareAccessIdentity(request);
-
-  const token = bearerToken(request) ?? adminCookieToken(request);
-  if (!token) return false;
-
-  return timingSafeTokenEqual(token, expected);
-}
-
-export async function isAuthorizedAdminToken(token: string | null, env: Env): Promise<boolean> {
-  const expected = env.ADMIN_TOKEN;
-  if (!expected || token === null) return false;
-
-  return timingSafeTokenEqual(token, expected);
-}
-
-export function adminTokenCookie(token: string): string {
-  return `${adminCookieName}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/`;
+  return hasCloudflareAccessIdentity(request, env);
 }
 
 function bearerToken(request: Request): string | null {
@@ -58,19 +63,4 @@ function bearerToken(request: Request): string | null {
   if (!header.startsWith(prefix)) return null;
 
   return header.slice(prefix.length);
-}
-
-function adminCookieToken(request: Request): string | null {
-  const cookie = request.headers.get("cookie") ?? "";
-  for (const part of cookie.split(";")) {
-    const [name, ...valueParts] = part.trim().split("=");
-    if (name !== adminCookieName) continue;
-    try {
-      return decodeURIComponent(valueParts.join("="));
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
 }

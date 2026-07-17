@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type { FeedTomlRow } from "../src/db";
-import worker from "../src/index";
+import deployedWorker from "../src/index";
+import { accessAssertion, accessEnv } from "./access";
 import { fakeD1, fakeEpisodeKey, type FakeEpisodeRow, type FakeFeedMetadataRow } from "./fake-d1";
+
+const worker = {
+  ...deployedWorker,
+  fetch: (request: Request, env: Parameters<typeof deployedWorker.fetch>[1]) =>
+    deployedWorker.fetch(request, { ...accessEnv, ...env }),
+};
 
 function adminGet(path: string, init: RequestInit = {}): Request {
   const { headers, ...rest } = init;
   return new Request(`https://podcast.example.com${path}`, {
     method: "GET",
     headers: {
-      "cf-access-jwt-assertion": "present",
+      "cf-access-jwt-assertion": accessAssertion,
       ...headers,
     },
     ...rest,
@@ -247,7 +254,7 @@ describe("admin read APIs", () => {
     const response = await worker.fetch(
       new Request("https://podcast.example.com/api/admin/feeds", {
         method: "POST",
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       { DB: fakeD1() },
     );

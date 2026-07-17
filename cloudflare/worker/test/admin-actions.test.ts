@@ -1,17 +1,23 @@
 import { describe, expect, it } from "vitest";
 import type { FeedTomlRow, PublicFeedRow } from "../src/db";
-import worker from "../src/index";
+import deployedWorker from "../src/index";
 import { sha256Hex } from "../src/tokens";
+import { accessAssertion, accessEnv } from "./access";
 import { fakeD1, fakeEpisodeKey, type FakeEpisodeRow, type FakeTombstoneChangeRow } from "./fake-d1";
 
 const nasToken = "secret";
+const worker = {
+  ...deployedWorker,
+  fetch: (request: Request, env: Parameters<typeof deployedWorker.fetch>[1]) =>
+    deployedWorker.fetch(request, { ...accessEnv, ...env }),
+};
 
 function adminRequest(path: string, body: unknown, init: RequestInit = {}): Request {
   const { headers, ...rest } = init;
   return new Request(`https://podcast.example.com${path}`, {
     method: "POST",
     headers: {
-      "cf-access-jwt-assertion": "present",
+      "cf-access-jwt-assertion": accessAssertion,
       "content-type": "application/json",
       ...headers,
     },
@@ -122,7 +128,7 @@ describe("admin actions", () => {
     const response = await worker.fetch(
       new Request("https://podcast.example.com/api/admin/feeds/status", {
         method: "GET",
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       { DB: fakeD1() },
     );
@@ -153,7 +159,7 @@ describe("admin actions", () => {
       new Request("https://podcast.example.com/api/admin/feeds/status", {
         method: "POST",
         headers: {
-          "cf-access-jwt-assertion": "present",
+          "cf-access-jwt-assertion": accessAssertion,
           "content-type": "application/json",
         },
         body: "{",
@@ -171,7 +177,7 @@ describe("admin actions", () => {
       new Request("https://podcast.example.com/api/admin/feeds/status", {
         method: "POST",
         headers: {
-          "cf-access-jwt-assertion": "present",
+          "cf-access-jwt-assertion": accessAssertion,
           "content-type": "application/json",
         },
         body: "x".repeat(65 * 1024),
@@ -279,7 +285,7 @@ describe("admin actions", () => {
     const wrongMethod = await worker.fetch(
       new Request("https://podcast.example.com/api/admin/feeds/delete", {
         method: "GET",
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       { DB: fakeD1() },
     );
@@ -405,7 +411,7 @@ describe("admin actions", () => {
     const response = await worker.fetch(
       new Request("https://podcast.example.com/api/admin/episodes/status", {
         method: "GET",
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       { DB: fakeD1() },
     );

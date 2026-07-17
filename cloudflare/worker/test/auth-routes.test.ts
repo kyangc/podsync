@@ -1,18 +1,15 @@
 import { describe, expect, it } from "vitest";
 import worker from "../src/index";
+import { accessAssertion, accessEnv, signAccessAssertion } from "./access";
 import { fakeD1 } from "./fake-d1";
 
 const env = {
+  ...accessEnv,
   DB: fakeD1({
     tomlFeeds: [],
     youtubeDefaults: { socket_timeout: 12, retries: 1, fragment_retries: 1 },
   }),
   NAS_TOKEN: "secret-token",
-};
-
-const envWithAdminToken = {
-  ...env,
-  ADMIN_TOKEN: "admin-token",
 };
 
 describe("route auth boundaries", () => {
@@ -63,29 +60,36 @@ describe("route auth boundaries", () => {
 
     const withAccess = await worker.fetch(
       new Request("https://podcast.example.com/api/admin/feeds", {
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       env,
     );
     expect(withAccess.status).not.toBe(403);
   });
 
-  it("ignores spoofed Cloudflare Access headers when ADMIN_TOKEN is configured", async () => {
-    const spoofedAccess = await worker.fetch(
+  it("rejects a forged Cloudflare Access assertion", async () => {
+    const response = await worker.fetch(
       new Request("https://podcast.example.com/api/admin/feeds", {
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": "definitely-not-a-jwt" },
       }),
-      envWithAdminToken,
+      {
+        ...env,
+        ...accessEnv,
+      },
     );
-    expect(spoofedAccess.status).toBe(403);
 
-    const withToken = await worker.fetch(
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects a signed Cloudflare Access assertion for another application", async () => {
+    const response = await worker.fetch(
       new Request("https://podcast.example.com/api/admin/feeds", {
-        headers: { authorization: "Bearer admin-token" },
+        headers: { "cf-access-jwt-assertion": await signAccessAssertion("another-audience") },
       }),
-      envWithAdminToken,
+      env,
     );
-    expect(withToken.status).toBe(200);
+
+    expect(response.status).toBe(403);
   });
 
   it("guards dashboard routes with Cloudflare Access identity", async () => {
@@ -94,33 +98,24 @@ describe("route auth boundaries", () => {
 
     const withAccess = await worker.fetch(
       new Request("https://podcast.example.com/dashboard/", {
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       env,
     );
     expect(withAccess.status).toBe(200);
   });
 
-  it("sets a dashboard admin cookie from a valid token query", async () => {
-    const login = await worker.fetch(new Request("https://podcast.example.com/dashboard/?token=admin-token"), envWithAdminToken);
-
-    expect(login.status).toBe(302);
-    expect(login.headers.get("location")).toBe("/dashboard/");
-    expect(login.headers.get("set-cookie")).toContain("podsync_admin_token=admin-token");
-
-    const dashboard = await worker.fetch(
-      new Request("https://podcast.example.com/dashboard/", {
-        headers: { cookie: "podsync_admin_token=admin-token" },
+  it("removes legacy token queries for an authorized Access session after cutover", async () => {
+    const response = await worker.fetch(
+      new Request("https://podcast.example.com/dashboard/?token=retired", {
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
-      envWithAdminToken,
+      env,
     );
-    expect(dashboard.status).toBe(200);
-  });
 
-  it("rejects invalid dashboard admin token queries", async () => {
-    const response = await worker.fetch(new Request("https://podcast.example.com/dashboard/?token=wrong"), envWithAdminToken);
-
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/dashboard/");
+    expect(response.headers.has("set-cookie")).toBe(false);
   });
 
   it("guards nested dashboard routes with the same Access and method boundaries", async () => {
@@ -130,7 +125,7 @@ describe("route auth boundaries", () => {
     const wrongMethod = await worker.fetch(
       new Request("https://podcast.example.com/dashboard/settings", {
         method: "POST",
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       env,
     );
@@ -138,7 +133,7 @@ describe("route auth boundaries", () => {
 
     const withAccess = await worker.fetch(
       new Request("https://podcast.example.com/dashboard/settings", {
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       env,
     );
@@ -149,7 +144,7 @@ describe("route auth boundaries", () => {
     const response = await worker.fetch(
       new Request("https://podcast.example.com/dashboard/", {
         method: "POST",
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       env,
     );
@@ -160,7 +155,7 @@ describe("route auth boundaries", () => {
   it("serves the dashboard management shell with defensive headers", async () => {
     const response = await worker.fetch(
       new Request("https://podcast.example.com/dashboard/", {
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       env,
     );
@@ -397,7 +392,7 @@ describe("route auth boundaries", () => {
   it("serves dashboard feed form fields and full upsert payload markers", async () => {
     const response = await worker.fetch(
       new Request("https://podcast.example.com/dashboard/", {
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       env,
     );
@@ -478,7 +473,7 @@ describe("route auth boundaries", () => {
   it("keeps dashboard source free of unsafe DOM shortcuts and external assets", async () => {
     const response = await worker.fetch(
       new Request("https://podcast.example.com/dashboard/", {
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       env,
     );

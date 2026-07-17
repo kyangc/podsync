@@ -1,4 +1,4 @@
-import { adminTokenCookie, isAuthorizedAdminRequest, isAuthorizedAdminToken, isAuthorizedNasRequest } from "./auth";
+import { isAuthorizedAdminRequest, isAuthorizedNasRequest } from "./auth";
 import type {
   AdminEpisodeAction,
   AdminEpisodeListRow,
@@ -2985,22 +2985,19 @@ function dashboardResponse(): Response {
 }
 
 async function dashboardAuthResponse(request: Request, env: Env, url: URL): Promise<Response | null> {
-  if (url.searchParams.has("token")) {
-    if (!(await isAuthorizedAdminToken(url.searchParams.get("token"), env))) return text("forbidden", 403);
+  if (!(await isAuthorizedAdminRequest(request, env))) return text("forbidden", 403);
 
+  if (url.searchParams.has("token")) {
     const clean = new URL(url);
     clean.searchParams.delete("token");
     return new Response(null, {
       status: 302,
       headers: {
         "location": `${clean.pathname}${clean.search}${clean.hash}`,
-        "set-cookie": adminTokenCookie(env.ADMIN_TOKEN!),
         "cache-control": "no-store",
       },
     });
   }
-
-  if (!(await isAuthorizedAdminRequest(request, env))) return text("forbidden", 403);
 
   return null;
 }

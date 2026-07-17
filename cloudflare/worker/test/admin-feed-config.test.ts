@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
-import worker from "../src/index";
+import deployedWorker from "../src/index";
 import { sha256Hex } from "../src/tokens";
+import { accessAssertion, accessEnv } from "./access";
 import { fakeD1, type FakeFeedRow } from "./fake-d1";
 
 const nasToken = "secret";
+const worker = {
+  ...deployedWorker,
+  fetch: (request: Request, env: Parameters<typeof deployedWorker.fetch>[1]) =>
+    deployedWorker.fetch(request, { ...accessEnv, ...env }),
+};
 
 function adminRequest(path: string, body: unknown, init: RequestInit = {}): Request {
   const { headers, ...rest } = init;
   return new Request(`https://podcast.example.com${path}`, {
     method: "POST",
     headers: {
-      "cf-access-jwt-assertion": "present",
+      "cf-access-jwt-assertion": accessAssertion,
       "content-type": "application/json",
       ...headers,
     },
@@ -68,7 +74,7 @@ describe("admin feed config upsert API", () => {
     const wrongMethod = await worker.fetch(
       new Request("https://podcast.example.com/api/admin/feeds/upsert", {
         method: "GET",
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       { DB: fakeD1() },
     );
@@ -86,7 +92,7 @@ describe("admin feed config upsert API", () => {
       new Request("https://podcast.example.com/api/admin/feeds/upsert", {
         method: "POST",
         headers: {
-          "cf-access-jwt-assertion": "present",
+          "cf-access-jwt-assertion": accessAssertion,
           "content-type": "application/json",
         },
         body: "{",
@@ -164,7 +170,7 @@ describe("admin feed config upsert API", () => {
 
     const subscriptions = await worker.fetch(
       new Request("https://podcast.example.com/api/admin/subscriptions", {
-        headers: { "cf-access-jwt-assertion": "present" },
+        headers: { "cf-access-jwt-assertion": accessAssertion },
       }),
       env,
     );
