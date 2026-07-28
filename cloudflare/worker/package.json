@@ -14,14 +14,14 @@
     "wrangler:check": "wrangler deploy --dry-run --outdir dist/dry-run"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260702.1",
-    "@playwright/test": "^1.61.1",
-    "@types/node": "^26.1.0",
-    "typescript": "^6.0.3",
+    "@cloudflare/workers-types": "^5.20260728.1",
+    "@playwright/test": "^1.62.0",
+    "@types/node": "^26.1.2",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10",
-    "wrangler": "^4.107.0"
+    "wrangler": "^4.114.0"
   },
   "dependencies": {
-    "jose": "^6.2.3"
+    "jose": "^6.2.4"
   }
 }
