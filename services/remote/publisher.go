@@ -4,11 +4,10 @@ import (
 	"context"
 	"io"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/pkg/errors"
 
@@ -24,27 +23,35 @@ type R2Config struct {
 }
 
 type R2Publisher struct {
-	api    s3iface.S3API
+	api    r2API
 	bucket string
+}
+
+type r2API interface {
+	PutObject(context.Context, *s3.PutObjectInput, ...func(*s3.Options)) (*s3.PutObjectOutput, error)
+	HeadObject(context.Context, *s3.HeadObjectInput, ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
 }
 
 func NewR2Publisher(cfg R2Config) (*R2Publisher, error) {
 	if cfg.Endpoint == "" || cfg.Bucket == "" || cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
 		return nil, errors.New("r2 endpoint, bucket, access key id, and secret access key are required")
 	}
-	awsCfg := aws.NewConfig().
-		WithEndpoint(cfg.Endpoint).
-		WithRegion("auto").
-		WithS3ForcePathStyle(true).
-		WithCredentials(credentials.NewStaticCredentials(cfg.AccessKeyID, cfg.SecretAccessKey, ""))
-	sess, err := session.NewSession(awsCfg)
+	awsCfg, err := config.LoadDefaultConfig(
+		context.Background(),
+		config.WithRegion("auto"),
+		config.WithBaseEndpoint(cfg.Endpoint),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, "")),
+	)
 	if err != nil {
 		return nil, err
 	}
-	return &R2Publisher{api: s3.New(sess), bucket: cfg.Bucket}, nil
+	client := s3.NewFromConfig(awsCfg, func(options *s3.Options) {
+		options.UsePathStyle = true
+	})
+	return &R2Publisher{api: client, bucket: cfg.Bucket}, nil
 }
 
-func NewR2PublisherWithAPI(api s3iface.S3API, bucket string) *R2Publisher {
+func NewR2PublisherWithAPI(api r2API, bucket string) *R2Publisher {
 	return &R2Publisher{api: api, bucket: bucket}
 }
 
@@ -70,7 +77,7 @@ func (p *R2Publisher) Upload(ctx context.Context, task *model.RemotePublishTask,
 	if _, err := reader.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	_, err := p.api.PutObjectWithContext(ctx, &s3.PutObjectInput{
+	_, err := p.api.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:        aws.String(p.bucket),
 		Key:           aws.String(task.R2Key),
 		Body:          reader,
@@ -80,15 +87,15 @@ func (p *R2Publisher) Upload(ctx context.Context, task *model.RemotePublishTask,
 	if err != nil {
 		return err
 	}
-	head, err := p.api.HeadObjectWithContext(ctx, &s3.HeadObjectInput{
+	head, err := p.api.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(p.bucket),
 		Key:    aws.String(task.R2Key),
 	})
 	if err != nil {
 		return err
 	}
-	if head.ContentLength == nil || *head.ContentLength != task.Size {
-		return errors.Errorf("r2 object size mismatch: got %d want %d", aws.Int64Value(head.ContentLength), task.Size)
+	if head.ContentLength == nil || aws.ToInt64(head.ContentLength) != task.Size {
+		return errors.Errorf("r2 object size mismatch: got %d want %d", aws.ToInt64(head.ContentLength), task.Size)
 	}
 	return nil
 }

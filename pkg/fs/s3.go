@@ -8,12 +8,12 @@ import (
 	"os"
 	"path"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
+	"github.com/aws/smithy-go/logging"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -33,25 +33,38 @@ type S3Config struct {
 
 // S3 implements file storage for S3-compatible providers.
 type S3 struct {
-	api      s3iface.S3API
-	uploader *s3manager.Uploader
+	api      s3API
+	uploader s3Uploader
 	bucket   string
 	prefix   string
 }
 
+type s3API interface {
+	DeleteObject(context.Context, *s3.DeleteObjectInput, ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
+	HeadObject(context.Context, *s3.HeadObjectInput, ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
+}
+
+type s3Uploader interface {
+	UploadObject(context.Context, *transfermanager.UploadObjectInput, ...func(*transfermanager.Options)) (*transfermanager.UploadObjectOutput, error)
+}
+
 func NewS3(c S3Config) (*S3, error) {
-	cfg := aws.NewConfig().
-		WithEndpoint(c.EndpointURL).
-		WithRegion(c.Region).
-		WithLogger(s3logger{}).
-		WithLogLevel(aws.LogDebug)
-	sess, err := session.NewSessionWithOptions(session.Options{Config: *cfg})
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to initialize S3 session")
+	options := []func(*config.LoadOptions) error{
+		config.WithRegion(c.Region),
+		config.WithLogger(s3logger{}),
+		config.WithClientLogMode(aws.LogRetries | aws.LogRequest | aws.LogResponse),
 	}
+	if c.EndpointURL != "" {
+		options = append(options, config.WithBaseEndpoint(c.EndpointURL))
+	}
+	cfg, err := config.LoadDefaultConfig(context.Background(), options...)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to initialize S3 configuration")
+	}
+	client := s3.NewFromConfig(cfg)
 	return &S3{
-		api:      s3.New(sess),
-		uploader: s3manager.NewUploader(sess),
+		api:      client,
+		uploader: transfermanager.New(client),
 		bucket:   c.Bucket,
 		prefix:   c.Prefix,
 	}, nil
@@ -63,16 +76,12 @@ func (s *S3) Open(_name string) (http.File, error) {
 
 func (s *S3) Delete(ctx context.Context, name string) error {
 	key := s.buildKey(name)
-	_, err := s.api.DeleteObjectWithContext(ctx, &s3.DeleteObjectInput{
+	_, err := s.api.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: &s.bucket,
 		Key:    &key,
 	})
-	if err != nil {
-		if awsErr, ok := err.(awserr.Error); ok {
-			if awsErr.Code() == "NotFound" {
-				return os.ErrNotExist
-			}
-		}
+	if isS3NotFound(err) {
+		return os.ErrNotExist
 	}
 	return err
 }
@@ -93,7 +102,7 @@ func (s *S3) Create(ctx context.Context, name string, reader io.Reader) (int64, 
 
 	logger.Infof("uploading file to %s", s.bucket)
 	r := &readerWithN{Reader: body}
-	_, err = s.uploader.UploadWithContext(ctx, &s3manager.UploadInput{
+	_, err = s.uploader.UploadObject(ctx, &transfermanager.UploadObjectInput{
 		Body:        r,
 		Bucket:      &s.bucket,
 		ContentType: aws.String(m.String()),
@@ -112,20 +121,18 @@ func (s *S3) Size(ctx context.Context, name string) (int64, error) {
 	logger := log.WithField("key", key)
 
 	logger.Debugf("getting file size from %s", s.bucket)
-	resp, err := s.api.HeadObjectWithContext(ctx, &s3.HeadObjectInput{
+	resp, err := s.api.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: &s.bucket,
 		Key:    &key,
 	})
 	if err != nil {
-		if awsErr, ok := err.(awserr.Error); ok {
-			if awsErr.Code() == "NotFound" {
-				return 0, os.ErrNotExist
-			}
+		if isS3NotFound(err) {
+			return 0, os.ErrNotExist
 		}
 		return 0, errors.Wrap(err, "failed to get file size")
 	}
 
-	return *resp.ContentLength, nil
+	return aws.ToInt64(resp.ContentLength), nil
 }
 
 func (s *S3) buildKey(name string) string {
@@ -145,6 +152,11 @@ func (r *readerWithN) Read(p []byte) (n int, err error) {
 
 type s3logger struct{}
 
-func (s s3logger) Log(args ...interface{}) {
-	log.Debug(args...)
+func (s3logger) Logf(_ logging.Classification, format string, args ...interface{}) {
+	log.Debugf(format, args...)
+}
+
+func isS3NotFound(err error) bool {
+	var apiErr smithy.APIError
+	return errors.As(err, &apiErr) && apiErr.ErrorCode() == "NotFound"
 }

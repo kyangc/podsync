@@ -8,10 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/request"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -114,7 +112,6 @@ func TestNewR2PublisherRequiresConfig(t *testing.T) {
 }
 
 type mockR2API struct {
-	s3iface.S3API
 	objects   map[string]mockR2Object
 	failPut   bool
 	headSize  *int64
@@ -133,7 +130,7 @@ func newMockR2API() *mockR2API {
 	return &mockR2API{objects: make(map[string]mockR2Object)}
 }
 
-func (m *mockR2API) PutObjectWithContext(_ aws.Context, input *s3.PutObjectInput, _ ...request.Option) (*s3.PutObjectOutput, error) {
+func (m *mockR2API) PutObject(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
 	m.putCount++
 	if m.failPut {
 		return nil, errors.New("put failed")
@@ -142,18 +139,18 @@ func (m *mockR2API) PutObjectWithContext(_ aws.Context, input *s3.PutObjectInput
 	if err != nil {
 		return nil, err
 	}
-	m.objects[aws.StringValue(input.Key)] = mockR2Object{
-		bucket:        aws.StringValue(input.Bucket),
+	m.objects[aws.ToString(input.Key)] = mockR2Object{
+		bucket:        aws.ToString(input.Bucket),
 		body:          body,
-		contentType:   aws.StringValue(input.ContentType),
-		contentLength: aws.Int64Value(input.ContentLength),
+		contentType:   aws.ToString(input.ContentType),
+		contentLength: aws.ToInt64(input.ContentLength),
 	}
 	return &s3.PutObjectOutput{}, nil
 }
 
-func (m *mockR2API) HeadObjectWithContext(_ aws.Context, input *s3.HeadObjectInput, _ ...request.Option) (*s3.HeadObjectOutput, error) {
+func (m *mockR2API) HeadObject(_ context.Context, input *s3.HeadObjectInput, _ ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
 	m.headCount++
-	object, ok := m.objects[aws.StringValue(input.Key)]
+	object, ok := m.objects[aws.ToString(input.Key)]
 	if !ok {
 		return nil, errors.New("not found")
 	}
