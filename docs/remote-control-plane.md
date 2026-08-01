@@ -318,8 +318,8 @@ purged
 
 - `pending`：已发现或正在发布，但音频/metadata 未完整完成，不进入 RSS。
 - `visible`：进入 Worker RSS。
-- `hidden`：手动隐藏，不进入 RSS，R2 object 保留。
-- `delete_pending`：手动删除，不进入 RSS，R2 object 等待延迟 purge。
+- `hidden`：手动隐藏，不进入 RSS；未超过 feed `keep_last` 时保留 R2 object。
+- `delete_pending`：手动删除或超过 feed `keep_last`，不进入 RSS，R2 object 等待延迟 purge。
 - `purged`：R2 object 已硬删，不进入 RSS。
 
 状态转换：
@@ -328,6 +328,7 @@ purged
 R2 uploaded + episode upsert -> visible
 dashboard hide -> hidden
 dashboard delete -> delete_pending
+scheduled retention beyond keep_last -> delete_pending
 scheduled purge -> purged
 restore hidden/delete_pending -> visible
 ```
@@ -451,6 +452,8 @@ Worker RSS 立即隐藏
 R2 object 保留 7 天
 ```
 
+Cron retention 对每个未删除 feed 的 `visible`/`hidden` episode 按发布时间排序，只保留最新 `keep_last` 条。超出的 episode 每轮最多标记 50 条为 `delete_pending`，同样保留 7 天恢复窗口；条件更新会在写入前重新校验当前 `keep_last`，避免配置并发修改导致误删。
+
 Cron purge：
 
 ```text
@@ -459,7 +462,7 @@ delete_pending 且 purge_after <= now
 -> status = purged
 ```
 
-7 天内可以 restore 到 `visible`。
+7 天内可以 restore 到 `visible`；如果 episode 是因为自动 retention 进入 `delete_pending`，应先提高对应 feed 的 `keep_last`，否则下一轮 Cron 会再次把它标记为过期。
 
 restore 和 purge 都必须使用条件更新，避免竞态：
 
@@ -795,7 +798,7 @@ episode_publish_status：跟 episode 生命周期走
 R2 raw error logs：90 天
 ```
 
-Cron Trigger 负责清理过期事件、sync runs、raw logs，并执行 R2 purge。
+Cron Trigger 负责清理过期事件、sync runs、raw logs，按 feed `keep_last` 标记过期 episode，并执行 R2 purge。
 
 ## Cloudflare 数据模型草案
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import worker, { runScheduledMaintenance } from "../src/index";
 import type { Env } from "../src/env";
-import { fakeD1, fakeEpisodeKey, fakeEventKey, type FakeEpisodeRow, type FakeEventRow, type FakeSyncRunRow, type FakeTombstoneChangeRow } from "./fake-d1";
+import { fakeD1, fakeEpisodeKey, fakeEventKey, type FakeEpisodeRow, type FakeEventRow, type FakeFeedRow, type FakeSyncRunRow, type FakeTombstoneChangeRow } from "./fake-d1";
 
 function episode(overrides: Partial<FakeEpisodeRow> = {}): FakeEpisodeRow {
   return {
@@ -68,6 +68,129 @@ class FakeR2Bucket {
 }
 
 describe("scheduled maintenance", () => {
+  it("marks episodes beyond a feed's keep_last for deletion with a seven-day grace period", async () => {
+    const feedsByID = new Map<string, FakeFeedRow>([
+      ["feed", { feed_id: "feed", provider: "youtube", keep_last: 2 }],
+    ]);
+    const episodesByKey = new Map([
+      [fakeEpisodeKey("feed", "newest"), episode({ local_episode_id: "newest", source_episode_id: "newest", status: "visible", published_at: "2026-07-06T12:00:00Z" })],
+      [fakeEpisodeKey("feed", "middle"), episode({ local_episode_id: "middle", source_episode_id: "middle", status: "visible", published_at: "2026-07-05T12:00:00Z" })],
+      [fakeEpisodeKey("feed", "oldest"), episode({ local_episode_id: "oldest", source_episode_id: "oldest", status: "visible", published_at: "2026-07-04T12:00:00Z" })],
+    ]);
+    const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+    const bucket = new FakeR2Bucket();
+
+    const result = await runScheduledMaintenance(
+      { DB: fakeD1({ feedsByID, episodesByKey, tombstoneChanges }), MEDIA_BUCKET: bucket as unknown as R2Bucket },
+      new Date("2026-07-06T12:00:00Z"),
+    );
+
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "newest"))?.status).toBe("visible");
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "middle"))?.status).toBe("visible");
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "oldest"))).toMatchObject({
+      status: "delete_pending",
+      deleted_at: "2026-07-06T12:00:00.000Z",
+      purge_after: "2026-07-13T12:00:00.000Z",
+      updated_at: "2026-07-06T12:00:00.000Z",
+    });
+    expect(tombstoneChanges).toEqual([
+      expect.objectContaining({ feed_id: "feed", local_episode_id: "oldest", status: "delete_pending", action: "delete" }),
+    ]);
+    expect(bucket.deletedKeys).toEqual([]);
+    expect(result.retention_candidates).toBe(1);
+    expect(result.episodes_expired).toBe(1);
+    expect(result.retention_errors).toBe(0);
+  });
+
+  it("does not expire an episode when keep_last increases after candidate selection", async () => {
+    const feedsByID = new Map<string, FakeFeedRow>([
+      ["feed", { feed_id: "feed", provider: "youtube", keep_last: 2 }],
+    ]);
+    const episodesByKey = new Map([
+      [fakeEpisodeKey("feed", "newest"), episode({ local_episode_id: "newest", source_episode_id: "newest", status: "visible", published_at: "2026-07-06T12:00:00Z" })],
+      [fakeEpisodeKey("feed", "middle"), episode({ local_episode_id: "middle", source_episode_id: "middle", status: "visible", published_at: "2026-07-05T12:00:00Z" })],
+      [fakeEpisodeKey("feed", "oldest"), episode({ local_episode_id: "oldest", source_episode_id: "oldest", status: "visible", published_at: "2026-07-04T12:00:00Z" })],
+    ]);
+    const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+
+    const result = await runScheduledMaintenance(
+      {
+        DB: fakeD1({
+          feedsByID,
+          episodesByKey,
+          tombstoneChanges,
+          beforeEpisodeStatusUpdate: (_key, _episode, options) => {
+            const feed = options.feedsByID?.get("feed");
+            if (feed) feed.keep_last = 3;
+          },
+        }),
+      },
+      new Date("2026-07-06T12:00:00Z"),
+    );
+
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "oldest"))?.status).toBe("visible");
+    expect(tombstoneChanges).toEqual([]);
+    expect(result.retention_candidates).toBe(1);
+    expect(result.episodes_expired).toBe(0);
+    expect(result.retention_errors).toBe(1);
+  });
+
+  it("counts hidden episodes toward keep_last and expires an older hidden episode", async () => {
+    const feedsByID = new Map<string, FakeFeedRow>([
+      ["feed", { feed_id: "feed", provider: "youtube", keep_last: 2 }],
+    ]);
+    const episodesByKey = new Map([
+      [fakeEpisodeKey("feed", "newest"), episode({ local_episode_id: "newest", source_episode_id: "newest", status: "visible", published_at: "2026-07-06T12:00:00Z" })],
+      [fakeEpisodeKey("feed", "middle"), episode({ local_episode_id: "middle", source_episode_id: "middle", status: "hidden", published_at: "2026-07-05T12:00:00Z" })],
+      [fakeEpisodeKey("feed", "oldest"), episode({ local_episode_id: "oldest", source_episode_id: "oldest", status: "hidden", published_at: "2026-07-04T12:00:00Z" })],
+    ]);
+    const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+
+    const result = await runScheduledMaintenance(
+      { DB: fakeD1({ feedsByID, episodesByKey, tombstoneChanges }) },
+      new Date("2026-07-06T12:00:00Z"),
+    );
+
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "middle"))?.status).toBe("hidden");
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "oldest"))?.status).toBe("delete_pending");
+    expect(tombstoneChanges).toEqual([
+      expect.objectContaining({ local_episode_id: "oldest", status: "delete_pending", action: "delete" }),
+    ]);
+    expect(result.episodes_expired).toBe(1);
+  });
+
+  it("marks at most fifty retention candidates per scheduled run", async () => {
+    const feedsByID = new Map<string, FakeFeedRow>([
+      ["feed", { feed_id: "feed", provider: "youtube", keep_last: 1 }],
+    ]);
+    const episodesByKey = new Map<string, FakeEpisodeRow>();
+    for (let day = 1; day <= 52; day++) {
+      const id = `episode-${String(day).padStart(2, "0")}`;
+      episodesByKey.set(fakeEpisodeKey("feed", id), episode({
+        local_episode_id: id,
+        source_episode_id: id,
+        status: "visible",
+        published_at: new Date(Date.UTC(2026, 4, day, 12)).toISOString(),
+      }));
+    }
+    const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+
+    const result = await runScheduledMaintenance(
+      { DB: fakeD1({ feedsByID, episodesByKey, tombstoneChanges }) },
+      new Date("2026-07-06T12:00:00Z"),
+    );
+
+    const statuses = [...episodesByKey.values()].reduce<Record<string, number>>((counts, row) => {
+      counts[row.status] = (counts[row.status] ?? 0) + 1;
+      return counts;
+    }, {});
+    expect(statuses).toMatchObject({ visible: 2, delete_pending: 50 });
+    expect(tombstoneChanges).toHaveLength(50);
+    expect(result.retention_candidates).toBe(50);
+    expect(result.episodes_expired).toBe(50);
+    expect(result.retention_errors).toBe(0);
+  });
+
   it("deletes old events and completed sync runs", async () => {
     const eventsByKey = new Map([
       [fakeEventKey("old-event", 1), eventRow({ run_id: "old-event", event_time: "2026-06-05T12:00:00Z" })],

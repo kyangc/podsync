@@ -320,6 +320,27 @@ class FakeStatement {
         .map(adminSubscriptionOpmlRow);
     }
 
+    if (this.query.includes("WITH ranked AS") && this.query.includes("retention_rank")) {
+      const limit = Number(this.params[0] ?? 50);
+      const candidates: FakeEpisodeRow[] = [];
+      for (const feed of this.options.feedsByID?.values() ?? []) {
+        const keepLast = feed.keep_last ?? 25;
+        if (feed.deleted_at || keepLast < 1) continue;
+        const ranked = [...(this.options.episodesByKey?.values() ?? [])]
+          .filter((episode) => episode.feed_id === feed.feed_id && (episode.status === "visible" || episode.status === "hidden"))
+          .sort(compareRetentionRank);
+        candidates.push(...ranked.slice(keepLast));
+      }
+      return candidates
+        .sort(compareRetentionCandidateOrder)
+        .slice(0, limit)
+        .map((episode) => ({
+          feed_id: episode.feed_id,
+          local_episode_id: episode.local_episode_id,
+          status: episode.status,
+        }));
+    }
+
     if (this.query.includes("FROM episodes") && this.query.includes("ORDER BY COALESCE(datetime(published_at), datetime(updated_at))")) {
       const feedID = String(this.params[0] ?? "");
       const hasStatusFilter = this.query.includes("AND status = ?");
@@ -680,6 +701,9 @@ class FakeStatement {
     if (this.query.includes("status = 'purged'")) {
       return this.runEpisodePurgeUpdate(options);
     }
+    if (this.query.includes("purge_after = ?")) {
+      return this.runRetentionEpisodeUpdate(options);
+    }
     const [feedID, localEpisodeID] = this.params;
     const key = fakeEpisodeKey(String(feedID), String(localEpisodeID));
     const episode = options.episodesByKey?.get(key);
@@ -721,6 +745,29 @@ class FakeStatement {
     return 0;
   }
 
+  private runRetentionEpisodeUpdate(options: FakeD1Options): number {
+    const [deletedAt, purgeAfter, updatedAt, feedID, localEpisodeID, expectedStatus] = this.params;
+    const key = fakeEpisodeKey(String(feedID), String(localEpisodeID));
+    const episode = options.episodesByKey?.get(key);
+    options.beforeEpisodeStatusUpdate?.(key, episode, options);
+    const current = options.episodesByKey?.get(key);
+    if (!current || feedIsDeleted(options, current.feed_id) || current.status !== String(expectedStatus)) return 0;
+    if (current.status !== "visible" && current.status !== "hidden") return 0;
+    const feed = options.feedsByID?.get(current.feed_id);
+    const keepLast = feed?.keep_last ?? 25;
+    if (!feed || keepLast < 1) return 0;
+    const rank = [...(options.episodesByKey?.values() ?? [])]
+      .filter((episode) => episode.feed_id === current.feed_id && (episode.status === "visible" || episode.status === "hidden"))
+      .sort(compareRetentionRank)
+      .findIndex((episode) => episode.local_episode_id === current.local_episode_id);
+    if (rank < keepLast) return 0;
+    current.status = "delete_pending";
+    current.deleted_at = String(deletedAt);
+    current.purge_after = String(purgeAfter);
+    current.updated_at = String(updatedAt);
+    return 1;
+  }
+
   private runEpisodePurgeUpdate(options: FakeD1Options): number {
     const [now, feedID, localEpisodeID, nullKey, r2Key] = this.params;
     const key = fakeEpisodeKey(String(feedID), String(localEpisodeID));
@@ -755,10 +802,11 @@ class FakeStatement {
       return 0;
     }
     const literalPurge = this.query.includes("'purged'") && this.query.includes("'purge'");
-    const [feedID, localEpisodeID, statusParam, actionParam] = this.params;
-    const status = literalPurge ? "purged" : statusParam;
-    const action = literalPurge ? "purge" : actionParam;
-    const createdAt = literalPurge ? nullableString(statusParam) : "2026-07-06 00:00:00";
+    const literalDelete = this.query.includes("'delete_pending'") && this.query.includes("'delete'");
+    const [feedID, localEpisodeID, statusParam, actionParam, createdAtParam] = this.params;
+    const status = literalPurge ? "purged" : literalDelete ? "delete_pending" : statusParam;
+    const action = literalPurge ? "purge" : literalDelete ? "delete" : actionParam;
+    const createdAt = literalPurge || literalDelete ? nullableString(statusParam) : nullableString(createdAtParam) ?? "2026-07-06 00:00:00";
     const changes = options.tombstoneChanges ?? [];
     options.tombstoneChanges = changes;
     const sequence = changes.reduce((max, change) => Math.max(max, change.sequence), 0) + 1;
@@ -1214,6 +1262,22 @@ function compareAdminEpisodeOrder(left: FakeEpisodeRow, right: FakeEpisodeRow): 
 function comparePurgeCandidateOrder(left: FakeEpisodeRow, right: FakeEpisodeRow): number {
   const timeCompare = sqliteDateTimeMillis(left.purge_after) - sqliteDateTimeMillis(right.purge_after);
   if (timeCompare !== 0) return timeCompare;
+  const feedCompare = left.feed_id.localeCompare(right.feed_id);
+  if (feedCompare !== 0) return feedCompare;
+  return left.local_episode_id.localeCompare(right.local_episode_id);
+}
+
+function compareRetentionRank(left: FakeEpisodeRow, right: FakeEpisodeRow): number {
+  const leftTime = coalesceSQLiteDateTimeMillis(left.published_at, left.updated_at);
+  const rightTime = coalesceSQLiteDateTimeMillis(right.published_at, right.updated_at);
+  if (leftTime !== rightTime) return rightTime - leftTime;
+  return right.local_episode_id.localeCompare(left.local_episode_id);
+}
+
+function compareRetentionCandidateOrder(left: FakeEpisodeRow, right: FakeEpisodeRow): number {
+  const leftTime = coalesceSQLiteDateTimeMillis(left.published_at, left.updated_at);
+  const rightTime = coalesceSQLiteDateTimeMillis(right.published_at, right.updated_at);
+  if (leftTime !== rightTime) return leftTime - rightTime;
   const feedCompare = left.feed_id.localeCompare(right.feed_id);
   if (feedCompare !== 0) return feedCompare;
   return left.local_episode_id.localeCompare(right.local_episode_id);

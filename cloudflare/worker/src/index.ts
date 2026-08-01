@@ -53,6 +53,8 @@ const maxEventDetailLength = 2048;
 const utcTimestampPattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/;
 const eventRetentionDays = 30;
 const syncRunRetentionDays = 180;
+const retentionGraceDays = 7;
+const retentionBatchLimit = 50;
 const purgeBatchLimit = 50;
 const maxFeedIDLength = 128;
 const maxFeedStringLength = 512;
@@ -97,9 +99,18 @@ interface PurgeCandidateRow {
   r2_key: string | null;
 }
 
+interface RetentionCandidateRow {
+  feed_id: string;
+  local_episode_id: string;
+  status: "visible" | "hidden";
+}
+
 export interface MaintenanceResult {
   old_events_deleted: number;
   old_sync_runs_deleted: number;
+  retention_candidates: number;
+  episodes_expired: number;
+  retention_errors: number;
   purge_candidates: number;
   episodes_purged: number;
   purge_errors: number;
@@ -3667,6 +3678,69 @@ function oldSyncRunsDeleteSQL(): string {
              AND datetime(COALESCE(finished_at, started_at)) < datetime(?, '-${syncRunRetentionDays} days')`;
 }
 
+function retentionCandidatesSQL(): string {
+  return `WITH ranked AS (
+            SELECT e.feed_id,
+                   e.local_episode_id,
+                   e.status,
+                   COALESCE(datetime(e.published_at), datetime(e.updated_at)) AS episode_time,
+                   f.keep_last,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY e.feed_id
+                     ORDER BY COALESCE(datetime(e.published_at), datetime(e.updated_at)) DESC,
+                              e.local_episode_id DESC
+                   ) AS retention_rank
+              FROM episodes e
+              JOIN feeds f ON f.feed_id = e.feed_id
+             WHERE f.deleted_at IS NULL
+               AND f.keep_last > 0
+               AND e.status IN ('visible', 'hidden')
+          )
+          SELECT feed_id, local_episode_id, status
+            FROM ranked
+           WHERE retention_rank > keep_last
+           ORDER BY episode_time ASC, feed_id ASC, local_episode_id ASC
+           LIMIT ?`;
+}
+
+function retentionEpisodeUpdateSQL(): string {
+  return `UPDATE episodes
+             SET status = 'delete_pending',
+                 deleted_at = ?,
+                 purge_after = ?,
+                 updated_at = ?
+           WHERE feed_id = ?
+             AND local_episode_id = ?
+             AND status = ?
+             AND EXISTS (
+               SELECT 1 FROM feeds
+                WHERE feeds.feed_id = episodes.feed_id
+                  AND feeds.deleted_at IS NULL
+                  AND feeds.keep_last > 0
+                  AND (
+                    SELECT COUNT(*)
+                      FROM episodes newer
+                     WHERE newer.feed_id = episodes.feed_id
+                       AND newer.status IN ('visible', 'hidden')
+                       AND (
+                         COALESCE(datetime(newer.published_at), datetime(newer.updated_at), '0001-01-01 00:00:00') >
+                           COALESCE(datetime(episodes.published_at), datetime(episodes.updated_at), '0001-01-01 00:00:00')
+                         OR (
+                           COALESCE(datetime(newer.published_at), datetime(newer.updated_at), '0001-01-01 00:00:00') =
+                             COALESCE(datetime(episodes.published_at), datetime(episodes.updated_at), '0001-01-01 00:00:00')
+                           AND newer.local_episode_id > episodes.local_episode_id
+                         )
+                       )
+                  ) >= feeds.keep_last
+             )`;
+}
+
+function retentionTombstoneInsertSQL(): string {
+  return `INSERT INTO tombstone_changes (feed_id, local_episode_id, status, action, created_at)
+          SELECT ?, ?, 'delete_pending', 'delete', ?
+           WHERE changes() = 1`;
+}
+
 function purgeCandidatesSQL(): string {
   return `SELECT feed_id, local_episode_id, r2_key
             FROM episodes
@@ -4495,17 +4569,42 @@ async function handleFeedMetadataUpsert(request: Request, env: Env): Promise<Res
 
 export async function runScheduledMaintenance(env: Env, now = new Date()): Promise<MaintenanceResult> {
   const nowISO = now.toISOString();
+  const purgeAfterISO = new Date(now.getTime() + retentionGraceDays * 24 * 60 * 60 * 1000).toISOString();
   const oldEvents = await env.DB.prepare(oldEventsDeleteSQL()).bind(nowISO).run();
   const oldSyncRuns = await env.DB.prepare(oldSyncRunsDeleteSQL()).bind(nowISO).run();
-  const { results: candidates } = await env.DB.prepare(purgeCandidatesSQL()).bind(nowISO, purgeBatchLimit).all<PurgeCandidateRow>();
+  const { results: retentionCandidates } = await env.DB.prepare(retentionCandidatesSQL()).bind(retentionBatchLimit).all<RetentionCandidateRow>();
 
   const result: MaintenanceResult = {
     old_events_deleted: oldEvents.meta.changes ?? 0,
     old_sync_runs_deleted: oldSyncRuns.meta.changes ?? 0,
-    purge_candidates: candidates.length,
+    retention_candidates: retentionCandidates.length,
+    episodes_expired: 0,
+    retention_errors: 0,
+    purge_candidates: 0,
     episodes_purged: 0,
     purge_errors: 0,
   };
+
+  for (const candidate of retentionCandidates) {
+    try {
+      if (await expireRetentionCandidate(env, candidate, nowISO, purgeAfterISO)) {
+        result.episodes_expired++;
+      } else {
+        result.retention_errors++;
+      }
+    } catch (error) {
+      result.retention_errors++;
+      console.warn(JSON.stringify({
+        message: "scheduled retention candidate failed",
+        feed_id: candidate.feed_id,
+        local_episode_id: candidate.local_episode_id,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+
+  const { results: candidates } = await env.DB.prepare(purgeCandidatesSQL()).bind(nowISO, purgeBatchLimit).all<PurgeCandidateRow>();
+  result.purge_candidates = candidates.length;
 
   for (const candidate of candidates) {
     try {
@@ -4525,6 +4624,29 @@ export async function runScheduledMaintenance(env: Env, now = new Date()): Promi
   }
 
   return result;
+}
+
+async function expireRetentionCandidate(
+  env: Env,
+  candidate: RetentionCandidateRow,
+  nowISO: string,
+  purgeAfterISO: string,
+): Promise<boolean> {
+  const update = env.DB.prepare(retentionEpisodeUpdateSQL()).bind(
+    nowISO,
+    purgeAfterISO,
+    nowISO,
+    candidate.feed_id,
+    candidate.local_episode_id,
+    candidate.status,
+  );
+  const tombstone = env.DB.prepare(retentionTombstoneInsertSQL()).bind(
+    candidate.feed_id,
+    candidate.local_episode_id,
+    nowISO,
+  );
+  const [updateResult, tombstoneResult] = await env.DB.batch([update, tombstone]);
+  return updateResult?.meta.changes === 1 && tombstoneResult?.meta.changes === 1;
 }
 
 async function purgeEpisodeCandidate(env: Env, candidate: PurgeCandidateRow, nowISO: string): Promise<boolean> {
