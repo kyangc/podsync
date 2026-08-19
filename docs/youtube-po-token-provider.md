@@ -33,6 +33,7 @@ Each YouTube feed must pass both extractor arguments:
 
 ```toml
 youtube_dl_args = [
+  "--format", "18/best[protocol=https][vcodec!=none][acodec!=none]",
   "--extractor-args", "youtube:player_client=mweb",
   "--extractor-args", "youtubepot-bgutilhttp:base_url=http://bgutil-provider:4416",
 ]
@@ -40,7 +41,10 @@ youtube_dl_args = [
 
 The Cloudflare remote control plane in this repository adds these arguments to
 generated YouTube feed configuration while preserving the existing timeout and
-retry values. It does not add them to non-YouTube feeds.
+retry values. The format selector prefers YouTube's progressive format 18 and
+falls back to another combined HTTPS format so audio feeds avoid the DASH media
+URLs that returned HTTP 403 on the production NAS. It does not add these
+arguments to non-YouTube feeds.
 
 The default `fetch_pot=auto` policy is intentional. Use `pot_trace=true` only
 for a bounded canary investigation; do not keep it in normal configuration.
@@ -49,7 +53,8 @@ for a bounded canary investigation; do not keep it in normal configuration.
 
 1. Confirm the provider is healthy and reports the same version as the plugin.
 2. Run yt-dlp with `--verbose` and confirm it lists `bgutil:http-1.3.1`.
-3. Verify a media short read with `mweb+bestaudio`.
+3. Verify a complete progressive-format download and audio transcode; a short
+   read alone is insufficient because DASH requests may fail later in the file.
 4. Verify one complete Podsync download, transcode, upload, RSS update, and sync
    success event.
 5. Observe two scheduled cycles and confirm there are no new YouTube HTTP 403

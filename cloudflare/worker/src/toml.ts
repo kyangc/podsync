@@ -58,7 +58,7 @@ export function compileFeedsToml(feeds: FeedTomlRow[], youtubeDefaults: Download
 
     if (feed.provider === "youtube") {
       chunks.push(
-        `youtube_dl_args = ["--socket-timeout", "${youtubeDefaults.socket_timeout}", "--retries", "${youtubeDefaults.retries}", "--fragment-retries", "${youtubeDefaults.fragment_retries}", "--extractor-args", "youtube:player_client=mweb", "--extractor-args", "youtubepot-bgutilhttp:base_url=http://bgutil-provider:4416"]`,
+        `youtube_dl_args = ["--socket-timeout", "${youtubeDefaults.socket_timeout}", "--retries", "${youtubeDefaults.retries}", "--fragment-retries", "${youtubeDefaults.fragment_retries}", "--format", "18/best[protocol=https][vcodec!=none][acodec!=none]", "--extractor-args", "youtube:player_client=mweb", "--extractor-args", "youtubepot-bgutilhttp:base_url=http://bgutil-provider:4416"]`,
       );
     }
 
