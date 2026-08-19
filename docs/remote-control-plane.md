@@ -135,7 +135,7 @@ opml = true
 private_feed = true
 clean = { keep_last = 25 }
 filters = { not_title = "直播" }
-youtube_dl_args = ["--socket-timeout", "12", "--retries", "1", "--fragment-retries", "1"]
+youtube_dl_args = ["--socket-timeout", "12", "--retries", "1", "--fragment-retries", "1", "--extractor-args", "youtube:player_client=mweb", "--extractor-args", "youtubepot-bgutilhttp:base_url=http://bgutil-provider:4416"]
 ```
 
 ### 合并规则
@@ -218,10 +218,10 @@ filters
 
 ## Downloader 参数
 
-当前 live 配置里只有 13 个 YouTube feed 使用同一组 `youtube_dl_args`：
+13 个 YouTube feed 共用全局 downloader defaults。TOML 编译器还会追加受控的 mweb 和 PO Token provider 参数：
 
 ```toml
-youtube_dl_args = ["--socket-timeout", "12", "--retries", "1", "--fragment-retries", "1"]
+youtube_dl_args = ["--socket-timeout", "12", "--retries", "1", "--fragment-retries", "1", "--extractor-args", "youtube:player_client=mweb", "--extractor-args", "youtubepot-bgutilhttp:base_url=http://bgutil-provider:4416"]
 ```
 
 第一版不开放任意 `youtube_dl_args` 文本编辑，只提供全局 YouTube downloader defaults：
@@ -232,7 +232,7 @@ retries = 1
 fragment_retries = 1
 ```
 
-Cloudflare 生成 TOML 时把它们编译成 `youtube_dl_args`。
+Cloudflare 生成 TOML 时把它们编译成 `youtube_dl_args`。mweb 客户端和 provider 内部地址由代码管理，不开放任意文本编辑，也不进入 D1。
 
 Bilibili 第一版只管理 `cookie_profile`。常用 Bilibili headers 由 Podsync 代码内置，不从远端配置 headers。
 
