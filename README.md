@@ -24,6 +24,7 @@ Podsync 是一个简单、免费的服务，可以把在线视频频道、合集
 - `bilibili.cookies_file` 会同时用于 Bilibili API 拉取和 `yt-dlp` 下载；下载时 Podsync 会先复制一份临时 cookies，避免 `yt-dlp` 回写污染源 cookies 文件。
 - 新增 `filename_template`，可控制下载文件名和 RSS enclosure 路径；同时提供一次性迁移命令。
 - GitHub Actions 已切到本仓库，`main` 会发布 `ghcr.io/kyangc/podsync:nightly`，推送 `v*` tag 会发布正式镜像。
+- Docker 镜像携带固定版本的 BgUtils PO Token provider 插件，但默认不激活；需要的部署必须同时运行 provider sidecar，并通过 `PYTHONPATH` 显式启用插件。
 
 Go module 路径仍保留为 `github.com/mxpv/podsync`，这是为了尽量减少和 upstream 的差异；镜像、CI/CD 和发布产物使用 `kyangc/podsync`。
 
@@ -63,6 +64,7 @@ brew install yt-dlp ffmpeg go
 - [获取 Vimeo API token](./docs/how_to_get_vimeo_token.md)
 - [在 QNAP NAS 上运行 Podsync](./docs/how_to_setup_podsync_on_qnap_nas.md)
 - [在 Synology NAS 上运行 Podsync](./docs/how_to_setup_podsync_on_synology_nas.md)
+- [为 YouTube 下载启用 PO Token provider](./docs/youtube-po-token-provider.md)
 - [Dashboard E2E 测试](./docs/dashboard-e2e.md)
 
 ## Nightly 镜像

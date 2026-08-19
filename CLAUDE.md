@@ -23,6 +23,7 @@ Podsync 是一个 Go 服务，用来把 YouTube、Vimeo、SoundCloud、Twitch �
 - 新增 `filename_template`，用于控制下载文件名和 RSS enclosure 路径。
 - 新增 `--migrate-filenames` 和 `--migrate-filenames-dry-run`，用于一次性迁移已下载文件名。
 - GitHub Actions 已切到 `kyangc/podsync`：`main` 发布 `ghcr.io/kyangc/podsync:nightly`，`v*` tag 发布正式镜像和 release。
+- Docker 镜像在 `/opt/podsync/yt-dlp-plugins/` 携带固定版本的 BgUtils PO Token provider 插件，但默认不激活；部署必须通过 `PYTHONPATH` 显式启用，并提供匹配版本的 provider sidecar。
 
 Go module 路径仍保留 `github.com/mxpv/podsync`，这是为了降低与 upstream 的差异。不要为了“看起来更像 fork”随意改 module path。
 
