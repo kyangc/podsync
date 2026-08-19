@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,6 +68,7 @@ type Manager struct {
 	mu                         sync.RWMutex
 	hostname                   string
 	downloader                 Downloader
+	downloadRetryDelays        []time.Duration
 	db                         db.Storage
 	fs                         fs.Storage
 	feeds                      map[string]*feed.Config
@@ -87,13 +89,14 @@ func NewUpdater(
 	options ...Option,
 ) (*Manager, error) {
 	manager := &Manager{
-		hostname:       hostname,
-		downloader:     downloader,
-		db:             db,
-		fs:             fs,
-		feeds:          feeds,
-		keys:           keys,
-		builderFactory: defaultFeedBuilderFactory,
+		hostname:            hostname,
+		downloader:          downloader,
+		downloadRetryDelays: []time.Duration{5 * time.Second, 30 * time.Second},
+		db:                  db,
+		fs:                  fs,
+		feeds:               feeds,
+		keys:                keys,
+		builderFactory:      defaultFeedBuilderFactory,
 	}
 	for _, option := range options {
 		option(manager)
@@ -472,7 +475,7 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 		// while still being processed by youtube-dl (e.g. a file is being downloaded from YT or encoding in progress)
 
 		logger.Infof("! downloading episode %s", episode.VideoURL)
-		tempFile, err := u.downloader.Download(ctx, feedConfig, episode)
+		tempFile, err := u.downloadEpisodeWithRetry(ctx, feedConfig, episode)
 		if err != nil {
 			// YouTube might block host with HTTP Error 429: Too Many Requests
 			// We still need to generate XML, so just stop sending download requests and
@@ -569,6 +572,63 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 
 	log.Infof("downloaded %d episode(s)", downloaded)
 	return nil
+}
+
+func (u *Manager) downloadEpisodeWithRetry(ctx context.Context, feedConfig *feed.Config, episode *model.Episode) (io.ReadCloser, error) {
+	for attempt := 1; ; attempt++ {
+		file, err := u.downloader.Download(ctx, feedConfig, episode)
+		retryReason := retryableYouTubeDownloadError(feedConfig, err)
+		if err == nil || attempt > len(u.downloadRetryDelays) || retryReason == "" {
+			return file, err
+		}
+		log.WithFields(log.Fields{
+			"next_attempt": attempt + 1,
+			"max_attempts": len(u.downloadRetryDelays) + 1,
+			"retry_reason": retryReason,
+		}).Warn("retrying transient YouTube download")
+		if err := waitForDownloadRetry(ctx, u.downloadRetryDelays[attempt-1]); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func waitForDownloadRetry(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func retryableYouTubeDownloadError(feedConfig *feed.Config, err error) string {
+	if err == nil {
+		return ""
+	}
+	info, parseErr := builder.ParseURL(feedConfig.URL)
+	if parseErr != nil || info.Provider != model.ProviderYoutube {
+		return ""
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "http error 403") {
+		return "http_403"
+	}
+	if strings.Contains(message, "unexpected_eof") ||
+		strings.Contains(message, "unexpected eof") ||
+		strings.Contains(message, "handshake operation timed out") {
+		return "tls_transport"
+	}
+	return ""
 }
 
 func (u *Manager) buildXML(ctx context.Context, feedConfig *feed.Config) error {

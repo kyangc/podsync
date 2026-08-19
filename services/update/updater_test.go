@@ -267,6 +267,87 @@ func TestDownloadEpisodesRecordsDownloadFinishedEvent(t *testing.T) {
 	assert.Equal(t, "episode", sink.events[0].LocalEpisodeID)
 }
 
+func TestDownloadEpisodesRecoversFromTransientYouTube403(t *testing.T) {
+	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
+		{err: errors.New("HTTP Error 403: Forbidden")},
+		{body: "audio"},
+	})
+
+	require.Equal(t, 2, downloader.calls)
+	require.Len(t, events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFinished, events[0].Type)
+}
+
+func TestDownloadEpisodesRecoversFromTransientYouTubeTLSFailure(t *testing.T) {
+	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
+		{err: errors.New("ssl.SSLEOFError: [SSL: UNEXPECTED_EOF_WHILE_READING]")},
+		{body: "audio"},
+	})
+
+	require.Equal(t, 2, downloader.calls)
+	require.Len(t, events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFinished, events[0].Type)
+}
+
+func TestDownloadEpisodesRecoversFromYouTubeHandshakeTimeout(t *testing.T) {
+	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
+		{err: errors.New("_ssl.c:989: The handshake operation timed out")},
+		{body: "audio"},
+	})
+
+	require.Equal(t, 2, downloader.calls)
+	require.Len(t, events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFinished, events[0].Type)
+}
+
+func TestDownloadEpisodesRecordsOneFailureAfterYouTubeRetriesAreExhausted(t *testing.T) {
+	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
+		{err: errors.New("HTTP Error 403: Forbidden")},
+		{err: errors.New("HTTP Error 403: Forbidden")},
+		{err: errors.New("HTTP Error 403: Forbidden")},
+	})
+
+	require.Equal(t, 3, downloader.calls)
+	require.Len(t, events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
+}
+
+func TestDownloadEpisodesDoesNotRetry403ForNonYouTubeFeed(t *testing.T) {
+	feedConfig := testFeedConfig()
+	feedConfig.URL = "https://vimeo.com/12345"
+	downloader, events := runDownloadScenario(t, context.Background(), feedConfig, []downloadResult{
+		{err: errors.New("HTTP Error 403: Forbidden")},
+	})
+
+	require.Equal(t, 1, downloader.calls)
+	require.Len(t, events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
+}
+
+func TestDownloadEpisodesDoesNotRetryNonTransientYouTubeFailure(t *testing.T) {
+	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
+		{err: errors.New("Sign in to confirm you are not a bot")},
+	})
+
+	require.Equal(t, 1, downloader.calls)
+	require.Len(t, events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
+}
+
+func TestDownloadEpisodesStopsYouTubeRetryWhenContextIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	downloader, events := runDownloadScenario(t, ctx, testFeedConfig(), []downloadResult{
+		{err: errors.New("HTTP Error 403: Forbidden")},
+		{body: "audio"},
+	})
+
+	require.Equal(t, 1, downloader.calls)
+	require.Len(t, events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
+	assert.Equal(t, context.Canceled.Error(), events[0].ErrorDetail)
+}
+
 func TestDownloadEpisodesRecordsDownloadFailedEvent(t *testing.T) {
 	wantErr := errors.New("download Authorization: Bearer secret-token failed")
 	sink := &recordingEventSink{}
@@ -587,6 +668,46 @@ func (h hookDownloader) Download(context.Context, *feed.Config, *model.Episode) 
 }
 
 func (h hookDownloader) PlaylistMetadata(context.Context, string) (ytdl.PlaylistMetadata, error) {
+	return ytdl.PlaylistMetadata{}, nil
+}
+
+type downloadResult struct {
+	body string
+	err  error
+}
+
+type sequenceDownloader struct {
+	results []downloadResult
+	calls   int
+}
+
+func runDownloadScenario(t *testing.T, ctx context.Context, feedConfig *feed.Config, results []downloadResult) (*sequenceDownloader, []model.RemoteEventDraft) {
+	t.Helper()
+	downloader := &sequenceDownloader{results: results}
+	sink := &recordingEventSink{}
+	manager, err := NewUpdater(nil, nil, "", downloader, &hookDB{}, &hookFS{},
+		WithRemoteEventSink(sink),
+		func(manager *Manager) {
+			manager.downloadRetryDelays = []time.Duration{0, 0}
+		},
+	)
+	require.NoError(t, err)
+
+	err = manager.downloadEpisodes(ctx, feedConfig, []*model.Episode{testEpisode()})
+	require.NoError(t, err)
+	return downloader, sink.events
+}
+
+func (d *sequenceDownloader) Download(context.Context, *feed.Config, *model.Episode) (io.ReadCloser, error) {
+	result := d.results[d.calls]
+	d.calls++
+	if result.err != nil {
+		return nil, result.err
+	}
+	return io.NopCloser(strings.NewReader(result.body)), nil
+}
+
+func (d *sequenceDownloader) PlaylistMetadata(context.Context, string) (ytdl.PlaylistMetadata, error) {
 	return ytdl.PlaylistMetadata{}, nil
 }
 
