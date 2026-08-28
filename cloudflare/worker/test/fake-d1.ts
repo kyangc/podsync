@@ -690,7 +690,7 @@ class FakeStatement {
       if (episode.feed_id !== String(feedID) || !feedDeleteCandidateStatus(episode.status)) continue;
       episode.status = "delete_pending";
       episode.deleted_at = "2026-07-06 00:00:00";
-      episode.purge_after = "2026-07-13 00:00:00";
+      episode.purge_after = purgeAfterFromSQL(this.query);
       episode.updated_at = "2026-07-06 00:00:00";
       changes++;
     }
@@ -732,7 +732,7 @@ class FakeStatement {
       if (current.status !== "pending" && current.status !== "visible" && current.status !== "hidden") return 0;
       current.status = "delete_pending";
       current.deleted_at = "2026-07-06 00:00:00";
-      current.purge_after = "2026-07-13 00:00:00";
+      current.purge_after = purgeAfterFromSQL(this.query);
       current.updated_at = "2026-07-06 00:00:00";
       return 1;
     }
@@ -1228,6 +1228,14 @@ function sqliteDateTimeMillis(value: string | null): number {
 function earlierTimestamp(current: string | undefined, incoming: string): string {
   if (current === undefined) return incoming;
   return incoming < current ? incoming : current;
+}
+
+function purgeAfterFromSQL(query: string): string {
+  const match = query.match(/'\+(\d+) days'/);
+  if (!match) throw new Error("unsupported purge grace SQL");
+  const value = new Date("2026-07-06T00:00:00Z");
+  value.setUTCDate(value.getUTCDate() + Number(match[1]));
+  return value.toISOString().replace("T", " ").replace(".000Z", "");
 }
 
 function coalesceSQLiteDateTimeMillis(primary: string | null, fallback: string | null): number {

@@ -68,7 +68,7 @@ class FakeR2Bucket {
 }
 
 describe("scheduled maintenance", () => {
-  it("marks episodes beyond a feed's keep_last for deletion with a seven-day grace period", async () => {
+  it("marks episodes beyond a feed's keep_last for deletion with a three-day grace period", async () => {
     const feedsByID = new Map<string, FakeFeedRow>([
       ["feed", { feed_id: "feed", provider: "youtube", keep_last: 2 }],
     ]);
@@ -90,7 +90,7 @@ describe("scheduled maintenance", () => {
     expect(episodesByKey.get(fakeEpisodeKey("feed", "oldest"))).toMatchObject({
       status: "delete_pending",
       deleted_at: "2026-07-06T12:00:00.000Z",
-      purge_after: "2026-07-13T12:00:00.000Z",
+      purge_after: "2026-07-09T12:00:00.000Z",
       updated_at: "2026-07-06T12:00:00.000Z",
     });
     expect(tombstoneChanges).toEqual([

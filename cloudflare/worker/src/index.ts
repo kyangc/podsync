@@ -53,7 +53,7 @@ const maxEventDetailLength = 2048;
 const utcTimestampPattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/;
 const eventRetentionDays = 30;
 const syncRunRetentionDays = 180;
-const retentionGraceDays = 7;
+const retentionGraceDays = 3;
 const retentionBatchLimit = 50;
 const purgeBatchLimit = 50;
 const maxFeedIDLength = 128;
@@ -3584,7 +3584,7 @@ function episodeStatusUpdateSQL(action: AdminEpisodeAction, episode?: EpisodeAdm
     return `UPDATE episodes
                SET status = 'delete_pending',
                    deleted_at = CURRENT_TIMESTAMP,
-                   purge_after = datetime(CURRENT_TIMESTAMP, '+7 days'),
+                   purge_after = datetime(CURRENT_TIMESTAMP, '+${retentionGraceDays} days'),
                    updated_at = CURRENT_TIMESTAMP
              WHERE feed_id = ?
                AND local_episode_id = ?
@@ -3872,7 +3872,7 @@ function feedDeleteEpisodeUpdateSQL(): string {
   return `UPDATE episodes
              SET status = 'delete_pending',
                  deleted_at = CURRENT_TIMESTAMP,
-                 purge_after = datetime(CURRENT_TIMESTAMP, '+7 days'),
+                 purge_after = datetime(CURRENT_TIMESTAMP, '+${retentionGraceDays} days'),
                  updated_at = CURRENT_TIMESTAMP
            WHERE feed_id = ?
              AND status IN ('pending', 'visible', 'hidden')`;

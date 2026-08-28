@@ -328,6 +328,9 @@ describe("admin actions", () => {
     expect(episodesByKey.get(fakeEpisodeKey("feed", "pending"))?.status).toBe("delete_pending");
     expect(episodesByKey.get(fakeEpisodeKey("feed", "visible"))?.status).toBe("delete_pending");
     expect(episodesByKey.get(fakeEpisodeKey("feed", "hidden"))?.status).toBe("delete_pending");
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "pending"))?.purge_after).toBe("2026-07-09 00:00:00");
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "visible"))?.purge_after).toBe("2026-07-09 00:00:00");
+    expect(episodesByKey.get(fakeEpisodeKey("feed", "hidden"))?.purge_after).toBe("2026-07-09 00:00:00");
     expect(episodesByKey.get(fakeEpisodeKey("feed", "delete"))?.status).toBe("delete_pending");
     expect(episodesByKey.get(fakeEpisodeKey("feed", "purged"))?.status).toBe("purged");
     expect(episodesByKey.get(fakeEpisodeKey("other", "visible"))?.status).toBe("visible");
@@ -478,7 +481,7 @@ describe("admin actions", () => {
     const got = episodesByKey.get(fakeEpisodeKey("feed", "episode"));
     expect(got?.status).toBe("delete_pending");
     expect(got?.deleted_at).not.toBeNull();
-    expect(got?.purge_after).not.toBeNull();
+    expect(got?.purge_after).toBe("2026-07-09 00:00:00");
     expect(tombstoneChanges[0]).toMatchObject({ status: "delete_pending", action: "delete" });
   });
 
