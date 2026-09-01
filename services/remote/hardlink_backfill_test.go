@@ -18,6 +18,27 @@ type stubRemotePublishTaskWalker struct {
 	err   error
 }
 
+type stubMissingSourceRestorer struct {
+	sourceRoot string
+	body       []byte
+	err        error
+	calls      int
+	dryRuns    []bool
+}
+
+func (r *stubMissingSourceRestorer) Restore(_ context.Context, task *model.RemotePublishTask, dryRun bool) error {
+	r.calls++
+	r.dryRuns = append(r.dryRuns, dryRun)
+	if r.err != nil || dryRun {
+		return r.err
+	}
+	path := filepath.Join(r.sourceRoot, filepath.FromSlash(task.MediaPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, r.body, 0644)
+}
+
 func (w *stubRemotePublishTaskWalker) WalkRemotePublishTasks(_ context.Context, status model.RemotePublishStatus, cb func(*model.RemotePublishTask) error) error {
 	if w.err != nil {
 		return w.err
@@ -137,6 +158,86 @@ func TestHardlinkBackfillReportsFailureCategoriesWithoutKeys(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, HardlinkBackfillResult{
 		Scanned: 3, Selected: 3, Failed: 3, SizeMismatch: 1, UnsafePath: 1, ConflictingTarget: 1,
+	}, result)
+}
+
+func TestHardlinkBackfillDryRunChecksRecoverableMissingSourcesWithoutWriting(t *testing.T) {
+	sourceRoot := t.TempDir()
+	publicRoot := t.TempDir()
+	publisher, err := NewHardlinkPublisher(sourceRoot, publicRoot)
+	require.NoError(t, err)
+	restorer := &stubMissingSourceRestorer{sourceRoot: sourceRoot, body: []byte("audio")}
+	task := &model.RemotePublishTask{
+		Status: model.RemotePublishSucceeded, MediaPath: "feed/missing.mp3", R2Key: "audio/feed/missing.mp3", Size: 5,
+	}
+
+	result, err := (&HardlinkBackfill{
+		Tasks:                 &stubRemotePublishTaskWalker{tasks: []*model.RemotePublishTask{task}},
+		Publisher:             publisher,
+		AllowedKeys:           map[string]struct{}{task.R2Key: {}},
+		MissingSourceRestorer: restorer,
+		DryRun:                true,
+	}).Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, HardlinkBackfillResult{
+		Scanned: 1, Selected: 1, MissingSource: 1, WouldRecoverSource: 1,
+	}, result)
+	assert.Equal(t, []bool{true}, restorer.dryRuns)
+	_, statErr := os.Stat(filepath.Join(sourceRoot, "feed", "missing.mp3"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestHardlinkBackfillRecoversMissingSourceThenLinksIt(t *testing.T) {
+	sourceRoot := t.TempDir()
+	publicRoot := t.TempDir()
+	publisher, err := NewHardlinkPublisher(sourceRoot, publicRoot)
+	require.NoError(t, err)
+	body := []byte("audio")
+	restorer := &stubMissingSourceRestorer{sourceRoot: sourceRoot, body: body}
+	task := &model.RemotePublishTask{
+		Status: model.RemotePublishSucceeded, MediaPath: "feed/missing.mp3", R2Key: "audio/feed/missing.mp3", Size: int64(len(body)),
+	}
+
+	result, err := (&HardlinkBackfill{
+		Tasks:                 &stubRemotePublishTaskWalker{tasks: []*model.RemotePublishTask{task}},
+		Publisher:             publisher,
+		AllowedKeys:           map[string]struct{}{task.R2Key: {}},
+		MissingSourceRestorer: restorer,
+	}).Run(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, HardlinkBackfillResult{
+		Scanned: 1, Selected: 1, Linked: 1, MissingSource: 1, RecoveredSource: 1,
+	}, result)
+	assert.Equal(t, []bool{false}, restorer.dryRuns)
+	sourceInfo, statErr := os.Stat(filepath.Join(sourceRoot, "feed", "missing.mp3"))
+	require.NoError(t, statErr)
+	targetInfo, statErr := os.Stat(filepath.Join(publicRoot, "audio", "feed", "missing.mp3"))
+	require.NoError(t, statErr)
+	assert.True(t, os.SameFile(sourceInfo, targetInfo))
+}
+
+func TestHardlinkBackfillReportsMissingSourceRecoveryFailure(t *testing.T) {
+	sourceRoot := t.TempDir()
+	publisher, err := NewHardlinkPublisher(sourceRoot, t.TempDir())
+	require.NoError(t, err)
+	task := &model.RemotePublishTask{
+		Status: model.RemotePublishSucceeded, MediaPath: "feed/missing.mp3", R2Key: "audio/feed/missing.mp3", Size: 5,
+	}
+	restorer := &stubMissingSourceRestorer{err: errors.New("r2 unavailable")}
+
+	result, err := (&HardlinkBackfill{
+		Tasks:                 &stubRemotePublishTaskWalker{tasks: []*model.RemotePublishTask{task}},
+		Publisher:             publisher,
+		AllowedKeys:           map[string]struct{}{task.R2Key: {}},
+		MissingSourceRestorer: restorer,
+		DryRun:                true,
+	}).Run(context.Background())
+
+	require.Error(t, err)
+	assert.Equal(t, HardlinkBackfillResult{
+		Scanned: 1, Selected: 1, Failed: 1, MissingSource: 1, OtherFailure: 1, RecoveryFailed: 1,
 	}, result)
 }
 

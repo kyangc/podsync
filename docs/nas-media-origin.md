@@ -81,16 +81,20 @@ docker compose stop podsync
 docker compose run --rm -v "$PWD/.secrets/retained-media.json:/run/secrets/retained-media.json:ro" podsync \
   --no-banner --config /app/config.toml --backfill-remote-media \
   --backfill-remote-media-key-file /run/secrets/retained-media.json \
+  --backfill-remote-media-recover-missing-from-r2 \
   --backfill-remote-media-dry-run
 docker compose run --rm -v "$PWD/.secrets/retained-media.json:/run/secrets/retained-media.json:ro" podsync \
   --no-banner --config /app/config.toml --backfill-remote-media \
-  --backfill-remote-media-key-file /run/secrets/retained-media.json
+  --backfill-remote-media-key-file /run/secrets/retained-media.json \
+  --backfill-remote-media-recover-missing-from-r2
 docker compose -f compose.yaml -f compose.media-origin.yml up -d podsync media media-tunnel
 ```
 
 Podsync must be stopped while the one-off command opens its Badger database; do not run the migration concurrently with the service.
 
-`failed > 0` or `missing_tasks > 0` is a failed migration, even if other links were created. Use the aggregate `missing_source`, `size_mismatch`, `unsafe_path`, `target_conflict`, and `other_failure` counters to resolve the cause without printing keys, then rerun idempotently.
+With `--backfill-remote-media-recover-missing-from-r2`, dry-run uses R2 HEAD only. The actual run atomically restores only selected missing sources, verifies the exact stored size, and then creates the hardlink. It never overwrites an existing source path.
+
+`failed > 0`, `missing_tasks > 0`, or `recovery_failed > 0` is a failed migration, even if other links were created. Use the aggregate `missing_source`, `size_mismatch`, `unsafe_path`, `target_conflict`, and `other_failure` counters to resolve the cause without printing keys, then rerun idempotently.
 
 ## Worker configuration
 

@@ -146,7 +146,7 @@ func loadRemoteMediaKeys(path string) (map[string]struct{}, error) {
 	return allowedKeys, nil
 }
 
-func runRemoteMediaBackfill(ctx context.Context, cfg *Config, tasks remotepublish.RemotePublishTaskWalker, keyFile string, dryRun bool) (remotepublish.HardlinkBackfillResult, error) {
+func runRemoteMediaBackfill(ctx context.Context, cfg *Config, tasks remotepublish.RemotePublishTaskWalker, keyFile string, recoverMissing bool, dryRun bool) (remotepublish.HardlinkBackfillResult, error) {
 	if cfg.Storage.Type != "local" || remoteMediaType(cfg) != remoteMediaTypeHardlink || cfg.RemoteMedia.PublicRoot == "" {
 		return remotepublish.HardlinkBackfillResult{}, errors.New("remote media backfill requires local storage and remote_media.type hardlink with public_root")
 	}
@@ -158,11 +158,19 @@ func runRemoteMediaBackfill(ctx context.Context, cfg *Config, tasks remotepublis
 	if err != nil {
 		return remotepublish.HardlinkBackfillResult{}, err
 	}
+	var restorer remotepublish.MissingSourceRestorer
+	if recoverMissing {
+		restorer, err = remotepublish.NewR2SourceRestorer(remoteR2Config(cfg), cfg.Storage.Local.DataDir)
+		if err != nil {
+			return remotepublish.HardlinkBackfillResult{}, err
+		}
+	}
 	return (&remotepublish.HardlinkBackfill{
-		Tasks:       tasks,
-		Publisher:   publisher,
-		AllowedKeys: allowedKeys,
-		DryRun:      dryRun,
+		Tasks:                 tasks,
+		Publisher:             publisher,
+		AllowedKeys:           allowedKeys,
+		MissingSourceRestorer: restorer,
+		DryRun:                dryRun,
 	}).Run(ctx)
 }
 

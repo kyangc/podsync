@@ -235,7 +235,7 @@ func TestRunRemoteMediaBackfillBuildsHardlinksFromSucceededTasks(t *testing.T) {
 
 	keyFile := filepath.Join(t.TempDir(), "retained-media.json")
 	require.NoError(t, os.WriteFile(keyFile, []byte(`["audio/feed/episode-token.mp3"]`), 0600))
-	result, err := runRemoteMediaBackfill(context.Background(), cfg, tasks, keyFile, false)
+	result, err := runRemoteMediaBackfill(context.Background(), cfg, tasks, keyFile, false, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, remotepublish.HardlinkBackfillResult{Scanned: 1, Selected: 1, Linked: 1}, result)
@@ -247,9 +247,27 @@ func TestRunRemoteMediaBackfillBuildsHardlinksFromSucceededTasks(t *testing.T) {
 }
 
 func TestRunRemoteMediaBackfillRejectsNonHardlinkConfig(t *testing.T) {
-	_, err := runRemoteMediaBackfill(context.Background(), &Config{}, &cmdFakeRemotePublishTaskWalker{}, "keys.json", true)
+	_, err := runRemoteMediaBackfill(context.Background(), &Config{}, &cmdFakeRemotePublishTaskWalker{}, "keys.json", false, true)
 
 	require.ErrorContains(t, err, "remote_media.type")
+}
+
+func TestRunRemoteMediaBackfillRecoveryRequiresR2Config(t *testing.T) {
+	sourceRoot := t.TempDir()
+	publicRoot := t.TempDir()
+	keyFile := filepath.Join(t.TempDir(), "retained-media.json")
+	require.NoError(t, os.WriteFile(keyFile, []byte(`[]`), 0600))
+	cfg := &Config{
+		Storage: fs.Config{Type: "local", Local: fs.LocalConfig{DataDir: sourceRoot}},
+		RemoteMedia: RemoteMediaConfig{
+			Type:       remoteMediaTypeHardlink,
+			PublicRoot: publicRoot,
+		},
+	}
+
+	_, err := runRemoteMediaBackfill(context.Background(), cfg, &cmdFakeRemotePublishTaskWalker{}, keyFile, true, true)
+
+	require.ErrorContains(t, err, "r2 endpoint")
 }
 
 func TestLoadRemoteMediaKeysRejectsDuplicates(t *testing.T) {

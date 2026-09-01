@@ -34,6 +34,7 @@ type Opts struct {
 	BackfillRemoteMedia    bool   `long:"backfill-remote-media" description:"Backfill NAS public-media hardlinks from succeeded remote publish tasks and exit"`
 	BackfillRemoteDryRun   bool   `long:"backfill-remote-media-dry-run" description:"Preview NAS public-media hardlink backfill without writing changes (requires --backfill-remote-media)"`
 	BackfillRemoteKeyFile  string `long:"backfill-remote-media-key-file" description:"JSON array of authoritative retained media keys (required with --backfill-remote-media)"`
+	BackfillRemoteRecover  bool   `long:"backfill-remote-media-recover-missing-from-r2" description:"Recover selected missing source files from R2 during NAS backfill"`
 	Debug                  bool   `long:"debug"`
 	NoBanner               bool   `long:"no-banner"`
 }
@@ -90,6 +91,9 @@ func main() {
 	if opts.BackfillRemoteKeyFile != "" && !opts.BackfillRemoteMedia {
 		log.Fatal("--backfill-remote-media-key-file requires --backfill-remote-media")
 	}
+	if opts.BackfillRemoteRecover && !opts.BackfillRemoteMedia {
+		log.Fatal("--backfill-remote-media-recover-missing-from-r2 requires --backfill-remote-media")
+	}
 
 	if !opts.NoBanner {
 		log.Info(banner)
@@ -138,22 +142,25 @@ func main() {
 		}
 	}()
 	if opts.BackfillRemoteMedia {
-		result, backfillErr := runRemoteMediaBackfill(ctx, cfg, database, opts.BackfillRemoteKeyFile, opts.BackfillRemoteDryRun)
+		result, backfillErr := runRemoteMediaBackfill(ctx, cfg, database, opts.BackfillRemoteKeyFile, opts.BackfillRemoteRecover, opts.BackfillRemoteDryRun)
 		log.WithFields(log.Fields{
-			"scanned":         result.Scanned,
-			"selected":        result.Selected,
-			"skipped":         result.Skipped,
-			"already_linked":  result.AlreadyLinked,
-			"would_link":      result.WouldLink,
-			"linked":          result.Linked,
-			"failed":          result.Failed,
-			"missing_tasks":   result.MissingTasks,
-			"missing_source":  result.MissingSource,
-			"size_mismatch":   result.SizeMismatch,
-			"unsafe_path":     result.UnsafePath,
-			"target_conflict": result.ConflictingTarget,
-			"other_failure":   result.OtherFailure,
-			"dry_run":         opts.BackfillRemoteDryRun,
+			"scanned":              result.Scanned,
+			"selected":             result.Selected,
+			"skipped":              result.Skipped,
+			"already_linked":       result.AlreadyLinked,
+			"would_link":           result.WouldLink,
+			"linked":               result.Linked,
+			"failed":               result.Failed,
+			"missing_tasks":        result.MissingTasks,
+			"missing_source":       result.MissingSource,
+			"size_mismatch":        result.SizeMismatch,
+			"unsafe_path":          result.UnsafePath,
+			"target_conflict":      result.ConflictingTarget,
+			"other_failure":        result.OtherFailure,
+			"would_recover_source": result.WouldRecoverSource,
+			"recovered_source":     result.RecoveredSource,
+			"recovery_failed":      result.RecoveryFailed,
+			"dry_run":              opts.BackfillRemoteDryRun,
 		}).Info("remote media backfill finished")
 		if backfillErr != nil {
 			log.WithError(backfillErr).Fatal("remote media backfill incomplete")

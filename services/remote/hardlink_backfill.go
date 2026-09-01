@@ -14,26 +14,30 @@ type RemotePublishTaskWalker interface {
 }
 
 type HardlinkBackfill struct {
-	Tasks       RemotePublishTaskWalker
-	Publisher   *HardlinkPublisher
-	AllowedKeys map[string]struct{}
-	DryRun      bool
+	Tasks                 RemotePublishTaskWalker
+	Publisher             *HardlinkPublisher
+	AllowedKeys           map[string]struct{}
+	MissingSourceRestorer MissingSourceRestorer
+	DryRun                bool
 }
 
 type HardlinkBackfillResult struct {
-	Scanned           int
-	Selected          int
-	Skipped           int
-	AlreadyLinked     int
-	WouldLink         int
-	Linked            int
-	Failed            int
-	MissingTasks      int
-	MissingSource     int
-	SizeMismatch      int
-	UnsafePath        int
-	ConflictingTarget int
-	OtherFailure      int
+	Scanned            int
+	Selected           int
+	Skipped            int
+	AlreadyLinked      int
+	WouldLink          int
+	Linked             int
+	Failed             int
+	MissingTasks       int
+	MissingSource      int
+	SizeMismatch       int
+	UnsafePath         int
+	ConflictingTarget  int
+	OtherFailure       int
+	WouldRecoverSource int
+	RecoveredSource    int
+	RecoveryFailed     int
 }
 
 func (r *HardlinkBackfillResult) recordFailure(err error) {
@@ -47,6 +51,19 @@ func (r *HardlinkBackfillResult) recordFailure(err error) {
 		r.UnsafePath++
 	case errors.Is(err, ErrHardlinkTargetConflict):
 		r.ConflictingTarget++
+	default:
+		r.OtherFailure++
+	}
+}
+
+func (r *HardlinkBackfillResult) recordRecoveryFailure(err error) {
+	r.Failed++
+	r.RecoveryFailed++
+	switch {
+	case errors.Is(err, ErrHardlinkSourceSizeMismatch):
+		r.SizeMismatch++
+	case errors.Is(err, ErrUnsafeMediaPath):
+		r.UnsafePath++
 	default:
 		r.OtherFailure++
 	}
@@ -75,6 +92,24 @@ func (b *HardlinkBackfill) Run(ctx context.Context) (HardlinkBackfillResult, err
 		seenAllowedKeys[task.R2Key] = struct{}{}
 		linked, err := b.Publisher.Published(task)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) && b.MissingSourceRestorer != nil {
+				result.MissingSource++
+				if restoreErr := b.MissingSourceRestorer.Restore(ctx, task, b.DryRun); restoreErr != nil {
+					result.recordRecoveryFailure(restoreErr)
+					return nil
+				}
+				if b.DryRun {
+					result.WouldRecoverSource++
+					return nil
+				}
+				result.RecoveredSource++
+				if uploadErr := b.Publisher.Upload(ctx, task, nil); uploadErr != nil {
+					result.recordFailure(uploadErr)
+					return nil
+				}
+				result.Linked++
+				return nil
+			}
 			result.recordFailure(err)
 			return nil
 		}
