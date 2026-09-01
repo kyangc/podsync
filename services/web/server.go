@@ -1,10 +1,12 @@
 package web
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"expvar"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -17,6 +19,22 @@ type Server struct {
 	http.Server
 	db               db.Storage
 	healthMaxFeedAge time.Duration
+	mediaLifecycle   MediaLifecycle
+	mediaToken       string
+}
+
+type MediaLifecycle interface {
+	Exists(key string) (bool, error)
+	Delete(key string) error
+}
+
+type Option func(*Server)
+
+func WithMediaLifecycle(lifecycle MediaLifecycle, token string) Option {
+	return func(server *Server) {
+		server.mediaLifecycle = lifecycle
+		server.mediaToken = token
+	}
 }
 
 type Config struct {
@@ -53,7 +71,7 @@ type Config struct {
 
 const defaultHealthMaxFeedAge = 24 * time.Hour
 
-func New(cfg Config, storage http.FileSystem, database db.Storage) *Server {
+func New(cfg Config, storage http.FileSystem, database db.Storage, options ...Option) *Server {
 	port := cfg.Port
 	if port == 0 {
 		port = 8080
@@ -67,6 +85,9 @@ func New(cfg Config, storage http.FileSystem, database db.Storage) *Server {
 	srv := Server{
 		db:               database,
 		healthMaxFeedAge: cfg.healthMaxFeedAge(),
+	}
+	for _, option := range options {
+		option(&srv)
 	}
 
 	srv.Addr = fmt.Sprintf("%s:%d", bindAddress, port)
@@ -83,6 +104,9 @@ func New(cfg Config, storage http.FileSystem, database db.Storage) *Server {
 
 	// Add health check endpoint
 	mux.HandleFunc("/health", srv.healthCheckHandler)
+	if srv.mediaLifecycle != nil && srv.mediaToken != "" {
+		mux.HandleFunc("/api/remote-media/", srv.remoteMediaLifecycleHandler)
+	}
 
 	// Optionally enable debug endpoints (disabled by default for security)
 	if cfg.DebugEndpoints {
@@ -98,6 +122,43 @@ func New(cfg Config, storage http.FileSystem, database db.Storage) *Server {
 	}
 
 	return &srv
+}
+
+func (s *Server) remoteMediaLifecycleHandler(w http.ResponseWriter, r *http.Request) {
+	const prefix = "/api/remote-media/"
+	expected := []byte("Bearer " + s.mediaToken)
+	provided := []byte(r.Header.Get("Authorization"))
+	if len(expected) != len(provided) || subtle.ConstantTimeCompare(expected, provided) != 1 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	key := strings.TrimPrefix(r.URL.Path, prefix)
+	if key == "" {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodHead:
+		exists, err := s.mediaLifecycle.Exists(key)
+		if err != nil {
+			http.Error(w, "media lifecycle check failed", http.StatusBadGateway)
+			return
+		}
+		if !exists {
+			http.NotFound(w, r)
+			return
+		}
+	case http.MethodDelete:
+		if err := s.mediaLifecycle.Delete(key); err != nil {
+			http.Error(w, "media lifecycle delete failed", http.StatusBadGateway)
+			return
+		}
+	default:
+		w.Header().Set("Allow", http.MethodHead+", "+http.MethodDelete)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type HealthStatus struct {

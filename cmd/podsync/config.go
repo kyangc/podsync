@@ -44,6 +44,8 @@ type Config struct {
 	Remote RemoteConfig `toml:"remote"`
 	// R2 is parsed for later remote publish phases.
 	R2 R2Config `toml:"r2"`
+	// RemoteMedia selects the remote public-media storage backend.
+	RemoteMedia RemoteMediaConfig `toml:"remote_media"`
 	// CookieProfiles maps remote feed cookie_profile references to local cookie files.
 	CookieProfiles map[string]CookieProfile `toml:"cookie_profiles"`
 	// LocalFeeds preserves original local feeds for remote-mode emergency fallback.
@@ -69,6 +71,12 @@ type R2Config struct {
 	Prefix          string `toml:"prefix"`
 	AccessKeyID     string `toml:"access_key_id"`
 	SecretAccessKey string `toml:"secret_access_key"`
+}
+
+type RemoteMediaConfig struct {
+	Type       string `toml:"type"`
+	Prefix     string `toml:"prefix"`
+	PublicRoot string `toml:"public_root"`
 }
 
 type CookieProfile struct {
@@ -176,6 +184,18 @@ func (c *Config) validate(configPath string) error {
 		}
 		if c.Remote.ConfigRefreshInterval <= 0 {
 			result = multierror.Append(result, errors.New("remote.config_refresh_interval must be positive"))
+		}
+		switch c.RemoteMedia.Type {
+		case "", remoteMediaTypeR2:
+		case remoteMediaTypeHardlink:
+			if c.Storage.Type != "local" {
+				result = multierror.Append(result, errors.New("remote_media.type hardlink requires local storage"))
+			}
+			if c.RemoteMedia.PublicRoot == "" {
+				result = multierror.Append(result, errors.New("remote_media.public_root is required for hardlink storage"))
+			}
+		default:
+			result = multierror.Append(result, errors.Errorf("unknown remote_media.type: %s", c.RemoteMedia.Type))
 		}
 	}
 

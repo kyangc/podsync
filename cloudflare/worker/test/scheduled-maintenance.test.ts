@@ -238,6 +238,48 @@ describe("scheduled maintenance", () => {
     expect(result.purge_errors).toBe(0);
   });
 
+  it("purges due NAS media links through the authenticated media origin", async () => {
+    const originalFetch = globalThis.fetch;
+    let originRequest: Request | undefined;
+    globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      if (request.url.startsWith("https://podsync-media-admin.example/")) {
+        originRequest = request;
+        return new Response(null, { status: 204 });
+      }
+      return originalFetch(input, init);
+    };
+    const episodesByKey = new Map([
+      [fakeEpisodeKey("feed", "episode"), episode()],
+    ]);
+    const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+
+    try {
+      const result = await runScheduledMaintenance(
+        {
+          DB: fakeD1({ episodesByKey, tombstoneChanges }),
+          NAS_TOKEN: "secret",
+          MEDIA_ORIGIN_BASE_URL: "https://podsync-media-admin.example/api/remote-media/",
+          MEDIA_ORIGIN_ACCESS_CLIENT_ID: "client-id",
+          MEDIA_ORIGIN_ACCESS_CLIENT_SECRET: "client-secret",
+        },
+        new Date("2026-07-06T12:00:00Z"),
+      );
+
+      expect(originRequest?.method).toBe("DELETE");
+      expect(originRequest?.url).toBe("https://podsync-media-admin.example/api/remote-media/audio/feed/episode.mp3");
+      expect(originRequest?.headers.get("authorization")).toBe("Bearer secret");
+      expect(originRequest?.headers.get("cf-access-client-id")).toBe("client-id");
+      expect(originRequest?.headers.get("cf-access-client-secret")).toBe("client-secret");
+      expect(episodesByKey.get(fakeEpisodeKey("feed", "episode"))?.status).toBe("purged");
+      expect(tombstoneChanges).toHaveLength(1);
+      expect(result.episodes_purged).toBe(1);
+      expect(result.purge_errors).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("keeps processing later candidates after an R2 delete failure", async () => {
     const bucket = new FakeR2Bucket();
     bucket.failKeys.add("audio/feed/fail.mp3");

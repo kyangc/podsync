@@ -31,6 +31,8 @@ type Opts struct {
 	Headless               bool   `long:"headless"`
 	MigrateFilenames       bool   `long:"migrate-filenames" description:"Migrate existing downloaded filenames to current filename_template and exit"`
 	MigrateFilenamesDryRun bool   `long:"migrate-filenames-dry-run" description:"Preview filename migration without writing changes (requires --migrate-filenames)"`
+	BackfillRemoteMedia    bool   `long:"backfill-remote-media" description:"Backfill NAS public-media hardlinks from succeeded remote publish tasks and exit"`
+	BackfillRemoteDryRun   bool   `long:"backfill-remote-media-dry-run" description:"Preview NAS public-media hardlink backfill without writing changes (requires --backfill-remote-media)"`
 	Debug                  bool   `long:"debug"`
 	NoBanner               bool   `long:"no-banner"`
 }
@@ -77,6 +79,9 @@ func main() {
 	}
 	if opts.MigrateFilenamesDryRun && !opts.MigrateFilenames {
 		log.Fatal("--migrate-filenames-dry-run requires --migrate-filenames")
+	}
+	if opts.BackfillRemoteDryRun && !opts.BackfillRemoteMedia {
+		log.Fatal("--backfill-remote-media-dry-run requires --backfill-remote-media")
 	}
 
 	if !opts.NoBanner {
@@ -125,6 +130,21 @@ func main() {
 			log.WithError(err).Error("failed to close database")
 		}
 	}()
+	if opts.BackfillRemoteMedia {
+		result, backfillErr := runRemoteMediaBackfill(ctx, cfg, database, opts.BackfillRemoteDryRun)
+		log.WithFields(log.Fields{
+			"scanned":        result.Scanned,
+			"already_linked": result.AlreadyLinked,
+			"would_link":     result.WouldLink,
+			"linked":         result.Linked,
+			"failed":         result.Failed,
+			"dry_run":        opts.BackfillRemoteDryRun,
+		}).Info("remote media backfill finished")
+		if backfillErr != nil {
+			log.WithError(backfillErr).Fatal("remote media backfill incomplete")
+		}
+		return
+	}
 
 	var storage fs.Storage
 	switch cfg.Storage.Type {
@@ -209,7 +229,7 @@ func main() {
 	if err != nil {
 		log.WithError(err).Warn("remote publish disabled")
 	} else if remoteProcessor == nil && cfg.Remote.Enabled {
-		log.Warn("remote publish disabled: R2 requires local storage and complete [r2] config")
+		log.Warn("remote publish disabled: configured remote media backend is incomplete")
 	}
 	remoteTombstoneSyncer, err := buildRemoteTombstoneSyncer(cfg, database, newRemoteTombstoneFetcher, remoteEvents)
 	if err != nil {
@@ -357,7 +377,11 @@ func main() {
 	}
 
 	// Run web server
-	srv := web.New(cfg.Server, storage, database)
+	webOptions, err := remoteMediaWebOptions(cfg)
+	if err != nil {
+		log.WithError(err).Fatal("failed to configure remote media lifecycle")
+	}
+	srv := web.New(cfg.Server, storage, database, webOptions...)
 
 	group.Go(func() error {
 		log.Infof("running listener at %s", srv.Addr)

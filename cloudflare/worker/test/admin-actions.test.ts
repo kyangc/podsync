@@ -506,6 +506,46 @@ describe("admin actions", () => {
     expect(tombstoneChanges[0]).toMatchObject({ status: "visible", action: "restore" });
   });
 
+  it("restores delete_pending episodes after an authenticated NAS media origin HEAD", async () => {
+    const originalFetch = globalThis.fetch;
+    let originRequest: Request | undefined;
+    globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      if (request.url.startsWith("https://podsync-media-admin.example/")) {
+        originRequest = request;
+        return new Response(null, { status: 204 });
+      }
+      return originalFetch(input, init);
+    };
+    const episodesByKey = new Map([
+      [fakeEpisodeKey("feed", "episode"), episode("delete_pending", { deleted_at: "2026-07-06 00:00:00", purge_after: "2026-07-13 00:00:00" })],
+    ]);
+    const tombstoneChanges: FakeTombstoneChangeRow[] = [];
+
+    try {
+      const response = await worker.fetch(
+        adminRequest("/api/admin/episodes/status", { feed_id: "feed", local_episode_id: "episode", action: "restore" }),
+        {
+          DB: fakeD1({ episodesByKey, tombstoneChanges }),
+          NAS_TOKEN: nasToken,
+          MEDIA_ORIGIN_BASE_URL: "https://podsync-media-admin.example/api/remote-media/",
+          MEDIA_ORIGIN_ACCESS_CLIENT_ID: "client-id",
+          MEDIA_ORIGIN_ACCESS_CLIENT_SECRET: "client-secret",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(originRequest?.method).toBe("HEAD");
+      expect(originRequest?.url).toBe("https://podsync-media-admin.example/api/remote-media/audio/feed/episode.mp3");
+      expect(originRequest?.headers.get("authorization")).toBe(`Bearer ${nasToken}`);
+      expect(originRequest?.headers.get("cf-access-client-id")).toBe("client-id");
+      expect(originRequest?.headers.get("cf-access-client-secret")).toBe("client-secret");
+      expect(episodesByKey.get(fakeEpisodeKey("feed", "episode"))?.status).toBe("visible");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("restores delete_pending episodes without bucket when r2 key is null or empty", async () => {
     for (const r2Key of [null, ""]) {
       const episodesByKey = new Map([
