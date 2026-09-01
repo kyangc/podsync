@@ -233,10 +233,12 @@ func TestRunRemoteMediaBackfillBuildsHardlinksFromSucceededTasks(t *testing.T) {
 		{Status: model.RemotePublishSucceeded, MediaPath: "feed/episode.mp3", R2Key: "audio/feed/episode-token.mp3", Size: 5},
 	}}
 
-	result, err := runRemoteMediaBackfill(context.Background(), cfg, tasks, false)
+	keyFile := filepath.Join(t.TempDir(), "retained-media.json")
+	require.NoError(t, os.WriteFile(keyFile, []byte(`["audio/feed/episode-token.mp3"]`), 0600))
+	result, err := runRemoteMediaBackfill(context.Background(), cfg, tasks, keyFile, false)
 
 	require.NoError(t, err)
-	assert.Equal(t, remotepublish.HardlinkBackfillResult{Scanned: 1, Linked: 1}, result)
+	assert.Equal(t, remotepublish.HardlinkBackfillResult{Scanned: 1, Selected: 1, Linked: 1}, result)
 	sourceInfo, err := os.Stat(filepath.Join(sourceRoot, "feed", "episode.mp3"))
 	require.NoError(t, err)
 	targetInfo, err := os.Stat(filepath.Join(publicRoot, "audio", "feed", "episode-token.mp3"))
@@ -245,9 +247,18 @@ func TestRunRemoteMediaBackfillBuildsHardlinksFromSucceededTasks(t *testing.T) {
 }
 
 func TestRunRemoteMediaBackfillRejectsNonHardlinkConfig(t *testing.T) {
-	_, err := runRemoteMediaBackfill(context.Background(), &Config{}, &cmdFakeRemotePublishTaskWalker{}, true)
+	_, err := runRemoteMediaBackfill(context.Background(), &Config{}, &cmdFakeRemotePublishTaskWalker{}, "keys.json", true)
 
 	require.ErrorContains(t, err, "remote_media.type")
+}
+
+func TestLoadRemoteMediaKeysRejectsDuplicates(t *testing.T) {
+	keyFile := filepath.Join(t.TempDir(), "retained-media.json")
+	require.NoError(t, os.WriteFile(keyFile, []byte(`["audio/feed/one.mp3","audio/feed/one.mp3"]`), 0600))
+
+	_, err := loadRemoteMediaKeys(keyFile)
+
+	require.ErrorContains(t, err, "duplicate")
 }
 
 func TestRemoteMediaWebOptionsExposeConfiguredHardlinkLifecycle(t *testing.T) {

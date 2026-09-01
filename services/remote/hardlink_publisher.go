@@ -12,6 +12,11 @@ import (
 	"github.com/mxpv/podsync/pkg/model"
 )
 
+var (
+	ErrHardlinkSourceSizeMismatch = errors.New("hardlink source size mismatch")
+	ErrHardlinkTargetConflict     = errors.New("hardlink target conflicts with source")
+)
+
 type HardlinkPublisher struct {
 	sourceRoot string
 	publicRoot string
@@ -139,7 +144,7 @@ func (p *HardlinkPublisher) Published(task *model.RemotePublishTask) (bool, erro
 		return false, err
 	}
 	if !os.SameFile(sourceInfo, targetInfo) {
-		return false, errors.New("hardlink target already exists with different content")
+		return false, errors.Wrap(ErrHardlinkTargetConflict, "hardlink target already exists with different content")
 	}
 	return true, nil
 }
@@ -174,7 +179,7 @@ func (p *HardlinkPublisher) Upload(_ context.Context, task *model.RemotePublishT
 			return statErr
 		}
 		if !os.SameFile(sourceInfo, targetInfo) {
-			return errors.New("hardlink target already exists with different content")
+			return errors.Wrap(ErrHardlinkTargetConflict, "hardlink target already exists with different content")
 		}
 	}
 	return nil
@@ -208,7 +213,7 @@ func (p *HardlinkPublisher) paths(task *model.RemotePublishTask) (string, string
 		return "", "", nil, errors.Wrap(ErrUnsafeMediaPath, "hardlink source is not a regular file")
 	}
 	if sourceInfo.Size() != task.Size {
-		return "", "", nil, errors.Errorf("hardlink source size mismatch: got %d want %d", sourceInfo.Size(), task.Size)
+		return "", "", nil, errors.Wrapf(ErrHardlinkSourceSizeMismatch, "got %d want %d", sourceInfo.Size(), task.Size)
 	}
 	return sourcePath, targetPath, sourceInfo, nil
 }

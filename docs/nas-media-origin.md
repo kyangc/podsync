@@ -35,6 +35,7 @@ Use the media compose file as an override in the existing Podsync Compose projec
 mkdir -p data/.remote-media .secrets
 chmod 700 .secrets
 install -m 600 /path/to/tunnel-token .secrets/media-tunnel-token
+chown 65532:65532 .secrets/media-tunnel-token
 docker compose -f compose.yaml -f compose.media-origin.yml config
 docker compose -f compose.yaml -f compose.media-origin.yml up -d media media-tunnel
 ```
@@ -59,18 +60,37 @@ prefix = "audio"
 public_root = "/app/data/.remote-media"
 ```
 
-First run the bounded migration mode. It only scans `succeeded` remote-publish tasks and prints aggregate counts; it does not log object keys:
+First export the authoritative retained key set from D1. Retained means `visible`, `hidden`, or `delete_pending`; `purged` keys must never be republished. Keep the generated JSON file private and delete it after acceptance:
+
+```sh
+umask 077
+raw_file=$(mktemp)
+key_file=$(mktemp)
+npx wrangler d1 execute podsync-control-plane --remote --json \
+  --command "SELECT DISTINCT r2_key FROM episodes WHERE status IN ('visible','hidden','delete_pending') AND r2_key IS NOT NULL AND r2_key <> '' ORDER BY r2_key;" \
+  > "$raw_file"
+jq '[.[].results[]?.r2_key] | unique' "$raw_file" > "$key_file"
+rm "$raw_file"
+jq 'length' "$key_file"
+```
+
+Securely copy `"$key_file"` to `.secrets/retained-media.json` on the NAS. The bounded migration only selects `succeeded` remote-publish tasks whose exact key is in that JSON array and prints aggregate counts; it does not log object keys:
 
 ```sh
 docker compose stop podsync
-docker compose run --rm podsync --no-banner --config /app/config.toml --backfill-remote-media --backfill-remote-media-dry-run
-docker compose run --rm podsync --no-banner --config /app/config.toml --backfill-remote-media
+docker compose run --rm -v "$PWD/.secrets/retained-media.json:/run/secrets/retained-media.json:ro" podsync \
+  --no-banner --config /app/config.toml --backfill-remote-media \
+  --backfill-remote-media-key-file /run/secrets/retained-media.json \
+  --backfill-remote-media-dry-run
+docker compose run --rm -v "$PWD/.secrets/retained-media.json:/run/secrets/retained-media.json:ro" podsync \
+  --no-banner --config /app/config.toml --backfill-remote-media \
+  --backfill-remote-media-key-file /run/secrets/retained-media.json
 docker compose -f compose.yaml -f compose.media-origin.yml up -d podsync media media-tunnel
 ```
 
 Podsync must be stopped while the one-off command opens its Badger database; do not run the migration concurrently with the service.
 
-`failed > 0` is a failed migration, even if other links were created. Resolve missing source files, size mismatches, or conflicting target files, then rerun idempotently.
+`failed > 0` or `missing_tasks > 0` is a failed migration, even if other links were created. Use the aggregate `missing_source`, `size_mismatch`, `unsafe_path`, `target_conflict`, and `other_failure` counters to resolve the cause without printing keys, then rerun idempotently.
 
 ## Worker configuration
 
@@ -97,7 +117,7 @@ Require:
 - `HEAD` returns 200 with the expected `Content-Length` and MIME type;
 - Range returns 206 and exactly 1024 bytes;
 - repeat GET/Range shows valid Cloudflare cache behavior without `private`/`no-store`;
-- backfill has `failed=0`, link count matches the authoritative D1-visible key set, and sampled files share an inode with their source;
+- backfill has `failed=0` and `missing_tasks=0`, selected/link counts match the authoritative D1-retained key set, and sampled files share an inode with their source;
 - a real external podcast client downloads and seeks successfully;
 - management HEAD works only through the Worker/service-token path;
 - failed management DELETE leaves D1 `delete_pending`, while successful DELETE removes only the hardlink and permits D1 `purged`.
