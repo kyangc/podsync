@@ -4095,6 +4095,33 @@ async function handleNasConfig(request: Request, env: Env): Promise<Response> {
   return text(toml, 200, "application/toml; charset=utf-8");
 }
 
+async function handleNasMediaOriginCheck(request: Request, env: Env): Promise<Response> {
+  if (!(await isAuthorizedNasRequest(request, env))) {
+    return text("unauthorized", 401);
+  }
+  if (!env.MEDIA_ORIGIN_BASE_URL) {
+    return text("media origin unavailable", 503);
+  }
+
+  const body = await readBoundedJson(request);
+  if (body instanceof Response) return body;
+  if (!body || typeof body !== "object") return badRequest("invalid media origin check body");
+  const key = (body as Record<string, unknown>).r2_key;
+  if (!nonEmptyString(key)) return badRequest("r2_key is required");
+  try {
+    validateR2Key(key);
+  } catch {
+    return badRequest("r2_key is invalid");
+  }
+
+  try {
+    if (!(await mediaObjectExists(env, key))) return text("not found", 404);
+  } catch {
+    return text("media origin check failed", 502);
+  }
+  return new Response(null, { status: 204 });
+}
+
 async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `SELECT f.feed_id, f.provider, f.url, f.title_override, f.description_override,
@@ -4970,6 +4997,11 @@ export default {
     if (url.pathname === "/api/nas/config.toml") {
       if (request.method !== "GET") return methodNotAllowed();
       return handleNasConfig(request, env);
+    }
+
+    if (url.pathname === "/api/nas/media-origin/check") {
+      if (request.method !== "POST") return methodNotAllowed();
+      return handleNasMediaOriginCheck(request, env);
     }
 
     if (url.pathname === "/api/nas/episodes/upsert") {

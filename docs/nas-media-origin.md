@@ -106,6 +106,15 @@ Keep `MEDIA_PUBLIC_BASE_URL` unchanged. Add `MEDIA_ORIGIN_BASE_URL` as a normal 
 
 During the observation window, leave `MEDIA_BUCKET` bound. When `MEDIA_ORIGIN_BASE_URL` is present, restore HEAD and scheduled purge DELETE use the NAS management route; otherwise they retain the R2 behavior.
 
+From the NAS, verify the complete Worker -> Access -> Tunnel -> Podsync HEAD path without changing D1:
+
+```sh
+curl -fsS -o /dev/null -X POST https://PODSYNC_WORKER/api/nas/media-origin/check \
+  -H "Authorization: Bearer $NAS_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"r2_key":"audio/RETAINED_KEY.mp3"}'
+```
+
 ## Acceptance gates
 
 Before public cutover, test representative small, medium, and largest objects on the temporary hostname:
@@ -123,7 +132,7 @@ Require:
 - repeat GET/Range shows valid Cloudflare cache behavior without `private`/`no-store`;
 - backfill has `failed=0` and `missing_tasks=0`, selected/link counts match the authoritative D1-retained key set, and sampled files share an inode with their source;
 - a real external podcast client downloads and seeks successfully;
-- management HEAD works only through the Worker/service-token path;
+- the authenticated `/api/nas/media-origin/check` returns 204 through the Worker/service-token path;
 - failed management DELETE leaves D1 `delete_pending`, while successful DELETE removes only the hardlink and permits D1 `purged`.
 
 After changing the production media Tunnel route, observe for at least seven complete days. Track Tunnel restarts, origin 4xx/5xx, Range failures, D1 restore/purge failures, and NAS availability. Only a separate, explicit retirement change may remove the R2 binding or R2 objects.
