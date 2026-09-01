@@ -3597,10 +3597,25 @@ function mediaOriginRequest(env: Env, key: string, method: "HEAD" | "DELETE"): R
 async function mediaObjectExists(env: Env, key: string): Promise<boolean> {
   const originRequest = mediaOriginRequest(env, key, "HEAD");
   if (originRequest) {
-    const response = await fetch(originRequest);
-    if (response.status === 404) return false;
-    if (!response.ok) throw new Error(`media origin HEAD returned ${response.status}`);
-    return true;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let response: Response;
+      try {
+        const request = attempt === 0 ? originRequest : mediaOriginRequest(env, key, "HEAD")!;
+        response = await fetch(request);
+      } catch (error) {
+        if (attempt === 0) continue;
+        throw error;
+      }
+      if (response.status === 404) return false;
+      if (response.ok) return true;
+      const retryable = response.status === 429 || response.status >= 500;
+      if (attempt === 0 && retryable) {
+        await response.body?.cancel();
+        continue;
+      }
+      throw new Error(`media origin HEAD returned ${response.status}`);
+    }
+    throw new Error("media origin HEAD failed");
   }
   if (!env.MEDIA_BUCKET) throw new Error("media storage unavailable");
   return (await env.MEDIA_BUCKET.head(key)) !== null;
@@ -4116,8 +4131,10 @@ async function handleNasMediaOriginCheck(request: Request, env: Env): Promise<Re
 
   try {
     if (!(await mediaObjectExists(env, key))) return text("not found", 404);
-  } catch {
-    return text("media origin check failed", 502);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const status = /^media origin HEAD returned ([0-9]{3})$/.exec(message)?.[1];
+    return text(status ? `media origin check failed: upstream status ${status}` : "media origin check failed: upstream request failed", 502);
   }
   return new Response(null, { status: 204 });
 }

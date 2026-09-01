@@ -62,6 +62,33 @@ describe("NAS media origin check", () => {
     expect(response.status).toBe(404);
   });
 
+  it("retries one transient NAS origin HEAD", async () => {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      return new Response(null, { status: calls === 1 ? 502 : 204 });
+    };
+
+    const response = await worker.fetch(request({ r2_key: "audio/feed/episode.mp3" }), env());
+
+    expect(response.status).toBe(204);
+    expect(calls).toBe(2);
+  });
+
+  it("does not retry an authorization failure", async () => {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      return new Response(null, { status: 403 });
+    };
+
+    const response = await worker.fetch(request({ r2_key: "audio/feed/episode.mp3" }), env());
+
+    expect(response.status).toBe(502);
+    expect(await response.text()).toContain("upstream status 403");
+    expect(calls).toBe(1);
+  });
+
   it("rejects invalid keys before calling the origin", async () => {
     let called = false;
     globalThis.fetch = async () => {
