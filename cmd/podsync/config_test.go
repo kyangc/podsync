@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -246,7 +247,7 @@ data_dir = "/data"
 enabled = true
 base_url = "https://podcast.example.com"
 token = "secret"
-cache_path = "` + path + `"
+cache_path = ` + strconv.Quote(path) + `
 `
 	require.NoError(t, os.WriteFile(path, []byte(file), 0o600))
 
