@@ -23,6 +23,74 @@ func (m *mockFileSystem) Open(name string) (http.File, error) {
 	return nil, http.ErrMissingFile
 }
 
+type stubMediaLifecycle struct {
+	existing map[string]bool
+	checked  []string
+	deleted  []string
+}
+
+func (s *stubMediaLifecycle) Exists(key string) (bool, error) {
+	s.checked = append(s.checked, key)
+	return s.existing[key], nil
+}
+
+func (s *stubMediaLifecycle) Delete(key string) error {
+	s.deleted = append(s.deleted, key)
+	delete(s.existing, key)
+	return nil
+}
+
+func TestServerPathPrefix(t *testing.T) {
+	tmpDir := t.TempDir()
+	storage, err := fs.NewLocal(tmpDir, false, false)
+	require.NoError(t, err)
+
+	_, err = storage.Create(context.Background(), "example.xml", bytes.NewReader([]byte("feed content")))
+	require.NoError(t, err)
+	_, err = storage.Create(context.Background(), "example/episode.mp3", bytes.NewReader([]byte("audio content")))
+	require.NoError(t, err)
+
+	srv := New(Config{Port: 8080, Path: "podcasts"}, storage, nil)
+
+	tests := []struct {
+		name   string
+		path   string
+		status int
+		body   string
+	}{
+		{
+			name:   "feed under configured path",
+			path:   "/podcasts/example.xml",
+			status: http.StatusOK,
+			body:   "feed content",
+		},
+		{
+			name:   "episode under configured path",
+			path:   "/podcasts/example/episode.mp3",
+			status: http.StatusOK,
+			body:   "audio content",
+		},
+		{
+			name:   "file outside configured path",
+			path:   "/example.xml",
+			status: http.StatusNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			rec := httptest.NewRecorder()
+			srv.Handler.ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.status, rec.Code)
+			if tt.body != "" {
+				assert.Equal(t, tt.body, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestDebugEndpointDisabledByDefault(t *testing.T) {
 	cfg := Config{
 		Port: 8080,
@@ -40,6 +108,56 @@ func TestDebugEndpointDisabledByDefault(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	// Should NOT contain expvar data
 	assert.False(t, strings.Contains(rec.Body.String(), "cmdline"))
+}
+
+func TestRemoteMediaLifecycleHeadReportsExistingLinkWhenAuthorized(t *testing.T) {
+	links := &stubMediaLifecycle{existing: map[string]bool{
+		"audio/feed/episode-token.mp3": true,
+	}}
+	srv := New(
+		Config{Port: 8080, Path: "feeds"},
+		&mockFileSystem{},
+		nil,
+		WithMediaLifecycle(links, "secret"),
+	)
+	req := httptest.NewRequest(http.MethodHead, "/api/remote-media/audio/feed/episode-token.mp3", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+
+	srv.Handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, []string{"audio/feed/episode-token.mp3"}, links.checked)
+}
+
+func TestRemoteMediaLifecycleDeleteRequiresAuthorizationAndIsIdempotent(t *testing.T) {
+	const key = "audio/feed/episode-token.mp3"
+	links := &stubMediaLifecycle{existing: map[string]bool{key: true}}
+	srv := New(
+		Config{Port: 8080, Path: "feeds"},
+		&mockFileSystem{},
+		nil,
+		WithMediaLifecycle(links, "secret"),
+	)
+
+	unauthorized := httptest.NewRequest(http.MethodDelete, "/api/remote-media/"+key, nil)
+	unauthorizedResponse := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(unauthorizedResponse, unauthorized)
+	assert.Equal(t, http.StatusUnauthorized, unauthorizedResponse.Code)
+	assert.True(t, links.existing[key])
+	assert.Empty(t, links.deleted)
+
+	for range 2 {
+		req := httptest.NewRequest(http.MethodDelete, "/api/remote-media/"+key, nil)
+		req.Header.Set("Authorization", "Bearer secret")
+		rec := httptest.NewRecorder()
+
+		srv.Handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusNoContent, rec.Code)
+	}
+	assert.Equal(t, []string{key, key}, links.deleted)
+	assert.False(t, links.existing[key])
 }
 
 func TestDebugEndpointEnabledWhenConfigured(t *testing.T) {

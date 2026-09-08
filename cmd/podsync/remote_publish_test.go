@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,6 +17,7 @@ import (
 	"github.com/mxpv/podsync/pkg/fs"
 	"github.com/mxpv/podsync/pkg/model"
 	remotepublish "github.com/mxpv/podsync/services/remote"
+	"github.com/mxpv/podsync/services/web"
 )
 
 func TestRemotePublishOptionsDisabledWhenRemoteOff(t *testing.T) {
@@ -182,6 +187,123 @@ func TestBuildRemoteProcessorBuildsLocalR2Processor(t *testing.T) {
 	assert.Equal(t, "/data", store.Root)
 }
 
+func TestBuildRemoteProcessorBuildsLocalHardlinkProcessorWithoutR2Credentials(t *testing.T) {
+	cfg := completeRemotePublishConfig()
+	root := t.TempDir()
+	cfg.Storage.Local.DataDir = root
+	cfg.R2 = R2Config{}
+	cfg.RemoteMedia = RemoteMediaConfig{
+		Type:       "hardlink",
+		Prefix:     "audio",
+		PublicRoot: filepath.Join(root, ".remote-media"),
+	}
+	require.NoError(t, os.MkdirAll(cfg.RemoteMedia.PublicRoot, 0755))
+	r2FactoryCalled := false
+
+	processor, err := buildRemoteProcessor(cfg, &cmdFakeOutbox{}, func(remotepublish.R2Config) (remotepublish.Publisher, error) {
+		r2FactoryCalled = true
+		return &cmdFakePublisher{}, nil
+	}, func(string, string) (remotepublish.EpisodeUpserter, error) {
+		return &cmdFakeUpserter{}, nil
+	}, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, processor)
+	assert.False(t, r2FactoryCalled)
+	remoteProcessor, ok := processor.(*remotepublish.Processor)
+	require.True(t, ok)
+	assert.Equal(t, "audio", remoteProcessor.Prefix)
+	_, ok = remoteProcessor.Publisher.(*remotepublish.HardlinkPublisher)
+	assert.True(t, ok)
+}
+
+func TestRunRemoteMediaBackfillBuildsHardlinksFromSucceededTasks(t *testing.T) {
+	sourceRoot := t.TempDir()
+	publicRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(sourceRoot, "feed"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceRoot, "feed", "episode.mp3"), []byte("audio"), 0644))
+	cfg := &Config{
+		Storage: fs.Config{Type: "local", Local: fs.LocalConfig{DataDir: sourceRoot}},
+		RemoteMedia: RemoteMediaConfig{
+			Type:       remoteMediaTypeHardlink,
+			PublicRoot: publicRoot,
+		},
+	}
+	tasks := &cmdFakeRemotePublishTaskWalker{tasks: []*model.RemotePublishTask{
+		{Status: model.RemotePublishSucceeded, MediaPath: "feed/episode.mp3", R2Key: "audio/feed/episode-token.mp3", Size: 5},
+	}}
+
+	keyFile := filepath.Join(t.TempDir(), "retained-media.json")
+	require.NoError(t, os.WriteFile(keyFile, []byte(`["audio/feed/episode-token.mp3"]`), 0600))
+	result, err := runRemoteMediaBackfill(context.Background(), cfg, tasks, keyFile, false, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, remotepublish.HardlinkBackfillResult{Scanned: 1, Selected: 1, Linked: 1}, result)
+	sourceInfo, err := os.Stat(filepath.Join(sourceRoot, "feed", "episode.mp3"))
+	require.NoError(t, err)
+	targetInfo, err := os.Stat(filepath.Join(publicRoot, "audio", "feed", "episode-token.mp3"))
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(sourceInfo, targetInfo))
+}
+
+func TestRunRemoteMediaBackfillRejectsNonHardlinkConfig(t *testing.T) {
+	_, err := runRemoteMediaBackfill(context.Background(), &Config{}, &cmdFakeRemotePublishTaskWalker{}, "keys.json", false, true)
+
+	require.ErrorContains(t, err, "remote_media.type")
+}
+
+func TestRunRemoteMediaBackfillRecoveryRequiresR2Config(t *testing.T) {
+	sourceRoot := t.TempDir()
+	publicRoot := t.TempDir()
+	keyFile := filepath.Join(t.TempDir(), "retained-media.json")
+	require.NoError(t, os.WriteFile(keyFile, []byte(`[]`), 0600))
+	cfg := &Config{
+		Storage: fs.Config{Type: "local", Local: fs.LocalConfig{DataDir: sourceRoot}},
+		RemoteMedia: RemoteMediaConfig{
+			Type:       remoteMediaTypeHardlink,
+			PublicRoot: publicRoot,
+		},
+	}
+
+	_, err := runRemoteMediaBackfill(context.Background(), cfg, &cmdFakeRemotePublishTaskWalker{}, keyFile, true, true)
+
+	require.ErrorContains(t, err, "r2 endpoint")
+}
+
+func TestLoadRemoteMediaKeysRejectsDuplicates(t *testing.T) {
+	keyFile := filepath.Join(t.TempDir(), "retained-media.json")
+	require.NoError(t, os.WriteFile(keyFile, []byte(`["audio/feed/one.mp3","audio/feed/one.mp3"]`), 0600))
+
+	_, err := loadRemoteMediaKeys(keyFile)
+
+	require.ErrorContains(t, err, "duplicate")
+}
+
+func TestRemoteMediaWebOptionsExposeConfiguredHardlinkLifecycle(t *testing.T) {
+	root := t.TempDir()
+	publicRoot := filepath.Join(root, "public")
+	keyPath := filepath.Join(publicRoot, "audio", "feed", "episode-token.mp3")
+	require.NoError(t, os.MkdirAll(filepath.Dir(keyPath), 0755))
+	require.NoError(t, os.WriteFile(keyPath, []byte("audio"), 0644))
+	cfg := completeRemotePublishConfig()
+	cfg.Storage.Local.DataDir = root
+	cfg.R2 = R2Config{}
+	cfg.RemoteMedia = RemoteMediaConfig{Type: "hardlink", PublicRoot: publicRoot}
+
+	options, err := remoteMediaWebOptions(cfg)
+	require.NoError(t, err)
+	storage, err := fs.NewLocal(root, false, true)
+	require.NoError(t, err)
+	srv := web.New(web.Config{Path: "feeds"}, storage, nil, options...)
+	req := httptest.NewRequest(http.MethodHead, "/api/remote-media/audio/feed/episode-token.mp3", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+
+	srv.Handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
 func TestProcessRemotePublishOnceCallsProcessor(t *testing.T) {
 	processor := &cmdFakeProcessor{}
 
@@ -226,6 +348,21 @@ type cmdFakeOutbox struct {
 type cmdFakePublisher struct{}
 
 func (p *cmdFakePublisher) Upload(context.Context, *model.RemotePublishTask, io.ReadSeeker) error {
+	return nil
+}
+
+type cmdFakeRemotePublishTaskWalker struct {
+	tasks []*model.RemotePublishTask
+}
+
+func (w *cmdFakeRemotePublishTaskWalker) WalkRemotePublishTasks(_ context.Context, status model.RemotePublishStatus, cb func(*model.RemotePublishTask) error) error {
+	for _, task := range w.tasks {
+		if task.Status == status {
+			if err := cb(task); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 

@@ -3563,17 +3563,81 @@ function r2KeyBlank(value: string | null): boolean {
   return value === null || value === "";
 }
 
-function restoreRequiresR2Head(action: AdminEpisodeAction, episode: EpisodeAdminRow): boolean {
+function restoreRequiresMediaHead(action: AdminEpisodeAction, episode: EpisodeAdminRow): boolean {
   return action === "restore" && episode.status === "delete_pending" && !r2KeyBlank(episode.r2_key);
 }
 
-async function verifyRestorableR2Object(env: Env, action: AdminEpisodeAction, episode: EpisodeAdminRow): Promise<Response | null> {
-  if (!restoreRequiresR2Head(action, episode)) return null;
-  if (!env.MEDIA_BUCKET) return text("media bucket unavailable", 503);
+function encodeMediaKey(key: string): string {
+  validateR2Key(key);
+  return key.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+}
+
+function mediaOriginRequest(env: Env, key: string, method: "HEAD" | "DELETE"): Request | null {
+  if (!env.MEDIA_ORIGIN_BASE_URL) return null;
+  if (!env.NAS_TOKEN || !env.MEDIA_ORIGIN_ACCESS_CLIENT_ID || !env.MEDIA_ORIGIN_ACCESS_CLIENT_SECRET) {
+    throw new Error("media origin credentials are incomplete");
+  }
+  const base = new URL(env.MEDIA_ORIGIN_BASE_URL);
+  if (base.protocol !== "https:") throw new Error("media origin must use HTTPS");
+  if (!base.pathname.endsWith("/")) base.pathname += "/";
+  base.search = "";
+  base.hash = "";
+  const url = new URL(encodeMediaKey(key), base);
+  return new Request(url, {
+    method,
+    redirect: "manual",
+    headers: {
+      authorization: `Bearer ${env.NAS_TOKEN}`,
+      "cf-access-client-id": env.MEDIA_ORIGIN_ACCESS_CLIENT_ID,
+      "cf-access-client-secret": env.MEDIA_ORIGIN_ACCESS_CLIENT_SECRET,
+    },
+  });
+}
+
+async function mediaObjectExists(env: Env, key: string): Promise<boolean> {
+  const originRequest = mediaOriginRequest(env, key, "HEAD");
+  if (originRequest) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let response: Response;
+      try {
+        const request = attempt === 0 ? originRequest : mediaOriginRequest(env, key, "HEAD")!;
+        response = await fetch(request);
+      } catch (error) {
+        if (attempt === 0) continue;
+        throw error;
+      }
+      if (response.status === 404) return false;
+      if (response.ok) return true;
+      const retryable = response.status === 429 || response.status >= 500;
+      if (attempt === 0 && retryable) {
+        await response.body?.cancel();
+        continue;
+      }
+      throw new Error(`media origin HEAD returned ${response.status}`);
+    }
+    throw new Error("media origin HEAD failed");
+  }
+  if (!env.MEDIA_BUCKET) throw new Error("media storage unavailable");
+  return (await env.MEDIA_BUCKET.head(key)) !== null;
+}
+
+async function deleteMediaObject(env: Env, key: string): Promise<void> {
+  const originRequest = mediaOriginRequest(env, key, "DELETE");
+  if (originRequest) {
+    const response = await fetch(originRequest);
+    if (!response.ok) throw new Error(`media origin DELETE returned ${response.status}`);
+    return;
+  }
+  if (!env.MEDIA_BUCKET) throw new Error("media storage unavailable");
+  await env.MEDIA_BUCKET.delete(key);
+}
+
+async function verifyRestorableMediaObject(env: Env, action: AdminEpisodeAction, episode: EpisodeAdminRow): Promise<Response | null> {
+  if (!restoreRequiresMediaHead(action, episode)) return null;
   try {
-    const object = await env.MEDIA_BUCKET.head(episode.r2_key!);
-    if (!object) return text("media object not found", 409);
+    if (!(await mediaObjectExists(env, episode.r2_key!))) return text("media object not found", 409);
   } catch {
+    if (!env.MEDIA_ORIGIN_BASE_URL && !env.MEDIA_BUCKET) return text("media bucket unavailable", 503);
     return text("media object check failed", 502);
   }
   return null;
@@ -4046,6 +4110,35 @@ async function handleNasConfig(request: Request, env: Env): Promise<Response> {
   return text(toml, 200, "application/toml; charset=utf-8");
 }
 
+async function handleNasMediaOriginCheck(request: Request, env: Env): Promise<Response> {
+  if (!(await isAuthorizedNasRequest(request, env))) {
+    return text("unauthorized", 401);
+  }
+  if (!env.MEDIA_ORIGIN_BASE_URL) {
+    return text("media origin unavailable", 503);
+  }
+
+  const body = await readBoundedJson(request);
+  if (body instanceof Response) return body;
+  if (!body || typeof body !== "object") return badRequest("invalid media origin check body");
+  const key = (body as Record<string, unknown>).r2_key;
+  if (!nonEmptyString(key)) return badRequest("r2_key is required");
+  try {
+    validateR2Key(key);
+  } catch {
+    return badRequest("r2_key is invalid");
+  }
+
+  try {
+    if (!(await mediaObjectExists(env, key))) return text("not found", 404);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const status = /^media origin HEAD returned ([0-9]{3})$/.exec(message)?.[1];
+    return text(status ? `media origin check failed: upstream status ${status}` : "media origin check failed: upstream request failed", 502);
+  }
+  return new Response(null, { status: 204 });
+}
+
 async function handleAdminFeeds(request: Request, env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `SELECT f.feed_id, f.provider, f.url, f.title_override, f.description_override,
@@ -4325,7 +4418,7 @@ async function handleAdminEpisodeStatus(request: Request, env: Env): Promise<Res
     });
   }
 
-  const restoreGuard = await verifyRestorableR2Object(env, parsed.action, episode);
+  const restoreGuard = await verifyRestorableMediaObject(env, parsed.action, episode);
   if (restoreGuard) return restoreGuard;
 
   const updateStatement = env.DB.prepare(episodeStatusUpdateSQL(parsed.action, episode)).bind(
@@ -4650,10 +4743,8 @@ async function expireRetentionCandidate(
 }
 
 async function purgeEpisodeCandidate(env: Env, candidate: PurgeCandidateRow, nowISO: string): Promise<boolean> {
-  const bucket = env.MEDIA_BUCKET;
   if (candidate.r2_key) {
-    if (!bucket) return false;
-    await bucket.delete(candidate.r2_key);
+    await deleteMediaObject(env, candidate.r2_key);
   }
 
   const update = env.DB.prepare(purgeEpisodeUpdateSQL()).bind(
@@ -4923,6 +5014,11 @@ export default {
     if (url.pathname === "/api/nas/config.toml") {
       if (request.method !== "GET") return methodNotAllowed();
       return handleNasConfig(request, env);
+    }
+
+    if (url.pathname === "/api/nas/media-origin/check") {
+      if (request.method !== "POST") return methodNotAllowed();
+      return handleNasMediaOriginCheck(request, env);
     }
 
     if (url.pathname === "/api/nas/episodes/upsert") {

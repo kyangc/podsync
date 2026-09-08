@@ -14,6 +14,8 @@
   },
   "vars": {
     "MEDIA_PUBLIC_BASE_URL": "https://media.podsync.kyangc.net",
+    // Set only at cutover; the value is a private Access-protected management route.
+    // "MEDIA_ORIGIN_BASE_URL": "https://media-origin-admin.example.com/api/remote-media/",
     "ACCESS_ISSUER": "https://kyangc.cloudflareaccess.com",
     "ACCESS_AUD": "e24a501be5edaa0c6d6d4b915358823be8b4d76edbda1ad846338c9fb582867b"
   },
@@ -22,12 +24,6 @@
       "binding": "DB",
       "database_name": "podsync-control-plane",
       "database_id": "4645686e-c03b-47c0-a174-6514f10e9218"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "MEDIA_BUCKET",
-      "bucket_name": "podsync-media"
     }
   ]
 }

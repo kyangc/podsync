@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,6 +28,149 @@ func TestDetectMimeTypeResetsReader(t *testing.T) {
 	pos, err := reader.Seek(0, io.SeekCurrent)
 	require.NoError(t, err)
 	assert.EqualValues(t, 0, pos)
+}
+
+func TestHardlinkPublisherUploadPublishesSameInodeIdempotently(t *testing.T) {
+	root := t.TempDir()
+	publicRoot := filepath.Join(root, "public")
+	mediaPath := filepath.Join("feed", "episode.mp3")
+	sourcePath := filepath.Join(root, mediaPath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(sourcePath), 0755))
+	require.NoError(t, os.MkdirAll(publicRoot, 0755))
+	body := []byte("audio bytes")
+	require.NoError(t, os.WriteFile(sourcePath, body, 0644))
+
+	publisher, err := NewHardlinkPublisher(root, publicRoot)
+	require.NoError(t, err)
+	task := &model.RemotePublishTask{
+		MediaPath: mediaPath,
+		R2Key:     "audio/feed/episode-token.mp3",
+		Size:      int64(len(body)),
+		MimeType:  "audio/mpeg",
+	}
+
+	require.NoError(t, publisher.Upload(context.Background(), task, bytes.NewReader(body)))
+	require.NoError(t, publisher.Upload(context.Background(), task, bytes.NewReader(body)))
+
+	targetPath := filepath.Join(publicRoot, filepath.FromSlash(task.R2Key))
+	sourceInfo, err := os.Stat(sourcePath)
+	require.NoError(t, err)
+	targetInfo, err := os.Stat(targetPath)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(sourceInfo, targetInfo))
+	assert.Equal(t, sourceInfo.Size(), targetInfo.Size())
+	published, err := os.ReadFile(targetPath)
+	require.NoError(t, err)
+	assert.Equal(t, body, published)
+}
+
+func TestHardlinkPublisherRejectsPathsOutsideConfiguredRoots(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "source")
+	publicRoot := filepath.Join(root, "public")
+	require.NoError(t, os.MkdirAll(filepath.Join(sourceRoot, "feed"), 0755))
+	require.NoError(t, os.MkdirAll(publicRoot, 0755))
+	body := []byte("audio bytes")
+	require.NoError(t, os.WriteFile(filepath.Join(sourceRoot, "feed", "episode.mp3"), body, 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "outside.mp3"), body, 0644))
+	publisher, err := NewHardlinkPublisher(sourceRoot, publicRoot)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name      string
+		mediaPath string
+		mediaKey  string
+	}{
+		{name: "source traversal", mediaPath: "../outside.mp3", mediaKey: "audio/feed/safe.mp3"},
+		{name: "target traversal", mediaPath: "feed/episode.mp3", mediaKey: "../escaped.mp3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &model.RemotePublishTask{
+				MediaPath: tt.mediaPath,
+				R2Key:     tt.mediaKey,
+				Size:      int64(len(body)),
+				MimeType:  "audio/mpeg",
+			}
+
+			err := publisher.Upload(context.Background(), task, bytes.NewReader(body))
+
+			require.Error(t, err)
+		})
+	}
+	_, err = os.Stat(filepath.Join(root, "escaped.mp3"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestHardlinkPublisherRejectsSymlinkEscapes(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "source")
+	publicRoot := filepath.Join(root, "public")
+	outsideRoot := filepath.Join(root, "outside")
+	require.NoError(t, os.MkdirAll(filepath.Join(sourceRoot, "feed"), 0755))
+	require.NoError(t, os.MkdirAll(publicRoot, 0755))
+	require.NoError(t, os.MkdirAll(outsideRoot, 0755))
+	body := []byte("audio bytes")
+	outsideSource := filepath.Join(outsideRoot, "outside.mp3")
+	require.NoError(t, os.WriteFile(outsideSource, body, 0644))
+	require.NoError(t, os.Symlink(outsideSource, filepath.Join(sourceRoot, "feed", "symlink.mp3")))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceRoot, "feed", "episode.mp3"), body, 0644))
+	publisher, err := NewHardlinkPublisher(sourceRoot, publicRoot)
+	require.NoError(t, err)
+
+	sourceEscape := &model.RemotePublishTask{
+		MediaPath: "feed/symlink.mp3",
+		R2Key:     "audio/feed/source-escape.mp3",
+		Size:      int64(len(body)),
+		MimeType:  "audio/mpeg",
+	}
+	require.Error(t, publisher.Upload(context.Background(), sourceEscape, bytes.NewReader(body)))
+
+	require.NoError(t, os.Symlink(outsideRoot, filepath.Join(publicRoot, "audio")))
+	targetEscape := &model.RemotePublishTask{
+		MediaPath: "feed/episode.mp3",
+		R2Key:     "audio/target-escape.mp3",
+		Size:      int64(len(body)),
+		MimeType:  "audio/mpeg",
+	}
+	require.Error(t, publisher.Upload(context.Background(), targetEscape, bytes.NewReader(body)))
+	_, err = os.Stat(filepath.Join(outsideRoot, "target-escape.mp3"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestHardlinkStoreDeleteRemovesPublicLinkAndPreservesSource(t *testing.T) {
+	root := t.TempDir()
+	publicRoot := filepath.Join(root, "public")
+	mediaPath := filepath.Join("feed", "episode.mp3")
+	sourcePath := filepath.Join(root, mediaPath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(sourcePath), 0755))
+	require.NoError(t, os.MkdirAll(publicRoot, 0755))
+	body := []byte("audio bytes")
+	require.NoError(t, os.WriteFile(sourcePath, body, 0644))
+	publisher, err := NewHardlinkPublisher(root, publicRoot)
+	require.NoError(t, err)
+	const mediaKey = "audio/feed/episode-token.mp3"
+	task := &model.RemotePublishTask{
+		MediaPath: mediaPath,
+		R2Key:     mediaKey,
+		Size:      int64(len(body)),
+		MimeType:  "audio/mpeg",
+	}
+	require.NoError(t, publisher.Upload(context.Background(), task, bytes.NewReader(body)))
+	store, err := NewHardlinkStore(publicRoot)
+	require.NoError(t, err)
+
+	exists, err := store.Exists(mediaKey)
+	require.NoError(t, err)
+	assert.True(t, exists)
+	require.NoError(t, store.Delete(mediaKey))
+	require.NoError(t, store.Delete(mediaKey))
+	exists, err = store.Exists(mediaKey)
+	require.NoError(t, err)
+	assert.False(t, exists)
+	preserved, err := os.ReadFile(sourcePath)
+	require.NoError(t, err)
+	assert.Equal(t, body, preserved)
 }
 
 func TestR2PublisherUploadPutsAndHeadsObject(t *testing.T) {

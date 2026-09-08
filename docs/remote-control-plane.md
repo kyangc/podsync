@@ -74,7 +74,7 @@ NAS 本地 OPML
 远端链路是新增能力：
 
 ```text
-R2 mp3
+R2 or NAS-public hardlink media
 D1 episode metadata
 Worker RSS
 Worker OPML
@@ -107,6 +107,12 @@ bucket = "podcasts"
 prefix = "audio"
 access_key_id = "..."
 secret_access_key = "..."
+
+# Optional NAS public-media backend. Keep [r2] during the rollback window.
+[remote_media]
+type = "hardlink"
+prefix = "audio"
+public_root = "/app/data/.remote-media"
 
 [cookie_profiles.bilibili-main]
 provider = "bilibili"
@@ -387,7 +393,7 @@ Delete feed 使用 soft delete，不硬删 `feeds` / `episodes` / `tombstone_cha
 - tombstone 下发给 NAS，防止重新发布。
 - 保留 D1 里的 feed/episode/tombstone 记录，保证 `cursor=0` tombstone 快照不会漏删。
 
-## R2 发布
+## 远端媒体发布
 
 ### 发布顺序
 
@@ -396,15 +402,15 @@ Delete feed 使用 soft delete，不硬删 `feeds` / `episodes` / `tombstone_cha
 2. 本地 episode 标记 downloaded
 3. 本地 XML/OPML 正常更新
 4. 生成或复用 r2_key
-5. 上传音频到 R2
-6. HEAD R2 object，确认 Content-Length 等于本地文件大小
+5. 由选定 backend 上传到 R2，或建立 NAS 公开目录硬链接
+6. 确认远端 object/硬链接存在且大小等于本地文件
 7. upsert episode visible
 8. Worker RSS 才展示该 episode
 ```
 
-R2 上传或 episode upsert 失败不影响本地发布。失败任务进入 remote outbox，下轮重试。
+远端媒体发布或 episode upsert 失败不影响本地发布。失败任务进入 remote outbox，下轮重试。
 
-### R2 object key
+### 远端 object key
 
 音频 key 使用可读前缀加随机 token：
 
@@ -431,7 +437,7 @@ NAS 只上报：
 
 Worker 根据自己的 `MEDIA_PUBLIC_BASE_URL` 动态生成 enclosure URL。NAS 不保存公开媒体域名。
 
-### R2 权限
+### R2 权限与 NAS 生命周期
 
 NAS 本地 R2 token 尽量最小权限：
 
@@ -442,6 +448,8 @@ NAS 本地 R2 token 尽量最小权限：
 
 R2 删除/purge 由 Worker 通过 R2 binding 执行。
 
+当 `[remote_media].type = "hardlink"` 时，NAS publisher 用相同 key 在隔离的公开目录创建硬链接。Worker 通过 Cloudflare Access service token 访问 Podsync 的私有 `HEAD`/`DELETE` 生命周期接口；公开媒体域名本身不得要求 Access。完整部署和验收流程见 `docs/nas-media-origin.md`。
+
 ### 删除与恢复
 
 Dashboard 删除 episode：
@@ -449,7 +457,7 @@ Dashboard 删除 episode：
 ```text
 D1 status = delete_pending
 Worker RSS 立即隐藏
-R2 object 保留 7 天
+远端媒体保留 7 天
 ```
 
 Cron retention 对每个未删除 feed 的 `visible`/`hidden` episode 按发布时间排序，只保留最新 `keep_last` 条。超出的 episode 每轮最多标记 50 条为 `delete_pending`，同样保留 7 天恢复窗口；条件更新会在写入前重新校验当前 `keep_last`，避免配置并发修改导致误删。
@@ -458,7 +466,7 @@ Cron purge：
 
 ```text
 delete_pending 且 purge_after <= now
--> 删除 R2 object
+-> 删除 R2 object 或 NAS 公开硬链接
 -> status = purged
 ```
 
@@ -468,18 +476,18 @@ restore 和 purge 都必须使用条件更新，避免竞态：
 
 ```text
 restore delete_pending:
-  HEAD R2 object 成功
+  HEAD 远端媒体成功
   AND current status still delete_pending
   -> status=visible
 
 purge:
   current status still delete_pending
   AND purge_after <= now
-  AND R2 delete success
+  AND 远端媒体 delete success
   -> status=purged
 ```
 
-如果 R2 delete 失败，不得把状态改成 `purged`。
+如果远端媒体 delete 失败，不得把状态改成 `purged`。
 
 ## Outbox 与重试
 

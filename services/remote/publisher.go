@@ -33,6 +33,14 @@ type r2API interface {
 }
 
 func NewR2Publisher(cfg R2Config) (*R2Publisher, error) {
+	client, err := newR2Client(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &R2Publisher{api: client, bucket: cfg.Bucket}, nil
+}
+
+func newR2Client(cfg R2Config) (*s3.Client, error) {
 	if cfg.Endpoint == "" || cfg.Bucket == "" || cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
 		return nil, errors.New("r2 endpoint, bucket, access key id, and secret access key are required")
 	}
@@ -48,7 +56,7 @@ func NewR2Publisher(cfg R2Config) (*R2Publisher, error) {
 	client := s3.NewFromConfig(awsCfg, func(options *s3.Options) {
 		options.UsePathStyle = true
 	})
-	return &R2Publisher{api: client, bucket: cfg.Bucket}, nil
+	return client, nil
 }
 
 func NewR2PublisherWithAPI(api r2API, bucket string) *R2Publisher {

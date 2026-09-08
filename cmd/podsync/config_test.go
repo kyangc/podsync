@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -345,6 +346,49 @@ secret_access_key = "secret"
 	assert.Equal(t, "secret", config.R2.SecretAccessKey)
 }
 
+func TestLoadRemoteMediaConfigFailsClosed(t *testing.T) {
+	tests := []struct {
+		name       string
+		mediaBlock string
+		want       string
+	}{
+		{
+			name: "unknown backend",
+			mediaBlock: `[remote_media]
+type = "unknown"`,
+			want: "unknown remote_media.type",
+		},
+		{
+			name: "hardlink missing public root",
+			mediaBlock: `[remote_media]
+type = "hardlink"`,
+			want: "remote_media.public_root is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := `[server]
+data_dir = "/data"
+
+[remote]
+enabled = true
+base_url = "https://podcast.example.com"
+token = "secret"
+cache_path = "/tmp/podsync-remote.toml"
+
+` + tt.mediaBlock
+			path := setup(t, file)
+			defer os.Remove(path)
+
+			_, err := LoadConfig(path)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
 func TestFilenameTemplateValidation(t *testing.T) {
 	const file = `
 [server]
@@ -549,8 +593,8 @@ func TestDefaultHostname(t *testing.T) {
 
 func TestDefaultDatabasePath(t *testing.T) {
 	cfg := Config{}
-	cfg.applyDefaults("/home/user/podsync/config.toml")
-	assert.Equal(t, "/home/user/podsync/db", cfg.Database.Dir)
+	cfg.applyDefaults(filepath.Join("home", "user", "podsync", "config.toml"))
+	assert.Equal(t, filepath.Join("home", "user", "podsync", "db"), cfg.Database.Dir)
 }
 
 func TestLoadBadgerConfig(t *testing.T) {
