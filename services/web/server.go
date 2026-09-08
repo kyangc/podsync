@@ -98,9 +98,15 @@ func New(cfg Config, storage http.FileSystem, database db.Storage, options ...Op
 	mux := http.NewServeMux()
 
 	fileServer := http.FileServer(storage)
+	mountPath := "/"
+	if cfg.Path != "" {
+		mountPath = fmt.Sprintf("/%s", cfg.Path)
+		fileServer = http.StripPrefix(mountPath, fileServer)
+		mountPath += "/"
+	}
 
-	log.Debugf("handle path: /%s", cfg.Path)
-	mux.Handle(fmt.Sprintf("/%s", cfg.Path), fileServer)
+	log.Debugf("handle path: %s", mountPath)
+	mux.Handle(mountPath, fileServer)
 
 	// Add health check endpoint
 	mux.HandleFunc("/health", srv.healthCheckHandler)
