@@ -74,6 +74,37 @@ func TestBilibiliBuildUserFeedIncludesUpowerVideosWhenEnabled(t *testing.T) {
 	require.Equal(t, "Exclusive video", got.Episodes[0].Title)
 }
 
+func TestBilibiliBuildUserFeedSkipsUnavailableEpisode(t *testing.T) {
+	server := newBilibiliEpisodeErrorTestServer(t, -404, "啥都木有")
+	builder := &BilibiliBuilder{
+		client: newBilibiliAPIClient(server.Client(), server.URL),
+	}
+
+	got, err := builder.Build(context.Background(), &feed.Config{
+		URL:      "https://space.bilibili.com/123",
+		PageSize: 2,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, got.Episodes, 2)
+	require.Equal(t, "BVGOOD1", got.Episodes[0].ID)
+	require.Equal(t, "BVGOOD2", got.Episodes[1].ID)
+}
+
+func TestBilibiliBuildUserFeedKeepsOtherAPIErrorsFatal(t *testing.T) {
+	server := newBilibiliEpisodeErrorTestServer(t, -412, "请求被拦截")
+	builder := &BilibiliBuilder{
+		client: newBilibiliAPIClient(server.Client(), server.URL),
+	}
+
+	_, err := builder.Build(context.Background(), &feed.Config{
+		URL:      "https://space.bilibili.com/123",
+		PageSize: 2,
+	})
+
+	require.EqualError(t, err, "bilibili api error: 请求被拦截")
+}
+
 func TestBilibiliAPIClientUsesCookiesFile(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Contains(t, r.Header.Get("Cookie"), "SESSDATA=secret")
@@ -315,6 +346,55 @@ func newBilibiliTestServer(t *testing.T) *httptest.Server {
 			},
 		}
 		writeJSON(t, w, response)
+	})
+
+	return httptest.NewServer(mux)
+}
+
+func newBilibiliEpisodeErrorTestServer(t *testing.T, code int, message string) *httptest.Server {
+	t.Helper()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/x/web-interface/card", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, map[string]any{
+			"code": 0,
+			"data": map[string]any{
+				"card": map[string]any{
+					"name": "Bili Creator",
+				},
+			},
+		})
+	})
+	mux.HandleFunc("/x/series/recArchivesByKeywords", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, map[string]any{
+			"code": 0,
+			"data": map[string]any{
+				"archives": []map[string]any{
+					{"bvid": "BVGOOD1", "pubdate": 1700000000},
+					{"bvid": "BVUNAVAILABLE", "pubdate": 1700000100},
+					{"bvid": "BVGOOD2", "pubdate": 1700000200},
+				},
+			},
+		})
+	})
+	mux.HandleFunc("/x/web-interface/view", func(w http.ResponseWriter, r *http.Request) {
+		bvid := r.URL.Query().Get("bvid")
+		if bvid == "BVUNAVAILABLE" {
+			writeJSON(t, w, map[string]any{
+				"code":    code,
+				"message": message,
+			})
+			return
+		}
+
+		writeJSON(t, w, map[string]any{
+			"code": 0,
+			"data": map[string]any{
+				"bvid":     bvid,
+				"title":    bvid,
+				"duration": 600,
+			},
+		})
 	})
 
 	return httptest.NewServer(mux)

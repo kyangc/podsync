@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/mxpv/podsync/pkg/feed"
 	"github.com/mxpv/podsync/pkg/model"
@@ -137,6 +138,10 @@ func (b *BilibiliBuilder) populateEpisodes(client *bilibiliAPIClient, result *mo
 
 		episode, err := client.episode(archive.Bvid)
 		if err != nil {
+			if isBilibiliAPIErrorCode(err, -404) {
+				log.WithField("episode_id", archive.Bvid).Warn("skipping unavailable Bilibili episode")
+				continue
+			}
 			return err
 		}
 		if episode.Data.IsUpowerExclusive && !includeUpowerExclusive {

@@ -196,11 +196,25 @@ type bilibiliAPIResponse struct {
 	Message string `json:"message"`
 }
 
+type bilibiliAPIError struct {
+	code    int
+	message string
+}
+
+func (e *bilibiliAPIError) Error() string {
+	return fmt.Sprintf("bilibili api error: %s", e.message)
+}
+
 func (r bilibiliAPIResponse) err() error {
 	if r.Code != 0 {
-		return fmt.Errorf("bilibili api error: %s", r.Message)
+		return &bilibiliAPIError{code: r.Code, message: r.Message}
 	}
 	return nil
+}
+
+func isBilibiliAPIErrorCode(err error, code int) bool {
+	var apiErr *bilibiliAPIError
+	return errors.As(err, &apiErr) && apiErr.code == code
 }
 
 type bilibiliEpisodeResponse struct {
