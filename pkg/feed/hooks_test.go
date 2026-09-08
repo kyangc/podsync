@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,17 +18,13 @@ func TestExecuteHook_WriteEnvToFile(t *testing.T) {
 	tempDir := t.TempDir()
 	tempFile := filepath.Join(tempDir, "env_output.txt")
 
-	command := []string{"sh", "-c", `printenv | grep '^TEST_VAR=' > "$TEST_OUTPUT_FILE"`}
-	if runtime.GOOS == "windows" {
-		command = []string{"powershell.exe", "-NoProfile", "-Command", `[IO.File]::WriteAllText($env:TEST_OUTPUT_FILE, "TEST_VAR=" + $env:TEST_VAR)`}
-	}
-
 	hook := &ExecHook{
-		Command: command,
+		Command: []string{os.Args[0], "-test.run=^TestExecuteHookWriteEnvHelper$"},
 		Timeout: 5,
 	}
 
 	env := []string{
+		"GO_WANT_HOOK_WRITE_ENV_HELPER=1",
 		"TEST_VAR=test-value",
 		"TEST_OUTPUT_FILE=" + tempFile,
 	}
@@ -43,6 +38,15 @@ func TestExecuteHook_WriteEnvToFile(t *testing.T) {
 
 	output := string(content)
 	assert.Contains(t, output, "TEST_VAR=test-value")
+}
+
+func TestExecuteHookWriteEnvHelper(t *testing.T) {
+	if os.Getenv("GO_WANT_HOOK_WRITE_ENV_HELPER") != "1" {
+		return
+	}
+
+	content := []byte("TEST_VAR=" + os.Getenv("TEST_VAR"))
+	require.NoError(t, os.WriteFile(os.Getenv("TEST_OUTPUT_FILE"), content, 0o600))
 }
 
 func TestExecuteHook_CornerCases(t *testing.T) {

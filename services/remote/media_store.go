@@ -22,7 +22,7 @@ type LocalMediaStore struct {
 
 func (s LocalMediaStore) Open(name string) (ReadSeekCloser, error) {
 	clean := filepath.Clean(name)
-	if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+	if clean == "." || filepath.IsAbs(clean) || strings.HasPrefix(clean, string(os.PathSeparator)) || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
 		return nil, ErrUnsafeMediaPath
 	}
 	return os.Open(filepath.Join(s.Root, clean))
