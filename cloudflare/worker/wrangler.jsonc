@@ -25,11 +25,5 @@
       "database_name": "podsync-control-plane",
       "database_id": "4645686e-c03b-47c0-a174-6514f10e9218"
     }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "MEDIA_BUCKET",
-      "bucket_name": "podsync-media"
-    }
   ]
 }
