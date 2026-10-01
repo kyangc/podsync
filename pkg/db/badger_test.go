@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -45,6 +47,35 @@ func TestBadger_AddFeed(t *testing.T) {
 	feed := getFeed()
 	err = db.AddFeed(testCtx, feed.ID, feed)
 	assert.NoError(t, err)
+}
+
+func TestBadgerFeedIdentityUsesStorageKey(t *testing.T) {
+	for _, storedID := range []string{"", "different-feed"} {
+		t.Run("stored-"+storedID, func(t *testing.T) {
+			database, err := NewBadger(&Config{Dir: t.TempDir()})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, database.Close()) })
+			original := &model.Feed{ID: storedID, Title: "channel"}
+			require.NoError(t, database.AddFeed(testCtx, "configured-feed", original))
+			assert.Equal(t, storedID, original.ID)
+			var persisted model.Feed
+			require.NoError(t, database.db.View(func(transaction *badger.Txn) error {
+				return database.getObj(transaction, database.getKey(feedPath, "configured-feed"), &persisted)
+			}))
+			assert.Equal(t, "configured-feed", persisted.ID)
+
+			require.NoError(t, database.db.Update(func(transaction *badger.Txn) error {
+				return database.setObj(transaction, database.getKey(feedPath, "configured-feed"), original, true)
+			}))
+			loaded, err := database.GetFeed(testCtx, "configured-feed")
+			require.NoError(t, err)
+			assert.Equal(t, "configured-feed", loaded.ID)
+			require.NoError(t, database.WalkFeeds(testCtx, func(loaded *model.Feed) error {
+				assert.Equal(t, "configured-feed", loaded.ID)
+				return nil
+			}))
+		})
+	}
 }
 
 func TestBadger_GetFeed(t *testing.T) {

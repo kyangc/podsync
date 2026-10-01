@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mxpv/podsync/pkg/db"
 	"github.com/mxpv/podsync/pkg/fs"
 	"github.com/mxpv/podsync/pkg/model"
 	"github.com/stretchr/testify/assert"
@@ -302,6 +303,33 @@ func TestNoListingEnabledWhenConfigured(t *testing.T) {
 	srv.Handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "audio content", rec.Body.String())
+}
+
+func TestHealthEndpointDetectsFailedDownloadWithBuilderFeedIdentity(t *testing.T) {
+	database, err := db.NewBadger(&db.Config{Dir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+	require.NoError(t, database.AddFeed(context.Background(), "youtube-feed", &model.Feed{
+		UpdatedAt: time.Now().UTC(),
+		Episodes: []*model.Episode{{
+			ID: "episode", PubDate: time.Now().UTC(), Status: model.EpisodeError,
+		}},
+	}))
+	server := New(Config{}, &mockFileSystem{}, database)
+	response := httptest.NewRecorder()
+	server.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health", nil))
+	require.Equal(t, http.StatusServiceUnavailable, response.Code)
+	var status HealthStatus
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &status))
+	assert.Equal(t, 1, status.FailedEpisodes)
+
+	require.NoError(t, database.UpdateEpisode("youtube-feed", "episode", func(episode *model.Episode) error {
+		episode.Status = model.EpisodeDownloaded
+		return nil
+	}))
+	response = httptest.NewRecorder()
+	server.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health", nil))
+	assert.Equal(t, http.StatusOK, response.Code)
 }
 
 func TestHealthEndpointHealthyWithRecentFeedUpdate(t *testing.T) {

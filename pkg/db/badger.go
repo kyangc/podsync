@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
@@ -100,10 +101,12 @@ func (b *Badger) Version() (int, error) {
 }
 
 func (b *Badger) AddFeed(_ context.Context, feedID string, feed *model.Feed) error {
+	storedFeed := *feed
+	storedFeed.ID = feedID
 	return b.db.Update(func(txn *badger.Txn) error {
 		// Insert or update feed info
 		feedKey := b.getKey(feedPath, feedID)
-		if err := b.setObj(txn, feedKey, feed, true); err != nil {
+		if err := b.setObj(txn, feedKey, &storedFeed, true); err != nil {
 			return err
 		}
 
@@ -133,6 +136,7 @@ func (b *Badger) GetFeed(_ context.Context, feedID string) (*model.Feed, error) 
 		if err := b.getObj(txn, feedKey, &feed); err != nil {
 			return err
 		}
+		feed.ID = feedID
 
 		// Query episodes
 		if err := b.walkEpisodes(txn, feedID, func(episode *model.Episode) error {
@@ -160,6 +164,7 @@ func (b *Badger) WalkFeeds(_ context.Context, cb func(feed *model.Feed) error) e
 			if err := b.unmarshalObj(item, feed); err != nil {
 				return err
 			}
+			feed.ID = strings.TrimPrefix(string(item.Key()), string(opts.Prefix))
 
 			return cb(feed)
 		})

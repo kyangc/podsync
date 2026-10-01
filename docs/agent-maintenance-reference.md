@@ -86,6 +86,8 @@ Go module 路径仍保留 `github.com/mxpv/podsync`，这是为了降低与 upst
 
 ## BadgerDB 行为
 
+- Feed 身份以 Badger key 中的配置 ID 为准；写入时保存该 ID，读取时兼容旧记录中缺失或不一致的 ID，无需文件迁移。
+
 - 使用版本化 keyspace：`podsync/v1/`。
 - feed key 前缀：`feed/{feedID}`。
 - episode key 前缀：`episode/{feedID}/{episodeID}`。
@@ -339,7 +341,7 @@ debug = false
 - `/{path}/{feed_id}/{episode_name}`：节目文件下载。
 - `/{path}/podsync.opml`：OPML 导出，包含 `opml = true` 的 feed。
 - `/{path}/index.html`：Web UI，仅在启用且使用本地存储时可用。
-- `/health`：健康检查；过去 24 小时有节目下载失败，或超过 `server.health_max_feed_age` 没有任何 feed 成功更新时返回 503。
+- `/health`：健康检查；仍处于下载错误状态且发布时间在过去 24 小时内的节目，或超过 `server.health_max_feed_age` 没有任何 feed 成功更新时返回 503。一次下载失败后已恢复的节目不再计入错误；更早发布的失败节目和远端发布错误仍须结合事件与内容交付检查。
 - `/debug/vars`：运行指标；仅当 `debug_endpoints = true` 时启用。
 - `/robots.txt`：仅当 `no_index = true` 时提供。
 
