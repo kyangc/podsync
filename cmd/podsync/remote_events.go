@@ -33,7 +33,7 @@ func newRemoteEventReporter(baseURL string, token string) (remotepublish.EventBa
 	return remotepublish.NewNASClient(baseURL, token, nil)
 }
 
-func buildRemoteEventRecorder(cfg *Config, newReporter remoteEventReporterFactory) (remoteEventRecorder, error) {
+func buildRemoteEventRecorder(cfg *Config, newReporter remoteEventReporterFactory, store remotepublish.EventRunStore) (remoteEventRecorder, error) {
 	if !remoteEventReportingEnabled(cfg) {
 		return nil, nil
 	}
@@ -43,13 +43,14 @@ func buildRemoteEventRecorder(cfg *Config, newReporter remoteEventReporterFactor
 	}
 	started := time.Now().UTC()
 	runID := fmt.Sprintf("%s-%d", started.Format("20060102T150405Z"), os.Getpid())
-	return remotepublish.NewEventRecorder(remotepublish.EventRecorderConfig{
+	return remotepublish.NewDurableEventRecorder(remotepublish.EventRecorderConfig{
 		RunID:          runID,
 		StartedAt:      started,
 		Reporter:       reporter,
 		Redactions:     collectRemoteEventRedactions(cfg),
 		MaxRunDuration: defaultRemoteEventRunDuration,
-	}), nil
+		Store:          store,
+	})
 }
 
 func collectRemoteEventRedactions(cfg *Config) []string {

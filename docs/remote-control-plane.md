@@ -495,6 +495,12 @@ purge:
 
 第一优先实现 DB-backed outbox，因为当前 Badger 已经是本地 durable state，适合保存 `feed_id + local_episode_id` 去重、attempt count、next retry、r2_key、tombstone cursor 等状态。
 
+NAS 事件记录器使用现有 Badger 保存每个 run 的脱敏事件、下一序号和累计计数，记录时即写入，HTTP 请求不持有记录器锁。启动后先重放旧 run 的未确认批次，再上报当前 run；仍使用原 `run_id + sequence`，由 Worker 幂等去重。已确认批次不会重复计入计数，本地确认写入失败则保留原序号重试。
+
+正常退出时无法上报的最终状态与结束时间会保留，恢复后继续发送。进程异常退出留下的 `running` run 会补充一条告警结束事件：已有错误时以 `partial` 结束，否则以 `failed` 结束，并用恢复时间作为结束时间；这表示此前缺少可靠的结束确认。旧 run 清空并确认最终摘要后才删除本地状态。持久化失败会告警并保留内存队列，恢复写入前不会上报该队列；磁盘持续不可写期间若进程同时退出，尚未落盘的内容仍可能丢失。
+
+该改动无需新配置、D1 migration 或媒体文件迁移；不会补回上线前已经丢失的历史事件。
+
 文件 outbox 仍可用于 config cache、raw logs 或临时批量事件，但写入必须使用 atomic rename，且不能放到会被本地 Web/S3 media storage 语义影响的位置。
 
 建议本地路径：

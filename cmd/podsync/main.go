@@ -183,7 +183,7 @@ func main() {
 		log.WithError(err).Fatal("failed to open storage")
 	}
 
-	remoteEvents, err := buildRemoteEventRecorder(cfg, newRemoteEventReporter)
+	remoteEvents, err := buildRemoteEventRecorder(cfg, newRemoteEventReporter, database)
 	if err != nil {
 		log.WithError(err).Warn("remote event reporting disabled")
 	}

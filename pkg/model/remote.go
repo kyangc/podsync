@@ -127,6 +127,12 @@ type RemoteEventBatch struct {
 	Events []RemoteEvent `json:"events"`
 }
 
+type RemoteEventRunState struct {
+	Run          RemoteSyncRun `json:"run"`
+	NextSequence int           `json:"next_sequence"`
+	Events       []RemoteEvent `json:"events"`
+}
+
 type RemoteEventBatchResult struct {
 	OK              bool   `json:"ok"`
 	RunID           string `json:"run_id"`

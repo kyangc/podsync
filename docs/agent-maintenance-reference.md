@@ -87,6 +87,7 @@ Go module 路径仍保留 `github.com/mxpv/podsync`，这是为了降低与 upst
 ## BadgerDB 行为
 
 - Feed 身份以 Badger key 中的配置 ID 为准；写入时保存该 ID，读取时兼容旧记录中缺失或不一致的 ID，无需文件迁移。
+- 远端事件在记录时将脱敏后的事件、序号和 run 计数持久化到 Badger；确认上报成功后才移除待发送内容。
 
 - 使用版本化 keyspace：`podsync/v1/`。
 - feed key 前缀：`feed/{feedID}`。

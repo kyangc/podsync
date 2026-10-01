@@ -10,6 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	log "github.com/sirupsen/logrus"
+
 	"github.com/mxpv/podsync/pkg/model"
 )
 
@@ -24,6 +26,12 @@ type EventSink interface {
 	RecordRemoteEvent(event model.RemoteEventDraft)
 }
 
+type EventRunStore interface {
+	SaveRemoteEventRun(context.Context, *model.RemoteEventRunState) error
+	PendingRemoteEventRuns(context.Context) ([]*model.RemoteEventRunState, error)
+	DeleteRemoteEventRun(context.Context, string) error
+}
+
 type EventRecorder struct {
 	flushMu            sync.Mutex
 	mu                 sync.Mutex
@@ -31,6 +39,10 @@ type EventRecorder struct {
 	startedAt          time.Time
 	maxRunDuration     time.Duration
 	reporter           EventBatchReporter
+	store              EventRunStore
+	recovered          []*model.RemoteEventRunState
+	status             model.RemoteSyncRunStatus
+	finishedAt         *string
 	now                func() time.Time
 	redactions         []string
 	nextSequence       int
@@ -50,6 +62,7 @@ type EventRecorderConfig struct {
 	Redactions     []string
 	BatchSize      int
 	MaxRunDuration time.Duration
+	Store          EventRunStore
 }
 
 func NewEventRecorder(cfg EventRecorderConfig) *EventRecorder {
@@ -77,11 +90,77 @@ func NewEventRecorder(cfg EventRecorderConfig) *EventRecorder {
 		startedAt:      startedAt.UTC(),
 		maxRunDuration: cfg.MaxRunDuration,
 		reporter:       cfg.Reporter,
+		store:          cfg.Store,
+		status:         model.RemoteSyncRunRunning,
 		now:            now,
 		redactions:     cfg.Redactions,
 		nextSequence:   1,
 		batchSize:      batchSize,
 	}
+}
+
+func NewDurableEventRecorder(cfg EventRecorderConfig) (*EventRecorder, error) {
+	recorder := NewEventRecorder(cfg)
+	if recorder == nil || cfg.Store == nil {
+		return recorder, nil
+	}
+	states, err := cfg.Store.PendingRemoteEventRuns(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	for _, state := range states {
+		if err := validateEventRunState(state); err != nil {
+			return nil, err
+		}
+		if state.Run.ID == recorder.runID {
+			return nil, errors.New("remote event run identity already exists")
+		}
+		if state.Run.Status == model.RemoteSyncRunRunning {
+			finishedAt := recorder.now().UTC().Format(time.RFC3339)
+			state.Run.FinishedAt = &finishedAt
+			state.Run.Status = model.RemoteSyncRunFailed
+			if state.Run.ErrorsCount > 0 {
+				state.Run.Status = model.RemoteSyncRunPartial
+			}
+			state.Events = append(state.Events, model.RemoteEvent{
+				Sequence: state.NextSequence, EventTime: finishedAt,
+				Level: model.RemoteEventWarn, Type: model.RemoteEventSyncRunFinished,
+				Message: "previous process stopped before its final event report",
+			})
+			state.NextSequence++
+			if err := cfg.Store.SaveRemoteEventRun(context.Background(), state); err != nil {
+				return nil, err
+			}
+		}
+	}
+	recorder.recovered = states
+	return recorder, nil
+}
+
+func validateEventRunState(state *model.RemoteEventRunState) error {
+	if state == nil || state.Run.ID == "" || state.NextSequence < 1 {
+		return errors.New("invalid remote event run state")
+	}
+	if _, err := time.Parse(time.RFC3339, state.Run.StartedAt); err != nil {
+		return errors.New("invalid remote event run start time")
+	}
+	switch state.Run.Status {
+	case model.RemoteSyncRunRunning:
+	case model.RemoteSyncRunSuccess, model.RemoteSyncRunPartial, model.RemoteSyncRunFailed:
+		if state.Run.FinishedAt == nil {
+			return errors.New("finished remote event run is missing its finish time")
+		}
+	default:
+		return errors.New("invalid remote event run status")
+	}
+	previous := 0
+	for _, event := range state.Events {
+		if event.Sequence <= previous || event.Sequence >= state.NextSequence {
+			return errors.New("invalid remote event run sequence")
+		}
+		previous = event.Sequence
+	}
+	return nil
 }
 
 func defaultRemoteRunID(startedAt time.Time) string {
@@ -123,6 +202,9 @@ func (r *EventRecorder) RecordRemoteEvent(event model.RemoteEventDraft) {
 	case model.RemoteEventUploadFinished:
 		r.episodesUploaded++
 	}
+	if err := r.persistLocked(); err != nil {
+		log.WithError(err).Warn("failed to persist remote event")
+	}
 }
 
 func (r *EventRecorder) Flush(ctx context.Context, status model.RemoteSyncRunStatus) error {
@@ -131,40 +213,103 @@ func (r *EventRecorder) Flush(ctx context.Context, status model.RemoteSyncRunSta
 	}
 	r.flushMu.Lock()
 	defer r.flushMu.Unlock()
+	if err := r.flushRecovered(ctx); err != nil {
+		return err
+	}
 
 	if status == model.RemoteSyncRunRunning && r.shouldRotateRun() {
-		if err := r.flushCurrentRun(ctx, r.FinalStatus()); err != nil {
-			return err
+		for {
+			if err := r.flushCurrentRun(ctx, r.FinalStatus()); err != nil {
+				return err
+			}
+			started, err := r.startNewRun(r.now().UTC())
+			if err != nil {
+				return err
+			}
+			if started {
+				break
+			}
 		}
-		r.startNewRun(r.now().UTC())
-		r.RecordRemoteEvent(model.RemoteEventDraft{Level: model.RemoteEventInfo, Type: model.RemoteEventSyncRunStarted})
 	}
 	return r.flushCurrentRun(ctx, status)
 }
 
 func (r *EventRecorder) flushCurrentRun(ctx context.Context, status model.RemoteSyncRunStatus) error {
 	final := status != model.RemoteSyncRunRunning
+	r.mu.Lock()
+	r.status = status
+	if final && r.finishedAt == nil {
+		finishedAt := r.now().UTC().Format(time.RFC3339)
+		r.finishedAt = &finishedAt
+	}
+	err := r.persistLocked()
+	r.mu.Unlock()
+	if err != nil {
+		return err
+	}
 	for {
-		batch, sequences, empty, err := r.nextBatch(status, final)
-		if err != nil {
-			return err
-		}
+		batch, sequences, empty := r.nextBatch()
 		if empty && !final {
 			return nil
 		}
 		if _, err := r.reporter.PostEventBatch(ctx, batch); err != nil {
 			return err
 		}
-		if empty {
-			return nil
-		}
 		if err := r.removeSentPrefix(sequences); err != nil {
 			return err
 		}
-		if r.PendingCount() == 0 {
+		complete, err := r.completeFlush(ctx, final)
+		if err != nil {
+			return err
+		}
+		if complete {
 			return nil
 		}
 	}
+}
+
+func (recorder *EventRecorder) flushRecovered(ctx context.Context) error {
+	for len(recorder.recovered) > 0 {
+		state := recorder.recovered[0]
+		limit := recorder.batchSize
+		if len(state.Events) < limit {
+			limit = len(state.Events)
+		}
+		batch := &model.RemoteEventBatch{
+			Run: state.Run, Events: append([]model.RemoteEvent{}, state.Events[:limit]...),
+		}
+		if _, err := recorder.reporter.PostEventBatch(ctx, batch); err != nil {
+			return err
+		}
+		if limit == len(state.Events) {
+			if err := recorder.store.DeleteRemoteEventRun(ctx, state.Run.ID); err != nil {
+				return err
+			}
+			recorder.recovered = recorder.recovered[1:]
+			continue
+		}
+		next := *state
+		next.Events = append([]model.RemoteEvent{}, state.Events[limit:]...)
+		if err := recorder.store.SaveRemoteEventRun(ctx, &next); err != nil {
+			return err
+		}
+		recorder.recovered[0] = &next
+	}
+	return nil
+}
+
+func (recorder *EventRecorder) completeFlush(ctx context.Context, final bool) (bool, error) {
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	if len(recorder.pending) > 0 {
+		return false, nil
+	}
+	if final && recorder.store != nil {
+		if err := recorder.store.DeleteRemoteEventRun(ctx, recorder.runID); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 func (r *EventRecorder) shouldRotateRun() bool {
@@ -176,17 +321,26 @@ func (r *EventRecorder) shouldRotateRun() bool {
 	return !r.startedAt.IsZero() && !r.now().UTC().Before(r.startedAt.Add(r.maxRunDuration))
 }
 
-func (r *EventRecorder) startNewRun(startedAt time.Time) {
+func (r *EventRecorder) startNewRun(startedAt time.Time) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if len(r.pending) > 0 {
+		return false, nil
+	}
 	r.runID = defaultRemoteRunID(startedAt)
 	r.startedAt = startedAt.UTC()
-	r.nextSequence = 1
-	r.pending = nil
+	r.status = model.RemoteSyncRunRunning
+	r.finishedAt = nil
+	r.nextSequence = 2
+	r.pending = []model.RemoteEvent{{
+		Sequence: 1, EventTime: startedAt.UTC().Format(time.RFC3339),
+		Level: model.RemoteEventInfo, Type: model.RemoteEventSyncRunStarted,
+	}}
 	r.feedsUpdated = 0
 	r.episodesDownloaded = 0
 	r.episodesUploaded = 0
 	r.errorsCount = 0
+	return true, r.persistLocked()
 }
 
 func (r *EventRecorder) FinalStatus() model.RemoteSyncRunStatus {
@@ -210,7 +364,7 @@ func (r *EventRecorder) PendingCount() int {
 	return len(r.pending)
 }
 
-func (r *EventRecorder) nextBatch(status model.RemoteSyncRunStatus, final bool) (*model.RemoteEventBatch, []int, bool, error) {
+func (r *EventRecorder) nextBatch() (*model.RemoteEventBatch, []int, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	limit := r.batchSize
@@ -222,24 +376,29 @@ func (r *EventRecorder) nextBatch(status model.RemoteSyncRunStatus, final bool) 
 	for i, event := range events {
 		sequences[i] = event.Sequence
 	}
-	finishedAt := (*string)(nil)
-	if final {
-		value := r.now().UTC().Format(time.RFC3339)
-		finishedAt = &value
-	}
 	return &model.RemoteEventBatch{
-		Run: model.RemoteSyncRun{
-			ID:                 r.runID,
-			StartedAt:          r.startedAt.UTC().Format(time.RFC3339),
-			FinishedAt:         finishedAt,
-			Status:             status,
-			FeedsUpdated:       r.feedsUpdated,
-			EpisodesDownloaded: r.episodesDownloaded,
-			EpisodesUploaded:   r.episodesUploaded,
-			ErrorsCount:        r.errorsCount,
-		},
+		Run:    r.runLocked(),
 		Events: events,
-	}, sequences, len(events) == 0, nil
+	}, sequences, len(events) == 0
+}
+
+func (recorder *EventRecorder) runLocked() model.RemoteSyncRun {
+	return model.RemoteSyncRun{
+		ID: recorder.runID, StartedAt: recorder.startedAt.UTC().Format(time.RFC3339),
+		FinishedAt: recorder.finishedAt, Status: recorder.status,
+		FeedsUpdated: recorder.feedsUpdated, EpisodesDownloaded: recorder.episodesDownloaded,
+		EpisodesUploaded: recorder.episodesUploaded, ErrorsCount: recorder.errorsCount,
+	}
+}
+
+func (recorder *EventRecorder) persistLocked() error {
+	if recorder.store == nil {
+		return nil
+	}
+	return recorder.store.SaveRemoteEventRun(context.Background(), &model.RemoteEventRunState{
+		Run: recorder.runLocked(), NextSequence: recorder.nextSequence,
+		Events: append([]model.RemoteEvent{}, recorder.pending...),
+	})
 }
 
 func (r *EventRecorder) removeSentPrefix(sequences []int) error {
@@ -253,7 +412,12 @@ func (r *EventRecorder) removeSentPrefix(sequences []int) error {
 			return errors.New("event recorder pending prefix changed")
 		}
 	}
+	previous := r.pending
 	r.pending = append([]model.RemoteEvent(nil), r.pending[len(sequences):]...)
+	if err := r.persistLocked(); err != nil {
+		r.pending = previous
+		return err
+	}
 	return nil
 }
 

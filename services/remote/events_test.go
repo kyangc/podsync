@@ -12,8 +12,58 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mxpv/podsync/pkg/db"
 	"github.com/mxpv/podsync/pkg/model"
 )
+
+func TestDurableEventRecorderRecoversEventsBeforeFirstFlush(t *testing.T) {
+	config := &db.Config{Dir: t.TempDir()}
+	database, err := db.NewBadger(config)
+	require.NoError(t, err)
+	clock := fixedEventClock()
+	recorder, err := NewDurableEventRecorder(EventRecorderConfig{
+		RunID: "old-run", StartedAt: clock.Now(), Now: clock.Now,
+		Reporter: &fakeEventReporter{}, Store: database, Redactions: []string{"private-token"},
+	})
+	require.NoError(t, err)
+	recorder.RecordRemoteEvent(model.RemoteEventDraft{Type: model.RemoteEventSyncRunStarted})
+	recorder.RecordRemoteEvent(model.RemoteEventDraft{
+		Type: model.RemoteEventDownloadFailed, Level: model.RemoteEventError, ErrorDetail: "private-token",
+	})
+	states, err := database.PendingRemoteEventRuns(context.Background())
+	require.NoError(t, err)
+	require.Len(t, states, 1)
+	assert.NotContains(t, states[0].Events[1].ErrorDetail, "private-token")
+	require.NoError(t, database.Close())
+
+	database, err = db.NewBadger(config)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+	clock.Advance(time.Minute)
+	reporter := &fakeEventReporter{}
+	recorder, err = NewDurableEventRecorder(EventRecorderConfig{
+		RunID: "new-run", StartedAt: clock.Now(), Now: clock.Now, Reporter: reporter, Store: database,
+	})
+	require.NoError(t, err)
+	recorder.RecordRemoteEvent(model.RemoteEventDraft{Type: model.RemoteEventSyncRunStarted})
+	require.NoError(t, recorder.Flush(context.Background(), model.RemoteSyncRunRunning))
+	require.Len(t, reporter.batches, 2)
+	oldBatch := reporter.batches[0]
+	assert.Equal(t, "old-run", oldBatch.Run.ID)
+	assert.Equal(t, model.RemoteSyncRunPartial, oldBatch.Run.Status)
+	assert.Equal(t, 1, oldBatch.Run.ErrorsCount)
+	require.Len(t, oldBatch.Events, 3)
+	assert.Equal(t, 1, oldBatch.Events[0].Sequence)
+	assert.Equal(t, 2, oldBatch.Events[1].Sequence)
+	assert.Equal(t, model.RemoteEventSyncRunFinished, oldBatch.Events[2].Type)
+	assert.Equal(t, "new-run", reporter.batches[1].Run.ID)
+	assert.Equal(t, 1, reporter.batches[1].Events[0].Sequence)
+	states, err = database.PendingRemoteEventRuns(context.Background())
+	require.NoError(t, err)
+	require.Len(t, states, 1)
+	assert.Equal(t, "new-run", states[0].Run.ID)
+	assert.Empty(t, states[0].Events)
+}
 
 func TestEventRecorderRecordsSequencesAndCounters(t *testing.T) {
 	reporter := &fakeEventReporter{}

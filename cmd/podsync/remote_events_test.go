@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mxpv/podsync/pkg/db"
 	"github.com/mxpv/podsync/pkg/model"
 	remotepublish "github.com/mxpv/podsync/services/remote"
 )
@@ -25,7 +26,7 @@ func TestBuildRemoteEventRecorderDisabledDoesNotCallFactory(t *testing.T) {
 	recorder, err := buildRemoteEventRecorder(&Config{}, func(string, string) (remotepublish.EventBatchReporter, error) {
 		called = true
 		return &cmdFakeEventReporter{}, nil
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	assert.Nil(t, recorder)
@@ -33,6 +34,9 @@ func TestBuildRemoteEventRecorderDisabledDoesNotCallFactory(t *testing.T) {
 }
 
 func TestBuildRemoteEventRecorderUsesRemoteBaseURLAndToken(t *testing.T) {
+	database, err := db.NewBadger(&db.Config{Dir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
 	cfg := &Config{Remote: RemoteConfig{Enabled: true, BaseURL: "https://podcast.example.com", Token: "secret"}}
 	var gotBaseURL string
 	var gotToken string
@@ -41,12 +45,17 @@ func TestBuildRemoteEventRecorderUsesRemoteBaseURLAndToken(t *testing.T) {
 		gotBaseURL = baseURL
 		gotToken = token
 		return &cmdFakeEventReporter{}, nil
-	})
+	}, database)
 
 	require.NoError(t, err)
 	assert.NotNil(t, recorder)
 	assert.Equal(t, "https://podcast.example.com", gotBaseURL)
 	assert.Equal(t, "secret", gotToken)
+	recordRemoteRunStarted(recorder)
+	states, err := database.PendingRemoteEventRuns(context.Background())
+	require.NoError(t, err)
+	require.Len(t, states, 1)
+	assert.Equal(t, model.RemoteEventSyncRunStarted, states[0].Events[0].Type)
 }
 
 func TestCollectRemoteEventRedactionsIncludesConfiguredSecrets(t *testing.T) {
