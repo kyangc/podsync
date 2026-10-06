@@ -15,6 +15,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/mxpv/podsync/pkg/feed"
+	"github.com/mxpv/podsync/pkg/httpretry"
 )
 
 type remoteFeedSource string
@@ -56,6 +57,12 @@ func remoteConfigURL(baseURL string) (string, error) {
 }
 
 func fetchRemoteConfig(ctx context.Context, cfg RemoteConfig, client remoteHTTPClient) ([]byte, error) {
+	return httpretry.Do(ctx, func(ctx context.Context) ([]byte, error) {
+		return fetchRemoteConfigOnce(ctx, cfg, client)
+	})
+}
+
+func fetchRemoteConfigOnce(ctx context.Context, cfg RemoteConfig, client remoteHTTPClient) ([]byte, error) {
 	endpoint, err := remoteConfigURL(cfg.BaseURL)
 	if err != nil {
 		return nil, err

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mxpv/podsync/pkg/httpretry"
 	"github.com/mxpv/podsync/pkg/model"
 )
 
@@ -88,6 +89,12 @@ func NewNASClient(baseURL string, token string, client HTTPClient) (*NASClient, 
 }
 
 func (c *NASClient) UpsertEpisode(ctx context.Context, task *model.RemotePublishTask) (*EpisodeUpsertResult, error) {
+	return httpretry.Do(ctx, func(ctx context.Context) (*EpisodeUpsertResult, error) {
+		return c.upsertEpisodeOnce(ctx, task)
+	})
+}
+
+func (c *NASClient) upsertEpisodeOnce(ctx context.Context, task *model.RemotePublishTask) (*EpisodeUpsertResult, error) {
 	payload, err := episodeUpsertPayloadFromTask(task)
 	if err != nil {
 		return nil, err
@@ -144,6 +151,12 @@ func (c *NASClient) episodeUpsertURL() string {
 }
 
 func (c *NASClient) FetchTombstones(ctx context.Context, cursor int64, limit int) (*model.RemoteTombstoneBatch, error) {
+	return httpretry.Do(ctx, func(ctx context.Context) (*model.RemoteTombstoneBatch, error) {
+		return c.fetchTombstonesOnce(ctx, cursor, limit)
+	})
+}
+
+func (c *NASClient) fetchTombstonesOnce(ctx context.Context, cursor int64, limit int) (*model.RemoteTombstoneBatch, error) {
 	if cursor < 0 {
 		return nil, errors.New("tombstone cursor must be non-negative")
 	}
@@ -193,6 +206,12 @@ func (c *NASClient) tombstonesURL(cursor int64, limit int) string {
 }
 
 func (c *NASClient) PostEventBatch(ctx context.Context, batch *model.RemoteEventBatch) (*model.RemoteEventBatchResult, error) {
+	return httpretry.Do(ctx, func(ctx context.Context) (*model.RemoteEventBatchResult, error) {
+		return c.postEventBatchOnce(ctx, batch)
+	})
+}
+
+func (c *NASClient) postEventBatchOnce(ctx context.Context, batch *model.RemoteEventBatch) (*model.RemoteEventBatchResult, error) {
 	if batch == nil {
 		return nil, nonRetryable("remote event batch is required")
 	}
@@ -248,6 +267,13 @@ func (c *NASClient) eventsBatchURL() string {
 }
 
 func (c *NASClient) UpsertFeedMetadata(ctx context.Context, metadata *model.RemoteFeedMetadata) error {
+	_, err := httpretry.Do(ctx, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, c.upsertFeedMetadataOnce(ctx, metadata)
+	})
+	return err
+}
+
+func (c *NASClient) upsertFeedMetadataOnce(ctx context.Context, metadata *model.RemoteFeedMetadata) error {
 	payload, err := feedMetadataUpsertPayloadFromMetadata(metadata)
 	if err != nil {
 		return err

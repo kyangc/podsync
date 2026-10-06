@@ -16,6 +16,7 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/api/youtube/v3"
 
+	"github.com/mxpv/podsync/pkg/httpretry"
 	"github.com/mxpv/podsync/pkg/model"
 	"github.com/mxpv/podsync/pkg/ytdl"
 )
@@ -52,7 +53,9 @@ func (yt *YouTubeBuilder) resolveHandle(ctx context.Context, handle string) (str
 		Type("channel").
 		MaxResults(1)
 
-	resp, err := req.Context(ctx).Do(yt.key)
+	resp, err := httpretry.Do(ctx, func(ctx context.Context) (*youtube.SearchListResponse, error) {
+		return req.Context(ctx).Do(yt.key)
+	})
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to search for handle: %s", handle)
 	}
@@ -91,7 +94,9 @@ func (yt *YouTubeBuilder) listChannels(ctx context.Context, linkType model.Type,
 		return nil, errors.New("unsupported link type")
 	}
 
-	resp, err := req.Context(ctx).Do(yt.key)
+	resp, err := httpretry.Do(ctx, func(ctx context.Context) (*youtube.ChannelListResponse, error) {
+		return req.Context(ctx).Do(yt.key)
+	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to query channel")
 	}
@@ -115,7 +120,9 @@ func (yt *YouTubeBuilder) listPlaylists(ctx context.Context, id, channelID strin
 		req = req.ChannelId(channelID)
 	}
 
-	resp, err := req.Context(ctx).Do(yt.key)
+	resp, err := httpretry.Do(ctx, func(ctx context.Context) (*youtube.PlaylistListResponse, error) {
+		return req.Context(ctx).Do(yt.key)
+	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to query playlist")
 	}
@@ -142,7 +149,9 @@ func (yt *YouTubeBuilder) listPlaylistItems(ctx context.Context, feed *model.Fee
 		req = req.PageToken(pageToken)
 	}
 
-	resp, err := req.Context(ctx).Do(yt.key)
+	resp, err := httpretry.Do(ctx, func(ctx context.Context) (*youtube.PlaylistItemListResponse, error) {
+		return req.Context(ctx).Do(yt.key)
+	})
 	if err != nil {
 		return nil, "", errors.Wrap(err, "failed to query playlist items")
 	}
@@ -341,7 +350,9 @@ func (yt *YouTubeBuilder) queryVideoDescriptions(ctx context.Context, playlist m
 
 	// Loop in each slices of 50 (or less) IDs and query their description
 	for _, idsI := range idsList {
-		req, err := yt.client.Videos.List([]string{"id", "snippet", "contentDetails"}).Id(idsI).Context(ctx).Do(yt.key)
+		req, err := httpretry.Do(ctx, func(ctx context.Context) (*youtube.VideoListResponse, error) {
+			return yt.client.Videos.List([]string{"id", "snippet", "contentDetails"}).Id(idsI).Context(ctx).Do(yt.key)
+		})
 		if err != nil {
 			return errors.Wrap(err, "failed to query video descriptions")
 		}

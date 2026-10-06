@@ -493,6 +493,8 @@ purge:
 
 远端发布和事件上传使用本地 outbox，不阻塞本地主流程。
 
+NAS 配置、tombstone、幂等 metadata/event 请求，以及 YouTube discovery API，在 EOF、响应体截断、连接重置或 TLS 等网络超时时最多尝试两次，间隔 250ms。两次共用 30s 总时限，并尊重调用方更短的 deadline/cancellation；HTTP 状态错误、证书或配置校验失败不在此处重试。持续失败仍按原逻辑告警、使用配置 cache 或保留 outbox，事件重试保持原 run ID 和 sequence。
+
 第一优先实现 DB-backed outbox，因为当前 Badger 已经是本地 durable state，适合保存 `feed_id + local_episode_id` 去重、attempt count、next retry、r2_key、tombstone cursor 等状态。
 
 NAS 事件记录器使用现有 Badger 保存每个 run 的脱敏事件、下一序号和累计计数，记录时即写入，HTTP 请求不持有记录器锁。启动后先重放旧 run 的未确认批次，再上报当前 run；仍使用原 `run_id + sequence`，由 Worker 幂等去重。已确认批次不会重复计入计数，本地确认写入失败则保留原序号重试。
