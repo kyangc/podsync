@@ -628,6 +628,10 @@ func retryableYouTubeDownloadError(feedConfig *feed.Config, err error) string {
 		strings.Contains(message, "handshake operation timed out") {
 		return "tls_transport"
 	}
+	// Match an exhausted media read timeout, not a warning before another failure.
+	if strings.Contains(message, "[download] got error: the read operation timed out. giving up after ") {
+		return "read_timeout"
+	}
 	return ""
 }
 

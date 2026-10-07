@@ -300,6 +300,21 @@ func TestDownloadEpisodesRecoversFromYouTubeHandshakeTimeout(t *testing.T) {
 	assert.Equal(t, model.RemoteEventDownloadFinished, events[0].Type)
 }
 
+func TestDownloadEpisodesRecoversFromYouTubeMediaReadTimeout(t *testing.T) {
+	// yt-dlp can exhaust its media retries after downloading part of format 18.
+	// This terminal transport error does not contain a TLS handshake or EOF error.
+	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
+		{err: errors.New("[info] episode: Downloading 1 format(s): 18\n" +
+			"[download] Got error: The read operation timed out. Retrying (1/1)...\n" +
+			"ERROR: \r[download] Got error: The read operation timed out. Giving up after 1 retries\n")},
+		{body: "audio"},
+	})
+
+	require.Equal(t, 2, downloader.calls)
+	require.Len(t, events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFinished, events[0].Type)
+}
+
 func TestDownloadEpisodesRecordsOneFailureAfterYouTubeRetriesAreExhausted(t *testing.T) {
 	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
 		{err: errors.New("HTTP Error 403: Forbidden")},
@@ -310,6 +325,20 @@ func TestDownloadEpisodesRecordsOneFailureAfterYouTubeRetriesAreExhausted(t *tes
 	require.Equal(t, 3, downloader.calls)
 	require.Len(t, events, 1)
 	assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
+}
+
+func TestDownloadEpisodesRecordsOneFailureAfterYouTubeReadTimeoutRetriesAreExhausted(t *testing.T) {
+	wantErr := errors.New("ERROR: \r[download] Got error: The read operation timed out. Giving up after 1 retries\n")
+	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
+		{err: wantErr},
+		{err: wantErr},
+		{err: wantErr},
+	})
+
+	require.Equal(t, 3, downloader.calls)
+	require.Len(t, events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
+	assert.Equal(t, wantErr.Error(), events[0].ErrorDetail)
 }
 
 func TestDownloadEpisodesDoesNotRetry403ForNonYouTubeFeed(t *testing.T) {
@@ -324,14 +353,34 @@ func TestDownloadEpisodesDoesNotRetry403ForNonYouTubeFeed(t *testing.T) {
 	assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
 }
 
-func TestDownloadEpisodesDoesNotRetryNonTransientYouTubeFailure(t *testing.T) {
-	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
-		{err: errors.New("Sign in to confirm you are not a bot")},
+func TestDownloadEpisodesDoesNotRetryReadTimeoutForNonYouTubeFeed(t *testing.T) {
+	feedConfig := testFeedConfig()
+	feedConfig.URL = "https://vimeo.com/12345"
+	downloader, events := runDownloadScenario(t, context.Background(), feedConfig, []downloadResult{
+		{err: errors.New("ERROR: \r[download] Got error: The read operation timed out. Giving up after 1 retries\n")},
 	})
 
 	require.Equal(t, 1, downloader.calls)
 	require.Len(t, events, 1)
 	assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
+}
+
+func TestDownloadEpisodesDoesNotRetryNonTransientYouTubeFailure(t *testing.T) {
+	for _, message := range []string{
+		"Sign in to confirm you are not a bot",
+		"ERROR: Requested format is not available",
+		"WARNING: The read operation timed out. Retrying (1/3)...\nERROR: Requested format is not available",
+	} {
+		t.Run(message, func(t *testing.T) {
+			downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
+				{err: errors.New(message)},
+			})
+
+			require.Equal(t, 1, downloader.calls)
+			require.Len(t, events, 1)
+			assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
+		})
+	}
 }
 
 func TestDownloadEpisodesStopsYouTubeRetryWhenContextIsCanceled(t *testing.T) {
