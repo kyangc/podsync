@@ -8,8 +8,11 @@ import (
 
 type tempFile struct {
 	*os.File
-	dir string
+	dir     string
+	summary DownloadSummary
 }
+
+func (f *tempFile) DownloadSummary() DownloadSummary { return f.summary }
 
 func (f *tempFile) Close() error {
 	err := f.File.Close()

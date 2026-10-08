@@ -66,6 +66,7 @@ Go module 路径仍保留 `github.com/mxpv/podsync`，这是为了降低与 upst
 - 下载先写入临时目录，成功后再复制到目标存储，避免留下不完整文件。
 - 成功后状态变成 `EpisodeDownloaded`，并记录文件大小。
 - 失败后状态变成 `EpisodeError`，下一轮更新会重试。
+- 服务 context 取消时退出整批下载，不把取消或尚未开始的节目记为下载失败，不启动对应失败 hook，也不改写这些节目的状态；已返回的临时文件会关闭并清理。单次下载命令达到自己的 `timeout`、而服务 context 仍有效时，继续按普通下载失败记录并处理下一期。
 
 ### 清理阶段
 
@@ -278,6 +279,16 @@ timeout = 15
 custom_binary = "/path/to/yt-dlp"
 ```
 
+`self_update` 启动时先同步更新，之后在每次更新结束 24 小时后再次更新。后台循环沿用服务 context；退出信号取消 context 时停止等待，并取消正在执行的更新命令。配置 `custom_binary` 时仍关闭自更新。
+
+下载、playlist metadata 和自更新继续共用一个串行执行入口。等锁期间可响应调用方 context 取消；下载在拿到锁后才创建临时目录及 cookies 副本。配置的 `timeout` 仍从命令执行时开始计时，排队时限由调用方 context 决定。
+
+Linux/macOS 为命令创建独立进程组，取消时终止该组，并在每次命令返回后清理遗留进程。子进程继承输出管道时最多额外等待 2 秒，避免父进程退出后一直等 EOF。Windows 在取消时通过 `taskkill /T /F` 清理仍存活父进程的进程树，失败则回退到终止父进程；同样限制管道等待。Windows 父进程提前退出后的孤儿进程，以及主动脱离 Unix 进程组的子进程，无法保证被该机制清理。
+
+下载进程被取消或达到 `timeout` 时，返回错误保留 `context.Canceled` / `context.DeadlineExceeded` 原因，并在错误详情中写明终止原因；无输出的进程失败也会保留执行错误。管理器不再将这些已终止的尝试按旧传输文本重新执行。yt-dlp 自身报告的 TLS 或终态媒体读取超时仍沿用既有瞬态重试分类、次数和退避。
+
+playlist metadata 将完整 stdout 作为 JSON 解码，stderr 单独读取为有容量上限的诊断文本。损坏、空输出、null 或非对象 JSON 返回明确错误；合法 JSON 不会因 stderr 诊断文字而失效。执行失败保留原始错误链和诊断，取消及进程时限原因优先于先前的 HTTP 429 输出；真实 429 仍沿用原限流行为。
+
 ### 全局清理
 
 ```toml
@@ -296,6 +307,20 @@ max_age = 28
 compress = true
 debug = false
 ```
+
+每次节目下载最终结束时记录一条 `episode download summary`，成功为 info、失败为 warn。`download_status` 只表示下载和本地转码结果；存储、上传及远端发布是否成功仍应按后续事件验收。
+
+摘要包含 feed/episode 的本地关联标识、`attempts`、含排队和退避等待的总耗时 `elapsed_ms`、最后一次下载进程耗时 `attempt_elapsed_ms`、该次等锁耗时 `queue_wait_ms` 和最后观察到的阶段 `last_stage`。阶段可为 `queued`、`extract`、`media`、`postprocess`、`complete`、`open_output` 或 `unknown`；排队时取消的进程耗时为 0。阶段是诊断线索，不能单独用于判定网络根因。临时失败的重试日志也带关联标识和该次尝试的摘要。
+
+下载诊断输出持续读取，在占用保留容量前过滤 `[download] 数字%` 的百分比进度行，保留下载错误、目标路径和其他非百分比文本。过滤支持分块输出及 CR/LF/CRLF；进度仍参与阶段和重试信号观察。其余诊断最多保留 128 KiB，超过上限时保留约四分之一开头和四分之三末尾、标明中间省略，并丢弃截断处的不完整行。单行解析最多保留 8 KiB，避免超长无换行输出扩大缓冲区。`output_bytes` 记录此次原始 stdout/stderr 字节数（包括被过滤的进度和内部元数据标记），`output_truncated` 表示剩余诊断文本超过保留容量；因此原始字节数很大时也可能为 false。格式摘要、HTTP 429 和 YouTube 瞬态重试信号在读取时独立提取，不受文本截断影响。discovery 使用的 playlist JSON 仍完整读取。
+
+失败摘要额外记录 `failure_reason`：`context_canceled`、`deadline_exceeded` 或 `downloader_error`。若在重试退避期间取消，最终摘要保留最后一次下载的阶段、格式元数据和进程耗时，同时标明取消原因。普通下载失败的最终错误事件仍只记录一次；服务取消退出时不记录节目下载失败事件。
+
+支持 [分阶段 `--print`](https://github.com/yt-dlp/yt-dlp#verbosity-and-simulation-options) 的 yt-dlp 通过 `before_dl` / `after_move` 输出只含 `format_id`、`acodec`、`protocol` 的 JSON，日志对应字段为 `format_id`、`audio_codec`、`protocol`。这些字段只接受最多 64 个白名单字符；缺失字段使用 JSON null 并省略对应日志字段，`metadata_available` 表示至少一个格式字段可用。`configured_player_client` 来自显式 per-feed extractor 参数，仅表示配置值，不证明请求实际使用了该 client。摘要不包含资源 URL、请求头、Cookie、PO Token 或完整提取 JSON。
+
+启动及下载器自更新后会用最多 5 秒的 `--help` 检测 `--print [WHEN:]TEMPLATE` 支持；不支持或检测失败时沿用原下载参数，仍记录结果、次数及耗时，格式元数据不可用。元数据标记行会从下载错误文本中移除；摘要不会参与重试分类，也不改变格式选择、重试预算或源 Bilibili Cookie 的临时复制行为。
+
+远端 `episode_download_failed` 的 `error_detail` 在完整脱敏后去掉下载百分比进度行，超过 2048 字符时保留约三分之一开头和三分之二末尾，并标明中间省略。这样可同时保留播放器传输告警和终态错误；其他事件仍沿用原截断规则。
 
 ## 平台行为
 

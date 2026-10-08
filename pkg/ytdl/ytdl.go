@@ -1,6 +1,7 @@
 package ytdl
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/mxpv/podsync/pkg/feed"
@@ -24,6 +24,7 @@ import (
 const (
 	DefaultDownloadTimeout = 10 * time.Minute
 	UpdatePeriod           = 24 * time.Hour
+	commandWaitDelay       = 2 * time.Second
 )
 
 type PlaylistMetadataThumbnail struct {
@@ -60,9 +61,10 @@ type Config struct {
 }
 
 type YoutubeDl struct {
-	path       string
-	timeout    time.Duration
-	updateLock sync.Mutex // Don't call youtube-dl while self updating
+	path             string
+	timeout          time.Duration
+	updateLock       commandLock // Don't call youtube-dl while self updating
+	summarySupported bool
 }
 
 func New(ctx context.Context, cfg Config) (*YoutubeDl, error) {
@@ -109,6 +111,7 @@ func New(ctx context.Context, cfg Config) (*YoutubeDl, error) {
 	if err := ytdl.ensureDependencies(ctx); err != nil {
 		return nil, err
 	}
+	ytdl.detectSummarySupport(ctx)
 
 	if cfg.SelfUpdate {
 		// Do initial blocking update at launch
@@ -116,15 +119,7 @@ func New(ctx context.Context, cfg Config) (*YoutubeDl, error) {
 			log.WithError(err).Error("failed to update youtube-dl")
 		}
 
-		go func() {
-			for {
-				time.Sleep(UpdatePeriod)
-
-				if err := ytdl.Update(context.Background()); err != nil {
-					log.WithError(err).Error("update failed")
-				}
-			}
-		}()
+		go ytdl.autoUpdate(ctx, UpdatePeriod)
 	}
 
 	return ytdl, nil
@@ -163,7 +158,9 @@ func (dl *YoutubeDl) ensureDependencies(ctx context.Context) error {
 }
 
 func (dl *YoutubeDl) Update(ctx context.Context) error {
-	dl.updateLock.Lock()
+	if err := dl.updateLock.Lock(ctx); err != nil {
+		return errors.Wrap(err, "waiting for downloader update")
+	}
 	defer dl.updateLock.Unlock()
 
 	log.Info("updating youtube-dl")
@@ -174,6 +171,7 @@ func (dl *YoutubeDl) Update(ctx context.Context) error {
 	}
 
 	log.Info(output)
+	dl.detectSummarySupport(ctx)
 	return nil
 }
 
@@ -186,27 +184,55 @@ func (dl *YoutubeDl) PlaylistMetadata(ctx context.Context, url string) (metadata
 		"--no-warnings", // suppress warnings
 		url,
 	}
-	dl.updateLock.Lock()
+	if err := dl.updateLock.Lock(ctx); err != nil {
+		return PlaylistMetadata{}, errors.Wrap(err, "waiting for playlist metadata")
+	}
 	defer dl.updateLock.Unlock()
-	output, err := dl.exec(ctx, args...)
+	var stdout bytes.Buffer
+	diagnostics := newDownloadOutput()
+	err = dl.runSeparated(ctx, &stdout, diagnostics, args...)
+	output := stdout.String()
+	detail, _ := diagnostics.result()
 	if err != nil {
 		log.WithError(err).Errorf("youtube-dl error: %s", url)
 
 		// YouTube might block host with HTTP Error 429: Too Many Requests
-		if strings.Contains(output, "HTTP Error 429") {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) &&
+			(diagnostics.rateLimited || strings.Contains(output, "HTTP Error 429")) {
 			return PlaylistMetadata{}, ErrTooManyRequests
 		}
 
-		log.Error(output)
-		return PlaylistMetadata{}, errors.New(output)
+		detail = strings.TrimSpace(output + "\n" + detail)
+		if detail != "" {
+			log.Error(detail)
+			err = errors.WithMessage(err, detail)
+		}
+		return PlaylistMetadata{}, err
 	}
 
-	var playlistMetadata PlaylistMetadata
-	json.Unmarshal([]byte(output), &playlistMetadata)
-	return playlistMetadata, nil
+	var playlistMetadata *PlaylistMetadata
+	if err := json.Unmarshal([]byte(output), &playlistMetadata); err != nil {
+		return PlaylistMetadata{}, errors.Wrap(err, "failed to decode playlist metadata")
+	}
+	if playlistMetadata == nil {
+		return PlaylistMetadata{}, errors.New("empty playlist metadata JSON")
+	}
+	if strings.TrimSpace(detail) != "" {
+		log.Warn(detail)
+	}
+	return *playlistMetadata, nil
 }
 
 func (dl *YoutubeDl) Download(ctx context.Context, feedConfig *feed.Config, episode *model.Episode) (r io.ReadCloser, err error) {
+	queued := time.Now()
+	err = dl.updateLock.Lock(ctx)
+	queueWait := time.Since(queued)
+	if err != nil {
+		return nil, &downloadError{message: errors.Wrap(err, "waiting for downloader").Error(), cause: err,
+			summary: DownloadSummary{Stage: "queued", QueueWait: queueWait}}
+	}
+	defer dl.updateLock.Unlock()
+
 	tmpDir, err := os.MkdirTemp("", "podsync-")
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get temp dir for download")
@@ -237,45 +263,72 @@ func (dl *YoutubeDl) Download(ctx context.Context, feedConfig *feed.Config, epis
 	}
 
 	args := buildArgs(downloadFeedConfig, episode, filePath)
-
-	dl.updateLock.Lock()
-	defer dl.updateLock.Unlock()
-
-	output, err := dl.exec(ctx, args...)
+	if dl.summarySupported {
+		// Per-feed options still take precedence over the default verbosity.
+		args = append([]string{"--print", "before_dl:" + downloadMetadataTemplate,
+			"--print", "after_move:" + downloadCompletionTemplate, "--no-quiet"}, args...)
+	}
+	started := time.Now()
+	capture := newDownloadOutput()
+	err = dl.run(ctx, capture, args...)
+	output, summary := capture.result()
+	summary.Elapsed = time.Since(started)
+	summary.QueueWait = queueWait
+	summary.ConfiguredPlayerClient = configuredPlayerClient(feedConfig.YouTubeDLArgs)
 	if err != nil {
 		log.WithError(err).Errorf("youtube-dl error: %s", filePath)
 
 		// YouTube might block host with HTTP Error 429: Too Many Requests
-		if strings.Contains(output, "HTTP Error 429") {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && capture.rateLimited {
 			return nil, ErrTooManyRequests
 		}
 
 		log.Error(output)
 
-		return nil, errors.New(output)
+		return nil, &downloadError{message: commandErrorDetail(output, err), summary: summary, cause: err, retryReason: capture.retryReason}
 	}
 
 	// filePath now with the final extension
 	filePath = filepath.Join(tmpDir, feed.EpisodeName(feedConfig, episode))
 	f, err := os.Open(filePath)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to open downloaded file")
+		summary.Stage = "open_output"
+		cause := errors.Wrap(err, "failed to open downloaded file")
+		return nil, &downloadError{message: cause.Error(), summary: summary, cause: cause}
 	}
 
-	return &tempFile{File: f, dir: tmpDir}, nil
+	summary.Stage = "complete"
+	return &tempFile{File: f, dir: tmpDir, summary: summary}, nil
 }
 
 func (dl *YoutubeDl) exec(ctx context.Context, args ...string) (string, error) {
+	var output bytes.Buffer
+	err := dl.run(ctx, &output, args...)
+	return output.String(), err
+}
+
+func (dl *YoutubeDl) run(ctx context.Context, output io.Writer, args ...string) error {
+	return dl.runSeparated(ctx, output, output, args...)
+}
+
+func (dl *YoutubeDl) runSeparated(ctx context.Context, stdout, stderr io.Writer, args ...string) error {
 	ctx, cancel := context.WithTimeout(ctx, dl.timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, dl.path, args...)
-	output, err := cmd.CombinedOutput()
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	cmd.WaitDelay = commandWaitDelay
+	cleanup := configureCommand(cmd)
+	defer cleanup()
+	err := cmd.Run()
 	if err != nil {
-		return string(output), errors.Wrap(err, "failed to execute youtube-dl")
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		return errors.Wrap(err, "failed to execute youtube-dl")
 	}
 
-	return string(output), nil
+	return nil
 }
 
 func buildArgs(feedConfig *feed.Config, episode *model.Episode, outputFilePath string) []string {

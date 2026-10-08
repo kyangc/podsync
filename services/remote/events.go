@@ -175,6 +175,12 @@ func (r *EventRecorder) RecordRemoteEvent(event model.RemoteEventDraft) {
 	if level == "" {
 		level = model.RemoteEventInfo
 	}
+	var errorDetail string
+	if event.Type == model.RemoteEventDownloadFailed {
+		errorDetail = summarizeDownloadError(event.ErrorDetail, r.redactions)
+	} else {
+		errorDetail = sanitizeEventString(event.ErrorDetail, maxRemoteEventDetail, r.redactions)
+	}
 	recorded := model.RemoteEvent{
 		EventTime:      r.now().UTC().Format(time.RFC3339),
 		Level:          level,
@@ -183,7 +189,7 @@ func (r *EventRecorder) RecordRemoteEvent(event model.RemoteEventDraft) {
 		LocalEpisodeID: sanitizeEventString(event.LocalEpisodeID, maxRemoteEventCode, r.redactions),
 		Message:        sanitizeEventString(event.Message, maxRemoteEventMessage, r.redactions),
 		ErrorCode:      sanitizeEventString(event.ErrorCode, maxRemoteEventCode, r.redactions),
-		ErrorDetail:    sanitizeEventString(event.ErrorDetail, maxRemoteEventDetail, r.redactions),
+		ErrorDetail:    errorDetail,
 	}
 
 	r.mu.Lock()

@@ -1,8 +1,10 @@
 package update
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -267,6 +270,54 @@ func TestDownloadEpisodesRecordsDownloadFinishedEvent(t *testing.T) {
 	assert.Equal(t, "episode", sink.events[0].LocalEpisodeID)
 }
 
+func TestDownloadEpisodesLogsSummaryAfterRecovery(t *testing.T) {
+	var output bytes.Buffer
+	previous := log.StandardLogger().Out
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previous) })
+	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
+		{err: errors.New("The handshake operation timed out")},
+		{body: "audio", summary: &ytdl.DownloadSummary{FormatID: "18", AudioCodec: "mp4a.40.2", Protocol: "https", ConfiguredPlayerClient: "mweb", Stage: "complete"}},
+	})
+	require.Equal(t, 2, downloader.calls)
+	require.Len(t, events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFinished, events[0].Type)
+	text := output.String()
+	assert.Equal(t, 1, strings.Count(text, "episode download summary"))
+	assert.Contains(t, text, "attempts=2")
+	assert.Contains(t, text, "download_status=success")
+	assert.Contains(t, text, "format_id=18")
+	assert.Contains(t, text, "audio_codec=mp4a.40.2")
+	assert.Contains(t, text, "protocol=https")
+	assert.Contains(t, text, "configured_player_client=mweb")
+	assert.Contains(t, text, "elapsed_ms=")
+}
+
+func TestDownloadEpisodesLogsWrappedFailureSummaryAfterRetries(t *testing.T) {
+	var output bytes.Buffer
+	previous := log.StandardLogger().Out
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previous) })
+	terminal := fmt.Errorf("download: %w", &summaryTestError{
+		error:   errors.New("ERROR: [download] Got error: The read operation timed out. Giving up after 1 retries"),
+		summary: ytdl.DownloadSummary{FormatID: "18", AudioCodec: "mp4a.40.2", Protocol: "https", Stage: "media"},
+	})
+	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
+		{err: terminal}, {err: terminal}, {err: terminal},
+	})
+	require.Equal(t, 3, downloader.calls)
+	require.Len(t, events, 1)
+	assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
+	assert.Equal(t, terminal.Error(), events[0].ErrorDetail)
+	text := output.String()
+	assert.Equal(t, 1, strings.Count(text, "episode download summary"))
+	assert.Contains(t, text, "attempts=3")
+	assert.Contains(t, text, "download_status=failed")
+	assert.Contains(t, text, "last_stage=media")
+	assert.Contains(t, text, "format_id=18")
+	assert.Contains(t, text, "metadata_available=true")
+}
+
 func TestDownloadEpisodesRecoversFromTransientYouTube403(t *testing.T) {
 	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
 		{err: errors.New("HTTP Error 403: Forbidden")},
@@ -298,6 +349,39 @@ func TestDownloadEpisodesRecoversFromYouTubeHandshakeTimeout(t *testing.T) {
 	require.Equal(t, 2, downloader.calls)
 	require.Len(t, events, 1)
 	assert.Equal(t, model.RemoteEventDownloadFinished, events[0].Type)
+}
+
+func TestDownloadEpisodesUsesCapturedRetryReason(t *testing.T) {
+	for _, test := range []struct {
+		name, reason, message string
+		cause                 error
+		nonYouTube            bool
+		wantCalls             int
+	}{
+		{name: "signal omitted from text", reason: "tls_transport", message: "ERROR: download failed", wantCalls: 2},
+		{name: "no captured signal", message: "The handshake operation timed out", wantCalls: 1},
+		{name: "cancellation takes precedence", reason: "tls_transport", cause: context.Canceled, wantCalls: 1},
+		{name: "deadline takes precedence", reason: "http_403", cause: context.DeadlineExceeded, wantCalls: 1},
+		{name: "provider takes precedence", reason: "http_403", nonYouTube: true, wantCalls: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			failure := &retryReasonTestError{error: errors.New(test.message), reason: test.reason, cause: test.cause}
+			feedConfig := testFeedConfig()
+			if test.nonYouTube {
+				feedConfig.URL = "https://vimeo.com/12345"
+			}
+			downloader, events := runDownloadScenario(t, context.Background(), feedConfig, []downloadResult{
+				{err: fmt.Errorf("download: %w", failure)}, {body: "audio"},
+			})
+			assert.Equal(t, test.wantCalls, downloader.calls)
+			require.Len(t, events, 1)
+			wantEvent := model.RemoteEventDownloadFailed
+			if test.wantCalls == 2 {
+				wantEvent = model.RemoteEventDownloadFinished
+			}
+			assert.Equal(t, wantEvent, events[0].Type)
+		})
+	}
 }
 
 func TestDownloadEpisodesRecoversFromYouTubeMediaReadTimeout(t *testing.T) {
@@ -391,10 +475,52 @@ func TestDownloadEpisodesStopsYouTubeRetryWhenContextIsCanceled(t *testing.T) {
 		{body: "audio"},
 	})
 
-	require.Equal(t, 1, downloader.calls)
-	require.Len(t, events, 1)
-	assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
-	assert.Equal(t, context.Canceled.Error(), events[0].ErrorDetail)
+	assert.Equal(t, 0, downloader.calls)
+	assert.Empty(t, events)
+}
+
+func TestDownloadEpisodesDoesNotRetryCanceledOrExpiredProcess(t *testing.T) {
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			failure := fmt.Errorf("WARNING: The handshake operation timed out: %w", cause)
+			downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
+				{err: failure}, {body: "audio"},
+			})
+			assert.Equal(t, 1, downloader.calls)
+			require.Len(t, events, 1)
+			assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
+			assert.Equal(t, failure.Error(), events[0].ErrorDetail)
+		})
+	}
+}
+
+func TestDownloadRetryKeepsLastSummaryWhenRetryWaitIsCanceled(t *testing.T) {
+	var output bytes.Buffer
+	previous := log.StandardLogger().Out
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previous) })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	failure := &summaryTestError{
+		error:   errors.New("HTTP Error 403: Forbidden"),
+		summary: ytdl.DownloadSummary{FormatID: "18", Protocol: "https", Stage: "media", Elapsed: time.Millisecond},
+	}
+	downloader := &cancelingDownloader{hookDownloader: hookDownloader{err: failure}, onDownload: cancel}
+	manager, err := NewUpdater(nil, nil, "", downloader, &hookDB{}, &hookFS{})
+	require.NoError(t, err)
+	_, err = manager.downloadEpisodeWithRetry(ctx, testFeedConfig(), testEpisode())
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 1, downloader.calls)
+	var summaryLine string
+	for _, line := range strings.Split(output.String(), "\n") {
+		if strings.Contains(line, "episode download summary") {
+			summaryLine = line
+		}
+	}
+	assert.Contains(t, summaryLine, "failure_reason=context_canceled")
+	assert.Contains(t, summaryLine, "format_id=18")
+	assert.Contains(t, summaryLine, "last_stage=media")
+	assert.Contains(t, summaryLine, "attempt_elapsed_ms=1")
 }
 
 func TestDownloadEpisodesRecordsDownloadFailedEvent(t *testing.T) {
@@ -721,9 +847,33 @@ func (h hookDownloader) PlaylistMetadata(context.Context, string) (ytdl.Playlist
 }
 
 type downloadResult struct {
-	body string
-	err  error
+	body    string
+	err     error
+	summary *ytdl.DownloadSummary
 }
+
+type summaryTestReader struct {
+	io.ReadCloser
+	summary ytdl.DownloadSummary
+}
+
+func (r *summaryTestReader) DownloadSummary() ytdl.DownloadSummary { return r.summary }
+
+type summaryTestError struct {
+	error
+	summary ytdl.DownloadSummary
+}
+
+func (e *summaryTestError) DownloadSummary() ytdl.DownloadSummary { return e.summary }
+
+type retryReasonTestError struct {
+	error
+	reason string
+	cause  error
+}
+
+func (e *retryReasonTestError) Unwrap() error               { return e.cause }
+func (e *retryReasonTestError) DownloadRetryReason() string { return e.reason }
 
 type sequenceDownloader struct {
 	results []downloadResult
@@ -743,7 +893,11 @@ func runDownloadScenario(t *testing.T, ctx context.Context, feedConfig *feed.Con
 	require.NoError(t, err)
 
 	err = manager.downloadEpisodes(ctx, feedConfig, []*model.Episode{testEpisode()})
-	require.NoError(t, err)
+	if ctx.Err() != nil {
+		require.ErrorIs(t, err, ctx.Err())
+	} else {
+		require.NoError(t, err)
+	}
 	return downloader, sink.events
 }
 
@@ -753,7 +907,11 @@ func (d *sequenceDownloader) Download(context.Context, *feed.Config, *model.Epis
 	if result.err != nil {
 		return nil, result.err
 	}
-	return io.NopCloser(strings.NewReader(result.body)), nil
+	reader := io.NopCloser(strings.NewReader(result.body))
+	if result.summary != nil {
+		return &summaryTestReader{ReadCloser: reader, summary: *result.summary}, nil
+	}
+	return reader, nil
 }
 
 func (d *sequenceDownloader) PlaylistMetadata(context.Context, string) (ytdl.PlaylistMetadata, error) {

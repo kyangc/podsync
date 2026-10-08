@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -437,6 +436,9 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 	// Download pending episodes
 
 	for idx, episode := range downloadList {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var (
 			logger      = log.WithFields(log.Fields{"index": idx, "episode_id": episode.ID})
 			episodeName = feed.EpisodeName(feedConfig, episode)
@@ -445,6 +447,9 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 
 		// Check whether episode already exists
 		size, err := u.fs.Size(ctx, mediaPath)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err == nil {
 			logger.Infof("episode %q already exists on disk", episode.ID)
 
@@ -476,6 +481,14 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 
 		logger.Infof("! downloading episode %s", episode.VideoURL)
 		tempFile, err := u.downloadEpisodeWithRetry(ctx, feedConfig, episode)
+		// A service shutdown is not an episode failure. A command's own
+		// deadline still follows the normal error path while ctx remains live.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if tempFile != nil {
+				tempFile.Close()
+			}
+			return ctxErr
+		}
 		if err != nil {
 			// YouTube might block host with HTTP Error 429: Too Many Requests
 			// We still need to generate XML, so just stop sending download requests and
@@ -502,6 +515,9 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 				}
 
 				for i, hook := range feedConfig.OnEpisodeDownloadError {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
 					if hookErr := hook.Invoke(env); hookErr != nil {
 						logger.Errorf("failed to execute episode download error hook %d: %v", i+1, hookErr)
 					} else {
@@ -510,6 +526,9 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 				}
 			}
 
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if err := u.db.UpdateEpisode(feedID, episode.ID, func(episode *model.Episode) error {
 				episode.Status = model.EpisodeError
 				return nil
@@ -523,6 +542,9 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 		logger.Debug("copying file")
 		fileSize, err := u.fs.Create(ctx, mediaPath, tempFile)
 		tempFile.Close()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			logger.WithError(err).Error("failed to copy file")
 			return err
@@ -537,6 +559,9 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 			}
 
 			for i, hook := range feedConfig.PostEpisodeDownload {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				if err := hook.Invoke(env); err != nil {
 					logger.Errorf("failed to execute post episode download hook %d: %v", i+1, err)
 				} else {
@@ -547,6 +572,9 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 
 		// Update file status in database
 
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		logger.Infof("successfully downloaded file %q", episode.ID)
 		if err := u.db.UpdateEpisode(feedID, episode.ID, func(episode *model.Episode) error {
 			episode.Size = fileSize
@@ -575,21 +603,64 @@ func (u *Manager) downloadEpisodes(ctx context.Context, feedConfig *feed.Config,
 }
 
 func (u *Manager) downloadEpisodeWithRetry(ctx context.Context, feedConfig *feed.Config, episode *model.Episode) (io.ReadCloser, error) {
+	started := time.Now()
 	for attempt := 1; ; attempt++ {
 		file, err := u.downloader.Download(ctx, feedConfig, episode)
+		summary := downloadSummary(file, err)
 		retryReason := retryableYouTubeDownloadError(feedConfig, err)
 		if err == nil || attempt > len(u.downloadRetryDelays) || retryReason == "" {
+			logDownloadSummary(feedConfig, episode, summary, err, attempt, time.Since(started))
 			return file, err
 		}
-		log.WithFields(log.Fields{
-			"next_attempt": attempt + 1,
-			"max_attempts": len(u.downloadRetryDelays) + 1,
-			"retry_reason": retryReason,
-		}).Warn("retrying transient YouTube download")
+		fields := summary.LogFields()
+		fields["feed_id"] = feedConfig.ID
+		fields["episode_id"] = episode.ID
+		fields["next_attempt"] = attempt + 1
+		fields["max_attempts"] = len(u.downloadRetryDelays) + 1
+		fields["retry_reason"] = retryReason
+		log.WithFields(fields).Warn("retrying transient YouTube download")
 		if err := waitForDownloadRetry(ctx, u.downloadRetryDelays[attempt-1]); err != nil {
+			logDownloadSummary(feedConfig, episode, summary, err, attempt, time.Since(started))
 			return nil, err
 		}
 	}
+}
+
+func downloadSummary(file io.ReadCloser, err error) ytdl.DownloadSummary {
+	var summary ytdl.DownloadSummary
+	var provider ytdl.SummaryProvider
+	if err == nil {
+		if provider, ok := file.(ytdl.SummaryProvider); ok {
+			summary = provider.DownloadSummary()
+		}
+		summary.Stage = "complete"
+	} else if errors.As(err, &provider) {
+		summary = provider.DownloadSummary()
+	}
+	return summary
+}
+
+func logDownloadSummary(feedConfig *feed.Config, episode *model.Episode, summary ytdl.DownloadSummary, err error, attempts int, elapsed time.Duration) {
+	fields := summary.LogFields()
+	fields["feed_id"] = feedConfig.ID
+	fields["episode_id"] = episode.ID
+	fields["attempts"] = attempts
+	fields["elapsed_ms"] = elapsed.Milliseconds()
+	fields["download_status"] = "success"
+	if err != nil {
+		fields["download_status"] = "failed"
+		switch {
+		case errors.Is(err, context.Canceled):
+			fields["failure_reason"] = "context_canceled"
+		case errors.Is(err, context.DeadlineExceeded):
+			fields["failure_reason"] = "deadline_exceeded"
+		default:
+			fields["failure_reason"] = "downloader_error"
+		}
+		log.WithFields(fields).Warn("episode download summary")
+		return
+	}
+	log.WithFields(fields).Info("episode download summary")
 }
 
 func waitForDownloadRetry(ctx context.Context, delay time.Duration) error {
@@ -612,27 +683,18 @@ func waitForDownloadRetry(ctx context.Context, delay time.Duration) error {
 }
 
 func retryableYouTubeDownloadError(feedConfig *feed.Config, err error) string {
-	if err == nil {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return ""
 	}
 	info, parseErr := builder.ParseURL(feedConfig.URL)
 	if parseErr != nil || info.Provider != model.ProviderYoutube {
 		return ""
 	}
-	message := strings.ToLower(err.Error())
-	if strings.Contains(message, "http error 403") {
-		return "http_403"
+	var provider ytdl.RetryReasonProvider
+	if errors.As(err, &provider) {
+		return provider.DownloadRetryReason()
 	}
-	if strings.Contains(message, "unexpected_eof") ||
-		strings.Contains(message, "unexpected eof") ||
-		strings.Contains(message, "handshake operation timed out") {
-		return "tls_transport"
-	}
-	// Match an exhausted media read timeout, not a warning before another failure.
-	if strings.Contains(message, "[download] got error: the read operation timed out. giving up after ") {
-		return "read_timeout"
-	}
-	return ""
+	return ytdl.YouTubeDownloadRetryReason(err.Error())
 }
 
 func (u *Manager) buildXML(ctx context.Context, feedConfig *feed.Config) error {

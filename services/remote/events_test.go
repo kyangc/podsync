@@ -222,6 +222,42 @@ func TestEventRecorderRedactsAndTruncatesEventStrings(t *testing.T) {
 	assert.Contains(t, event.ErrorDetail, "[redacted]")
 }
 
+func TestEventRecorderPreservesTerminalDownloadErrorAfterProgress(t *testing.T) {
+	reporter := &fakeEventReporter{}
+	recorder := NewEventRecorder(EventRecorderConfig{RunID: "run-1", Reporter: reporter, Redactions: []string{"private-token"}})
+	terminal := "[download] Got error: The read operation timed out. Giving up after 1 retries"
+	recorder.RecordRemoteEvent(model.RemoteEventDraft{
+		Type: model.RemoteEventDownloadFailed, Level: model.RemoteEventError,
+		ErrorDetail: "WARNING: TLS handshake failed private-token\n" +
+			strings.Repeat("[download] 53.4% of 42.00MiB at 1.0MiB/s ETA 00:20\r", 200) +
+			"ERROR: \r" + terminal + "\n",
+	})
+	require.NoError(t, recorder.Flush(context.Background(), model.RemoteSyncRunRunning))
+	detail := reporter.batches[0].Events[0].ErrorDetail
+	assert.Contains(t, detail, "WARNING: TLS handshake failed")
+	assert.Contains(t, detail, terminal)
+	assert.NotContains(t, detail, "53.4%")
+	assert.NotContains(t, detail, "private-token")
+	assert.LessOrEqual(t, len([]rune(detail)), maxRemoteEventDetail)
+}
+
+func TestEventRecorderBoundsDownloadErrorWhileKeepingHeadAndTail(t *testing.T) {
+	reporter := &fakeEventReporter{}
+	recorder := NewEventRecorder(EventRecorderConfig{RunID: "run-1", Reporter: reporter, Redactions: []string{"private-token"}})
+	recorder.RecordRemoteEvent(model.RemoteEventDraft{
+		Type: model.RemoteEventDownloadFailed,
+		ErrorDetail: "WARNING: player API handshake timed out\n" + strings.Repeat("中间日志 private-token\n", 400) +
+			"ERROR: Requested format is not available Authorization: Bearer private-token\n",
+	})
+	require.NoError(t, recorder.Flush(context.Background(), model.RemoteSyncRunRunning))
+	detail := reporter.batches[0].Events[0].ErrorDetail
+	assert.Contains(t, detail, "WARNING: player API handshake timed out")
+	assert.Contains(t, detail, "ERROR: Requested format is not available")
+	assert.NotContains(t, detail, "private-token")
+	assert.LessOrEqual(t, len([]rune(detail)), maxRemoteEventDetail)
+	assert.Contains(t, detail, "[... omitted ...]")
+}
+
 func TestEventRecorderUsesRFC3339SecondResolution(t *testing.T) {
 	reporter := &fakeEventReporter{}
 	now := fixedEventClockAt(time.Date(2026, 7, 6, 12, 0, 0, 123456789, time.UTC))
