@@ -42,6 +42,8 @@ docker compose -f compose.yaml -f compose.media-origin.yml up -d media media-tun
 
 The checked-in image versions match the already-running Monga media origin on the same NAS. Review and pin by digest before a later independent upgrade; do not silently track `latest`.
 
+The NAS override explicitly uses HTTP/2 over TCP port 7844. The current NAS egress path fails QUIC/UDP handshakes while TCP succeeds. This setting applies only to this connector and retains TLS verification. It does not repair stale Fake-IP mappings in an upstream DNS proxy.
+
 Configure the remotely-managed Tunnel with two routes:
 
 | Route | Origin | Access |
@@ -140,3 +142,17 @@ After changing the production media Tunnel route, observe for at least seven com
 ## Rollback
 
 Point the production media hostname back to R2. Disable `MEDIA_ORIGIN_BASE_URL` so lifecycle calls fall back to `MEDIA_BUCKET`, change `remote_media.type` back to `r2`, and restart only Podsync. Do not remove NAS hardlinks until rollback acceptance is complete.
+
+## Tunnel connectivity incidents
+
+A running connector container and a healthy Podsync HTTP service do not establish public media availability. Cloudflare can serve an older cached object while uncached objects fail with 530/1033.
+
+1. Read the connector's internal `/ready` and `/metrics` endpoints from the media container. Require ready connections and a nonzero `cloudflared_tunnel_ha_connections`; do not publish the metrics port. With the current image, the default metrics port is 20241.
+2. Compare connection errors and registered-connection addresses with fresh DNS resolution **from the same Docker network**. In a Fake-IP environment, a long-running connector can retain addresses whose proxy mappings are no longer usable. A different answer alone does not prove why the old mapping changed; preserve the failure and fresh-address connectivity evidence.
+3. Test TCP and QUIC separately. HTTP/2 also requires port 7844, so success on HTTPS port 443 alone does not prove Tunnel connectivity. Keep HTTP/2 in the NAS override while QUIC remains unavailable.
+4. If refreshing stale edge discovery is necessary, restart only `media-tunnel`. For a command/configuration change, save the previous override, validate the merged Compose config, and recreate only that service with `--no-deps --pull never`. Do not restart Podsync, republish media, rotate credentials, or change shared routing as part of this operation.
+5. Verify affected new objects and an older object through public RSS, D1 size, and Range requests from both an external client and the NAS. A unique query can exercise an uncached path; confirm a cache MISS and a matching nginx origin access entry. Also verify a read-only authenticated management HEAD, Access protection, background event freshness, and absence of continued connection errors after registration.
+
+To revert a connector transport change, restore the saved override and recreate only `media-tunnel` with the same Compose files and `--no-deps --pull never`; repeat the same acceptance checks. No R2 cutover, media migration, or Podsync restart is needed for this transport rollback.
+
+See the [2026-10-19 incident](incidents/2026-10-19-media-tunnel-connectivity.md) for the observed failure boundary and recovery evidence. Changes to shared Clash DNS, Fake-IP persistence, or egress policies require a separately reviewed scope; HTTP/2 alone does not eliminate that upstream dependency.

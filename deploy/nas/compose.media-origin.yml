@@ -23,7 +23,8 @@ services:
     image: cloudflare/cloudflared:2026.7.3
     restart: always
     init: true
-    command: tunnel --no-autoupdate run --token-file /run/secrets/tunnel-token
+    # The NAS proxy path supports TCP 7844; QUIC handshakes fail on this path.
+    command: tunnel --no-autoupdate --protocol http2 run --token-file /run/secrets/tunnel-token
     volumes:
       - ./.secrets/media-tunnel-token:/run/secrets/tunnel-token:ro
     depends_on:
