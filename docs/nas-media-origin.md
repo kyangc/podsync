@@ -117,7 +117,7 @@ curl -fsS -o /dev/null -X POST https://PODSYNC_WORKER/api/nas/media-origin/check
   --data '{"r2_key":"audio/RETAINED_KEY.mp3"}'
 ```
 
-Management lifecycle subrequests must bypass the CDN cache (`Request.cache = "no-store"`). A cacheable `.mp3` HEAD miss can otherwise become GET at Cloudflare's edge and receive 405 from the HEAD/DELETE-only management endpoint. Validate this path separately from public media Range reads; public media caching remains enabled. The local fix and its pending production acceptance are recorded in the [2026-10-21 incident](incidents/2026-10-21-media-tunnel-response-stall.md#管理-head-的独立验收缺口本地修复待部署).
+Management lifecycle subrequests must bypass the CDN cache (`Request.cache = "no-store"`). A cacheable `.mp3` HEAD miss can otherwise become GET at Cloudflare's edge and receive 405 from the HEAD/DELETE-only management endpoint. Validate this path separately from public media Range reads; public media caching remains enabled. The fix and production verification are recorded in the [2026-10-21 incident](incidents/2026-10-21-media-tunnel-response-stall.md#管理-head-的独立验收缺口与修复).
 
 ## Acceptance gates
 
