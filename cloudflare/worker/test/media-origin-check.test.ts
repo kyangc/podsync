@@ -62,6 +62,25 @@ describe("NAS media origin check", () => {
     expect(response.status).toBe(404);
   });
 
+  it("keeps a cold-cache media HEAD from becoming an origin GET", async () => {
+    const originMethods: string[] = [];
+    globalThis.fetch = async (input, init) => {
+      const subrequest = new Request(input, init);
+      // Cloudflare fills cacheable HEAD misses with GET, but this authenticated
+      // lifecycle endpoint only supports HEAD and DELETE.
+      const originMethod = subrequest.method === "HEAD" && subrequest.cache !== "no-store"
+        ? "GET"
+        : subrequest.method;
+      originMethods.push(originMethod);
+      return new Response(null, { status: originMethod === "HEAD" ? 204 : 405 });
+    };
+
+    const response = await worker.fetch(request({ r2_key: "audio/feed/cold.mp3" }), env());
+
+    expect(response.status).toBe(204);
+    expect(originMethods).toEqual(["HEAD"]);
+  });
+
   it("retries one transient NAS origin HEAD", async () => {
     let calls = 0;
     globalThis.fetch = async () => {

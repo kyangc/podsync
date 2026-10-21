@@ -117,6 +117,8 @@ curl -fsS -o /dev/null -X POST https://PODSYNC_WORKER/api/nas/media-origin/check
   --data '{"r2_key":"audio/RETAINED_KEY.mp3"}'
 ```
 
+Management lifecycle subrequests must bypass the CDN cache (`Request.cache = "no-store"`). A cacheable `.mp3` HEAD miss can otherwise become GET at Cloudflare's edge and receive 405 from the HEAD/DELETE-only management endpoint. Validate this path separately from public media Range reads; public media caching remains enabled. The local fix and its pending production acceptance are recorded in the [2026-10-21 incident](incidents/2026-10-21-media-tunnel-response-stall.md#管理-head-的独立验收缺口本地修复待部署).
+
 ## Acceptance gates
 
 Before public cutover, test representative small, medium, and largest objects on the temporary hostname:
@@ -156,3 +158,7 @@ A running connector container and a healthy Podsync HTTP service do not establis
 To revert a connector transport change, restore the saved override and recreate only `media-tunnel` with the same Compose files and `--no-deps --pull never`; repeat the same acceptance checks. No R2 cutover, media migration, or Podsync restart is needed for this transport rollback.
 
 See the [2026-10-19 incident](incidents/2026-10-19-media-tunnel-connectivity.md) for the observed failure boundary and recovery evidence. Changes to shared Clash DNS, Fake-IP persistence, or egress policies require a separately reviewed scope; HTTP/2 alone does not eliminate that upstream dependency.
+
+Ready connections and a stable request-error counter can also coexist with response backpressure. Compare public `/healthz` with the same hostname's Cloudflare edge response and the internal nginx health endpoint. If only origin-backed public requests stall, capture in-flight requests, socket queues and, when available, a read-only cloudflared goroutine snapshot before refreshing connections. A successful restart resets process counters; verify actual responses and completion of origin transfers separately.
+
+Use unique-query media probes sparingly and wait for the matching nginx transfer to finish before adding more. Cloudflare may fetch the entire object to populate its cache even when the public client requests only 1024 bytes. Several probes can therefore amplify traffic and delay small health responses on a constrained tunnel path. Match the complete origin byte count to D1, then reuse the same URL to check cache behavior. See the [2026-10-21 response-stall incident](incidents/2026-10-21-media-tunnel-response-stall.md) for the observed boundary and remaining uncertainty.

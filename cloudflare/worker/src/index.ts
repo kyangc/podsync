@@ -3586,6 +3586,9 @@ function mediaOriginRequest(env: Env, key: string, method: "HEAD" | "DELETE"): R
   return new Request(url, {
     method,
     redirect: "manual",
+    // A cacheable HEAD miss can become GET at Cloudflare's edge. Lifecycle
+    // checks must reach the origin with their method and current object state.
+    cache: "no-store",
     headers: {
       authorization: `Bearer ${env.NAS_TOKEN}`,
       "cf-access-client-id": env.MEDIA_ORIGIN_ACCESS_CLIENT_ID,
