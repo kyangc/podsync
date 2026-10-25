@@ -470,6 +470,39 @@ make docker
 docker run -it --rm localhost/podsync:latest
 ```
 
+### 当前生产运行与巡检入口
+
+2026-10-24 已完成 NAS → Mac mini 生产切换。当前唯一 producer 是 4T 专用
+Colima `platform` 环境中的 `podsync` 容器；NAS 的旧容器、Docker daemon 和
+`127.0.0.1:9091` 不再是生产巡检入口。不要因旧入口不可达而启动旧实例。
+
+| 项目 | 当前入口 |
+| --- | --- |
+| Docker | `/Users/chengkangyang/.local/bin/docker-platform docker`，显式选择受守卫的 4T 环境 |
+| Compose | `/Volumes/4T/DockerData/platform/stacks/podsync/compose.yaml` |
+| 媒体 | `/Volumes/4T/PublishedMedia/podsync`；nginx 只读挂载 `.remote-media` |
+| 数据库 / 下载临时目录 | `podsync-db` / `podsync-tmp` Linux volumes，底层数据盘在 4T |
+| 内部健康 | 容器内 `http://127.0.0.1:9090/health`；Mac loopback 发布端口为 `9091` |
+
+只读探针：
+
+```sh
+/Users/chengkangyang/.local/bin/docker-platform docker ps -a --filter name=podsync --format '{{.Names}} {{.Image}} {{.Status}}'
+/Users/chengkangyang/.local/bin/docker-platform docker inspect podsync --format '{{.State.Status}} started={{.State.StartedAt}} restarts={{.RestartCount}}'
+/Users/chengkangyang/.local/bin/docker-platform docker exec podsync python3 -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:9090/health", timeout=15).read().decode())'
+```
+
+启动 commit 从 `running podsync` 日志核实，报告只显示前 7 位；镜像标签不能替代
+实际二进制版本。日志须覆盖近 24 小时，跨迁移时结合旧实例归档，缺少的时段明确标注。
+默认 Docker context 和 `/var/run/docker.sock` 不指向该环境，不能据此判断生产停机。
+巡检保持总体结论、生产实例、同步、异常、Worker / Access 五项，结合更新新鲜度、
+D1 事件序号及计数、RSS/媒体大小和 Range 判断，不能只凭 `running` 或 HTTP 200。
+
+若出现 `previous process stopped before its final event report`，先关联进程启动与
+平台故障记录，再核对旧轮次闭合、后续轮次及事件计数，不删改历史失败记录。
+回退到 NAS 前必须先停止 Mac 写入者并保全最新数据库、outbox 和媒体。
+切换与平台中断的复核见 [10 月 25 日巡检修复记录](incidents/2026-10-25-production-inspection-runtime.md)。
+
 ## CI/CD
 
 - CI 在 `push` 到 `main` 和针对 `main` 的 PR 上运行。

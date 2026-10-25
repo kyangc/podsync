@@ -1,5 +1,7 @@
 # NAS public-media origin runbook
 
+Production moved to Mac mini on 2026-10-24. Use the [current runtime and inspection entry points](agent-maintenance-reference.md#当前生产运行与巡检入口) for operations. This runbook records the original NAS media setup; its Docker host and data paths are historical. Do not start the retired NAS producer while Mac is writing.
+
 This runbook migrates the existing public podcast media URLs from R2 to NAS storage behind Cloudflare Tunnel. It deliberately preserves the existing `r2_key` value and `MEDIA_PUBLIC_BASE_URL`, so RSS enclosure URLs do not change.
 
 ## Safety boundary
