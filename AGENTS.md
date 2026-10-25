@@ -1,3 +1,7 @@
+## 生产运行环境（2026-10-25）
+
+已在 Docker 生产运行。运行、部署或故障排查前先读 [DEPLOYMENT.md](DEPLOYMENT.md)。生产目标是 Mac mini Docker；本地开发测试不能代替容器验收。
+
 # Podsync 开发规则
 
 - 保留 `github.com/mxpv/podsync` module path，避免无关的 upstream 差异。

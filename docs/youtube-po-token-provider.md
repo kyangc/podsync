@@ -15,17 +15,21 @@ Merge [`deploy/nas/compose.youtube-po-token.yml`](../deploy/nas/compose.youtube-
 into the deployment Compose configuration. The overlay:
 
 - enables the plugin for Podsync through `PYTHONPATH`;
-- starts the matching `1.3.1-deno` provider image;
-- keeps port `4416` on the internal Compose network;
-- disables provider log persistence because version `1.3.1` prints generated
-  tokens to standard output;
+- starts the matching `2.0.2-deno` provider image;
+- puts Podsync and the provider on a dedicated ordinary bridge while keeping
+  the provider off the default application network;
+- does not publish port `4416` to the host;
+- disables provider log persistence because normal 2.0.2 messages can include
+  request-bound identifiers that should not be retained;
 - waits for the provider `/ping` endpoint before starting Podsync.
 
-Do not add a host `ports` mapping for the provider.
+Do not add a host `ports` mapping for the provider. Keep the dedicated bridge
+non-internal so the provider retains the DNS and HTTPS egress needed to mint
+tokens. Do not replace it with shared network namespace mode: Podsync only
+needs ordinary bridge access to the provider service name.
 
-Do not enable the default Docker log driver for provider version `1.3.1`.
-Use the health check, container state, restart count, and Podsync-side errors for
-normal monitoring. Re-evaluate this restriction when upgrading the provider.
+Use the health check, container state, restart count, and Podsync-side error
+categories for normal monitoring. Do not retain raw provider request logs.
 
 ## yt-dlp arguments
 
@@ -52,12 +56,15 @@ for a bounded canary investigation; do not keep it in normal configuration.
 ## Verification
 
 1. Confirm the provider is healthy and reports the same version as the plugin.
-2. Run yt-dlp with `--verbose` and confirm it lists `bgutil:http-1.3.1`.
-3. Verify a complete progressive-format download and audio transcode; a short
+2. Run yt-dlp with `--verbose` and confirm it lists `bgutil:http-2.0.2`.
+3. Confirm containers on the default application network cannot resolve or
+   connect to `bgutil-provider`, while Podsync can connect over the dedicated
+   bridge and the provider can reach required external HTTPS endpoints.
+4. Verify a complete progressive-format download and audio transcode; a short
    read alone is insufficient because DASH requests may fail later in the file.
-4. Verify one complete Podsync download, transcode, upload, RSS update, and sync
+5. Verify one complete Podsync download, transcode, upload, RSS update, and sync
    success event.
-5. Observe two scheduled cycles and confirm there are no new YouTube HTTP 403
+6. Observe two scheduled cycles and confirm there are no new YouTube HTTP 403
    failures.
 
 Podsync `/health` alone is not evidence that YouTube media downloads work.
