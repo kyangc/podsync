@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -90,16 +91,92 @@ func TestDoSharesOneDeadlineAcrossAttempts(t *testing.T) {
 }
 
 func TestDoHonorsCancellationDuringBackoff(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	calls := 0
-	_, err := Do(ctx, func(context.Context) (string, error) {
-		calls++
-		go cancel()
-		return "", io.EOF
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		calls := 0
+		done := make(chan error, 1)
+		go func() {
+			_, err := Do(ctx, func(context.Context) (string, error) {
+				calls++
+				return "", io.EOF
+			})
+			done <- err
+		}()
+
+		// Wait until Do is blocked in backoff, before its timer can fire.
+		synctest.Wait()
+		require.Equal(t, 1, calls)
+		cancel()
+		assert.ErrorIs(t, <-done, context.Canceled)
+		assert.Equal(t, 1, calls)
 	})
-	assert.ErrorIs(t, err, context.Canceled)
-	assert.Equal(t, 1, calls)
+}
+
+func TestDoHonorsCancellationAfterTransientFailure(t *testing.T) {
+	for _, cancelOnAttempt := range []int{1, 2} {
+		t.Run(fmt.Sprintf("attempt_%d", cancelOnAttempt), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				calls := 0
+				result, err := Do(ctx, func(context.Context) (string, error) {
+					calls++
+					if calls == cancelOnAttempt {
+						cancel()
+					}
+					return "partial", fmt.Errorf("read response: %w", io.EOF)
+				})
+				assert.ErrorIs(t, err, context.Canceled)
+				assert.Empty(t, result)
+				assert.Equal(t, cancelOnAttempt, calls)
+			})
+		})
+	}
+}
+
+func TestDoHonorsDeadlineAfterTransientFailure(t *testing.T) {
+	for _, expireOnAttempt := range []int{1, 2} {
+		t.Run(fmt.Sprintf("attempt_%d", expireOnAttempt), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				calls := 0
+				result, err := Do(ctx, func(operationCtx context.Context) (string, error) {
+					calls++
+					if calls == expireOnAttempt {
+						<-operationCtx.Done()
+					}
+					return "partial", fmt.Errorf("read response: %w", io.EOF)
+				})
+				assert.ErrorIs(t, err, context.DeadlineExceeded)
+				assert.Empty(t, result)
+				assert.Equal(t, expireOnAttempt, calls)
+			})
+		})
+	}
+}
+
+func TestDoPreservesCompletedResultsAfterCancellation(t *testing.T) {
+	for _, operationErr := range []error{nil, errors.New("HTTP 403")} {
+		name := "success"
+		if operationErr != nil {
+			name = "terminal_error"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls := 0
+			result, err := Do(ctx, func(context.Context) (string, error) {
+				calls++
+				cancel()
+				return "completed", operationErr
+			})
+			assert.Equal(t, "completed", result)
+			assert.ErrorIs(t, err, operationErr)
+			assert.Equal(t, 1, calls)
+		})
+	}
 }
 
 func TestDoHonorsShorterCallerDeadline(t *testing.T) {

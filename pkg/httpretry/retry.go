@@ -19,6 +19,8 @@ const (
 // be idempotent and recreate its request and response state on each attempt,
 // including reading and closing the response body before returning.
 // HTTP status, validation, and certificate errors are left to the caller.
+// Cancellation or deadline expiry takes precedence over transient failures;
+// successful results and terminal errors are preserved.
 func Do[T any](ctx context.Context, operation func(context.Context) (T, error)) (T, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
@@ -28,7 +30,14 @@ func Do[T any](ctx context.Context, operation func(context.Context) (T, error)) 
 			return zero, err
 		}
 		result, err := operation(ctx)
-		if err == nil || attempt == 1 || ctx.Err() != nil || !isTransient(err) {
+		if err == nil || !isTransient(err) {
+			return result, err
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			var zero T
+			return zero, ctxErr
+		}
+		if attempt == 1 {
 			return result, err
 		}
 		timer := time.NewTimer(retryDelay)
