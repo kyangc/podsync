@@ -502,6 +502,8 @@ D1 事件序号及计数、RSS/媒体大小和 Range 判断，不能只凭 `runn
 平台故障记录，再核对旧轮次闭合、后续轮次及事件计数，不删改历史失败记录。
 回退到 NAS 前必须先停止 Mac 写入者并保全最新数据库、outbox 和媒体。
 切换与平台中断的复核见 [10 月 25 日巡检修复记录](incidents/2026-10-25-production-inspection-runtime.md)。
+10 月 25 日晚 4T 失盘、次日恢复、日志缺口及 D1 瞬时 API 错误见
+[10 月 26 日复核记录](incidents/2026-10-26-storage-interruption-recovery.md)。
 
 ## CI/CD
 
