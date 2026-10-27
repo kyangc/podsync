@@ -506,6 +506,8 @@ D1 事件序号及计数、RSS/媒体大小和 Range 判断，不能只凭 `runn
 切换与平台中断的复核见 [10 月 25 日巡检修复记录](incidents/2026-10-25-production-inspection-runtime.md)。
 10 月 25 日晚 4T 失盘、次日恢复、日志缺口及 D1 瞬时 API 错误见
 [10 月 26 日复核记录](incidents/2026-10-26-storage-interruption-recovery.md)。
+内置盘迁移后的 DNS 批量错误、媒体恢复器 blocked 与租约交接、403 原样本及巡检自动化入口更新见
+[10 月 27 日复核记录](incidents/2026-10-27-media-recovery-and-migration-dns.md)。
 
 ## CI/CD
 
