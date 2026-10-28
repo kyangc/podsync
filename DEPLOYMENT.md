@@ -54,3 +54,12 @@ NAS producer 和媒体容器已停止；不要用旧 NAS 容器检查结果判�
 已准入会话的租约发布若获 guest 成功确认但超过两秒预算，也先撤租，最多三次有限重验；
 重新核验原会话、制品、介质和 I/O 后才可恢复。SSH 超时等写入结果未知的情况仍阻塞，
 十秒 TTL 和连接预算不变。边界与验收见 [10 月 28 日记录](docs/incidents/2026-10-28-acknowledged-lease-publication.md)。
+
+10 月 28 日后续已采用 Podsync 独立 v2 门禁与固定 ID 的暖驻只读观察器，身份观察每轮实际检查 diskutil/介质路径。
+inspect 由原 wrapper 每轮重新校验守卫，并新建 Unix 连接，仅 GET 已登记 ID。
+租约必须有宿主对完整 guest 回执的 nonce 确认；十秒到期点在 guest 初始时钟读取时固定，
+不得由迟到 writer 重新计算。实际门禁位于
+`runtime/control/media-recovery-podsync-v2-20261028-boot-budget/media-gate`，最终控制器位于
+`runtime/control/media-recovery-podsync-v2-api-final-20261028/`。不能与 v1 signer 混用，
+也不能替换 Monga 的共享旧门禁。计时、边界、回退和生产验收见
+[后续根因记录](docs/incidents/2026-10-28-recovery-control-plane-root-cause.md)。
