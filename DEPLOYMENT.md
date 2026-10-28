@@ -50,3 +50,7 @@ NAS producer 和媒体容器已停止；不要用旧 NAS 容器检查结果判�
 `waiting`，解锁后也要重新验证。它们与需人工审查的 `blocked` 分开记录；
 现有业务可能仍可用，但不能只看 phase 或进程存活，验收必须读到 Linux 有效租约与实际门禁通过。
 复发条件、验证及历史证据见 [10 月 27 日记录](docs/incidents/2026-10-27-media-recovery-and-migration-dns.md)。
+
+已准入会话的租约发布若获 guest 成功确认但超过两秒预算，也先撤租，最多三次有限重验；
+重新核验原会话、制品、介质和 I/O 后才可恢复。SSH 超时等写入结果未知的情况仍阻塞，
+十秒 TTL 和连接预算不变。边界与验收见 [10 月 28 日记录](docs/incidents/2026-10-28-acknowledged-lease-publication.md)。
