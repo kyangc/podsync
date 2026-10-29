@@ -1,0 +1,29 @@
+{
+  "zone": "kyangc.net",
+  "phase": "http_request_cache_settings",
+  "rules": [
+    {
+      "id": "eea16e1b63c7450988c2933a59fe4f2b",
+      "description": "Podsync audio origin ranges",
+      "expression": "(http.host eq \"media.podsync.kyangc.net\" and starts_with(http.request.uri.path, \"/audio/\"))",
+      "action": "set_cache_settings",
+      "action_parameters": {
+        "cache": true,
+        "origin_range_requests": {
+          "mode": "on"
+        }
+      },
+      "enabled": true
+    },
+    {
+      "id": "60542672420e487da8d30e7ad6c2b436",
+      "description": "Podsync audio HEAD stays HEAD",
+      "expression": "(http.host eq \"media.podsync.kyangc.net\" and starts_with(http.request.uri.path, \"/audio/\") and http.request.method eq \"HEAD\")",
+      "action": "set_cache_settings",
+      "action_parameters": {
+        "cache": false
+      },
+      "enabled": true
+    }
+  ]
+}
