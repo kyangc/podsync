@@ -140,3 +140,16 @@ Tunnel 最终 4 条连接、在途 0、历史错误计数 6；窗口后段 08:41
 `/Users/chengkangyang/DockerPlatform/runtime/private/podsync-identity-recurrence-20261029/`。
 未打开运行中 Badger、清 outbox/历史错误、手造租约、放宽预算、修改 Access/TLS，
 也没有手动删除媒体或进行文件名迁移。业务原有的保留策略随正常调度继续执行。
+
+## 推送后复核
+
+09:01 的读回仍为 ready/healthy、两个实际 gate 通过、消费者零重启，源配置/Cookie 和制品摘要吻合。
+随后 Mac/NAS 五组原地址各再读一次，十次仍均 HIT/206/1024，前缀和总大小正确；健康及 Access 也通过。
+Tunnel 累计错误此时为 10，09:04 仍为 10、连接 4、在途 0。
+08:57:58 的新增日志为 client disconnected / control stream context canceled；未据此声称新的媒体缺失，
+也没有在缺少请求标识时把取消唯一归因到某个探针或用户行为。计数和日志原样保留。
+
+本轮门禁属于进程启动准入；撤租不会自动终止已运行进程。
+因此 13:43 blocked 不等于业务在该时刻全部失败，之后介质仍可用时仍能更新；
+17:17 实际失盘撤销旧 pinned root，才与 17:19 开始的 EIO/全 feed 失败相衔接。
+新增门禁健康检查提高这类状态的可见性，没有将其冒充每次业务写入的持续围栏。
