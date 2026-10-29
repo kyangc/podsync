@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
@@ -106,6 +107,12 @@ func (b *Badger) AddFeed(_ context.Context, feedID string, feed *model.Feed) err
 	return b.db.Update(func(txn *badger.Txn) error {
 		// Insert or update feed info
 		feedKey := b.getKey(feedPath, feedID)
+		var previous model.Feed
+		if err := b.getObj(txn, feedKey, &previous); err != nil && err != model.ErrNotFound {
+			return err
+		}
+		// Discovery must neither advance nor erase the publication checkpoint.
+		storedFeed.LastSuccessfulUpdate = previous.LastSuccessfulUpdate
 		if err := b.setObj(txn, feedKey, &storedFeed, true); err != nil {
 			return err
 		}
@@ -122,6 +129,22 @@ func (b *Badger) AddFeed(_ context.Context, feedID string, feed *model.Feed) err
 		}
 
 		return nil
+	})
+}
+
+func (b *Badger) RecordFeedUpdateSuccess(ctx context.Context, feedID string, at time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return b.db.Update(func(txn *badger.Txn) error {
+		key := b.getKey(feedPath, feedID)
+		var stored model.Feed
+		if err := b.getObj(txn, key, &stored); err != nil {
+			return err
+		}
+		stored.ID = feedID
+		stored.LastSuccessfulUpdate = at.UTC()
+		return b.setObj(txn, key, &stored, true)
 	})
 }
 

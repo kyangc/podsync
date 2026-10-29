@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/mxpv/podsync/pkg/model"
 )
@@ -20,6 +21,8 @@ type Storage interface {
 	// - Insert or update feed info
 	// - Append new episodes to the existing list of episodes (existing episodes are not overwritten!)
 	AddFeed(ctx context.Context, feedID string, feed *model.Feed) error
+	// RecordFeedUpdateSuccess records completed publication, independently of discovery metadata.
+	RecordFeedUpdateSuccess(ctx context.Context, feedID string, at time.Time) error
 
 	// GetFeed gets a feed by ID
 	GetFeed(ctx context.Context, feedID string) (*model.Feed, error)

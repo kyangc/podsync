@@ -204,8 +204,8 @@ func (s *Server) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	// Walk through all feeds to count recent failures
 	err := s.db.WalkFeeds(ctx, func(feed *model.Feed) error {
 		feedCount++
-		if feed.UpdatedAt.After(lastFeedUpdate) {
-			lastFeedUpdate = feed.UpdatedAt
+		if feed.LastSuccessfulUpdate.After(lastFeedUpdate) {
+			lastFeedUpdate = feed.LastSuccessfulUpdate
 		}
 		return s.db.WalkEpisodes(ctx, feed.ID, func(episode *model.Episode) error {
 			if episode.Status == model.EpisodeError && episode.PubDate.After(cutoffTime) {

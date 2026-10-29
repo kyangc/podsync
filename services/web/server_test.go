@@ -327,15 +327,24 @@ func TestHealthEndpointDetectsFailedDownloadWithBuilderFeedIdentity(t *testing.T
 		episode.Status = model.EpisodeDownloaded
 		return nil
 	}))
+	require.NoError(t, database.RecordFeedUpdateSuccess(context.Background(), "youtube-feed", time.Now()))
 	response = httptest.NewRecorder()
 	server.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health", nil))
 	assert.Equal(t, http.StatusOK, response.Code)
 }
 
+func TestHealthEndpointRejectsDiscoveryWithoutCompletedFeedUpdate(t *testing.T) {
+	database := &healthDB{feeds: []*model.Feed{{ID: "discovered", UpdatedAt: time.Now().UTC()}}}
+	srv := New(Config{}, &mockFileSystem{}, database)
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
+
 func TestHealthEndpointHealthyWithRecentFeedUpdate(t *testing.T) {
 	db := &healthDB{
 		feeds: []*model.Feed{
-			{ID: "recent", UpdatedAt: time.Now().UTC().Add(-1 * time.Hour)},
+			{ID: "recent", LastSuccessfulUpdate: time.Now().UTC().Add(-1 * time.Hour)},
 		},
 	}
 
@@ -358,7 +367,7 @@ func TestHealthEndpointHealthyWithRecentFeedUpdate(t *testing.T) {
 func TestHealthEndpointUnhealthyWithStaleFeedUpdate(t *testing.T) {
 	db := &healthDB{
 		feeds: []*model.Feed{
-			{ID: "stale", UpdatedAt: time.Now().UTC().Add(-3 * time.Hour)},
+			{ID: "stale", UpdatedAt: time.Now().UTC(), LastSuccessfulUpdate: time.Now().UTC().Add(-3 * time.Hour)},
 		},
 	}
 
@@ -410,6 +419,9 @@ func (h *healthDB) Close() error { return nil }
 func (h *healthDB) Version() (int, error) { return 1, nil }
 
 func (h *healthDB) AddFeed(context.Context, string, *model.Feed) error {
+	return errors.New("not implemented")
+}
+func (h *healthDB) RecordFeedUpdateSuccess(context.Context, string, time.Time) error {
 	return errors.New("not implemented")
 }
 

@@ -49,6 +49,29 @@ func TestBadger_AddFeed(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestBadgerPublicationCheckpointIsIndependentAndDurable(t *testing.T) {
+	config := &Config{Dir: t.TempDir()}
+	database, err := NewBadger(config)
+	require.NoError(t, err)
+	completed := time.Now().UTC().Add(-time.Hour)
+	// Builder input cannot establish a publication checkpoint.
+	require.NoError(t, database.AddFeed(testCtx, "feed", &model.Feed{LastSuccessfulUpdate: time.Now()}))
+	stored, err := database.GetFeed(testCtx, "feed")
+	require.NoError(t, err)
+	assert.True(t, stored.LastSuccessfulUpdate.IsZero())
+	require.NoError(t, database.RecordFeedUpdateSuccess(testCtx, "feed", completed))
+	require.NoError(t, database.AddFeed(testCtx, "feed", &model.Feed{Title: "new metadata", UpdatedAt: time.Now()}))
+	require.NoError(t, database.Close())
+	database, err = NewBadger(config)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+	stored, err = database.GetFeed(testCtx, "feed")
+	require.NoError(t, err)
+	assert.Equal(t, completed, stored.LastSuccessfulUpdate)
+	assert.Equal(t, "new metadata", stored.Title)
+	assert.ErrorIs(t, database.RecordFeedUpdateSuccess(testCtx, "missing", completed), model.ErrNotFound)
+}
+
 func TestBadgerFeedIdentityUsesStorageKey(t *testing.T) {
 	for _, storedID := range []string{"", "different-feed"} {
 		t.Run("stored-"+storedID, func(t *testing.T) {

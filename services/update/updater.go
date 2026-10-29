@@ -224,6 +224,9 @@ func (u *Manager) Update(ctx context.Context, feedConfig *feed.Config) (err erro
 	if err := u.buildOPML(ctx); err != nil {
 		return errors.Wrap(err, "opml build failed")
 	}
+	if err := u.db.RecordFeedUpdateSuccess(ctx, feedConfig.ID, time.Now()); err != nil {
+		return errors.Wrap(err, "record feed publication failed")
+	}
 
 	elapsed := time.Since(started)
 	log.Infof("successfully updated feed in %s", elapsed)

@@ -30,6 +30,9 @@ func (t *testDB) Version() (int, error) { return 1, nil }
 func (t *testDB) AddFeed(_ context.Context, _ string, _ *model.Feed) error {
 	return errors.New("not implemented")
 }
+func (t *testDB) RecordFeedUpdateSuccess(context.Context, string, time.Time) error {
+	return errors.New("not implemented")
+}
 func (t *testDB) GetFeed(_ context.Context, _ string) (*model.Feed, error) {
 	return nil, errors.New("not implemented")
 }

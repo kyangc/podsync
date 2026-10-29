@@ -65,6 +65,9 @@ type Feed struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 	PlaylistSort    Sorting    `json:"playlist_sort"`
 	PrivateFeed     bool       `json:"private_feed"`
+
+	// LastSuccessfulUpdate is set only after downloads and XML/OPML publication complete.
+	LastSuccessfulUpdate time.Time `json:"last_successful_update"`
 }
 
 type EpisodeStatus string

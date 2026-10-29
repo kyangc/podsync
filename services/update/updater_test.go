@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mxpv/podsync/pkg/builder"
+	"github.com/mxpv/podsync/pkg/db"
 	"github.com/mxpv/podsync/pkg/feed"
 	"github.com/mxpv/podsync/pkg/model"
 	"github.com/mxpv/podsync/pkg/ytdl"
@@ -218,6 +219,45 @@ func TestUpdateRecordsFeedUpdateFailureEvent(t *testing.T) {
 	assert.Equal(t, model.RemoteEventFeedUpdateFailed, sink.events[1].Type)
 	assert.Equal(t, model.RemoteEventError, sink.events[1].Level)
 	assert.Contains(t, sink.events[1].ErrorDetail, "update failed")
+}
+
+func TestUpdatePublicationCheckpointSurvivesDiscoveryAndFailedPublication(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.NewBadger(&db.Config{Dir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+	config := testFeedConfig()
+	config.URL = "https://space.bilibili.com/10835521"
+	result := testFeedResult()
+	result.Episodes = nil
+	result.UpdatedAt = time.Now().UTC()
+	storage := &hookFS{createErrFor: "feed.xml"}
+	manager := &Manager{
+		db: database, fs: storage, feeds: map[string]*feed.Config{config.ID: config},
+		keys: map[model.Provider]feed.KeyProvider{},
+		builderFactory: func(context.Context, model.Provider, string, Downloader) (builder.Builder, error) {
+			return fakeFeedBuilder{result: result}, nil
+		},
+	}
+	for _, failedFile := range []string{"feed.xml", "podsync.opml"} {
+		storage.createErrFor = failedFile
+		require.ErrorContains(t, manager.Update(ctx, config), "publication unavailable")
+		stored, err := database.GetFeed(ctx, config.ID)
+		require.NoError(t, err)
+		assert.False(t, stored.UpdatedAt.IsZero())
+		assert.True(t, stored.LastSuccessfulUpdate.IsZero())
+	}
+	storage.createErrFor = ""
+	require.NoError(t, manager.Update(ctx, config))
+	stored, err := database.GetFeed(ctx, config.ID)
+	require.NoError(t, err)
+	require.False(t, stored.LastSuccessfulUpdate.IsZero())
+	completed := stored.LastSuccessfulUpdate
+	storage.createErrFor = "feed.xml"
+	require.Error(t, manager.Update(ctx, config))
+	stored, err = database.GetFeed(ctx, config.ID)
+	require.NoError(t, err)
+	assert.Equal(t, completed, stored.LastSuccessfulUpdate)
 }
 
 func TestUpdateRecordsFeedUpdateStartedAndFinishedEvents(t *testing.T) {
@@ -776,6 +816,7 @@ func (h *hookDB) AddFeed(_ context.Context, _ string, feed *model.Feed) error {
 	h.feed = feed
 	return nil
 }
+func (h *hookDB) RecordFeedUpdateSuccess(context.Context, string, time.Time) error { return nil }
 func (h *hookDB) GetFeed(context.Context, string) (*model.Feed, error) {
 	return nil, errors.New("not implemented")
 }
@@ -809,6 +850,7 @@ func (h *hookDB) UpdateEpisode(_ string, episodeID string, cb func(*model.Episod
 }
 
 type hookFS struct {
+	createErrFor string
 	existingSize int64
 	createdPath  string
 }
@@ -826,6 +868,9 @@ func (h *hookFS) Size(context.Context, string) (int64, error) {
 }
 
 func (h *hookFS) Create(_ context.Context, name string, reader io.Reader) (int64, error) {
+	if name == h.createErrFor {
+		return 0, errors.New("publication unavailable")
+	}
 	h.createdPath = name
 	return io.Copy(io.Discard, reader)
 }

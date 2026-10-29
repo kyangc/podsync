@@ -367,7 +367,7 @@ debug = false
 - `/{path}/{feed_id}/{episode_name}`：节目文件下载。
 - `/{path}/podsync.opml`：OPML 导出，包含 `opml = true` 的 feed。
 - `/{path}/index.html`：Web UI，仅在启用且使用本地存储时可用。
-- `/health`：健康检查；仍处于下载错误状态且发布时间在过去 24 小时内的节目，或超过 `server.health_max_feed_age` 没有任何 feed 成功更新时返回 503。一次下载失败后已恢复的节目不再计入错误；更早发布的失败节目和远端发布错误仍须结合事件与内容交付检查。
+- `/health`：健康检查；仍处于下载错误状态且发布时间在过去 24 小时内的节目，或超过 `server.health_max_feed_age` 没有任何 feed 成功更新时返回 503。成功更新以下载处理和 XML/OPML 发布均完成后的持久化时间为准；discovery 的 `updated_at` 不代表发布成功。旧记录没有成功时间时，需等待一次完整更新才恢复健康。一次下载失败后已恢复的节目不再计入错误；更早发布的失败节目和远端发布错误仍须结合事件与内容交付检查。
 - `/debug/vars`：运行指标；仅当 `debug_endpoints = true` 时启用。
 - `/robots.txt`：仅当 `no_index = true` 时提供。
 
