@@ -136,6 +136,7 @@ Require:
 - `HEAD` returns 200 with the expected `Content-Length` and MIME type;
 - Range returns 206 and exactly 1024 bytes;
 - repeat GET/Range shows valid Cloudflare cache behavior without `private`/`no-store`;
+- missing or failed media responses carry `Cache-Control: no-store`; only successful media responses receive the public cache lifetime. A cached 404 can outlive an origin storage recovery, so retain the failed response and verify the real file and origin Range before expiring a specific stale negative entry;
 - backfill has `failed=0` and `missing_tasks=0`, selected/link counts match the authoritative D1-retained key set, and sampled files share an inode with their source;
 - a real external podcast client downloads and seeks successfully;
 - the authenticated `/api/nas/media-origin/check` returns 204 through the Worker/service-token path;
