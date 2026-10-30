@@ -60,7 +60,7 @@ NAS producer 和媒体容器已停止；不要用旧 NAS 容器检查结果判�
 inspect 由原 wrapper 每轮重新校验守卫，并新建 Unix 连接，仅 GET 已登记 ID。
 租约必须有宿主对完整 guest 回执的 nonce 确认；十秒到期点在 guest 初始时钟读取时固定，
 不得由迟到 writer 重新计算。实际门禁位于
-`runtime/control/media-recovery-podsync-v2-20261028-boot-budget/media-gate`，当前控制器位于
+`runtime/control/media-recovery-podsync-v2-20261028-boot-budget/media-gate`，10 月 29 日控制器位于
 `runtime/control/media-recovery-podsync-native-20261029/`。不能与 v1 signer 混用，
 也不能替换 Monga 的共享旧门禁。计时、边界、回退和生产验收见
 [后续根因记录](docs/incidents/2026-10-28-recovery-control-plane-root-cause.md)。
@@ -72,3 +72,11 @@ inspect 由原 wrapper 每轮重新校验守卫，并新建 Unix 连接，仅 GE
 须按正常排空、卸载、替换传输及重新登记流程恢复，保留未知结果与预算。
 媒体错误响应必须 `no-store`，防止源站恢复后仍向部分区域提供旧 404。
 复发链、修复和验证见 [10 月 29 日记录](docs/incidents/2026-10-29-identity-usb-and-negative-cache.md)。
+
+10 月 30 日审查了 10 月 29 日 12:19 的未知媒体写探针超时。该窗口发生全局 OOM；
+随后已启用的内置盘 swap 保持有效。Podsync 控制器现位于
+`runtime/control/media-recovery-podsync-probe-20261030/`，登记 `lease_stream = true`，
+复用固定 nonce 发布会话；实际 v2 门禁、双时钟十秒 TTL、两秒发布预算与 SSH 期限不变。
+探针失败的数值分段另存 `probe-failures.jsonl`，不受周期日志轮转影响。
+完整 guest 进度也不授权把 SSH 未知结果当作成功；保留原未知记录，必须审查后完整重新准入。
+原因边界、受控交接及验收见 [10 月 30 日记录](docs/incidents/2026-10-30-probe-timeout-and-memory-pressure.md)。
