@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mxpv/podsync/pkg/diagnostics"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -33,6 +34,10 @@ type DownloadSummary struct {
 	QueueWait              time.Duration
 	OutputBytes            int64
 	OutputTruncated        bool
+	NoDataBlocks           bool
+	ExtractOffsetMS        int64
+	MediaOffsetMS          int64
+	PostprocessOffsetMS    int64
 }
 
 type SummaryProvider interface {
@@ -46,6 +51,7 @@ func (s DownloadSummary) LogFields() log.Fields {
 	case "queued", "extract", "media", "postprocess", "complete", "open_output":
 		fields["last_stage"] = s.Stage
 	}
+	fields["no_data_blocks"] = s.NoDataBlocks
 	metadataAvailable := false
 	for key, value := range map[string]string{
 		"format_id": s.FormatID, "audio_codec": s.AudioCodec, "protocol": s.Protocol,
@@ -144,14 +150,32 @@ func (s *DownloadSummary) observeMetadata(line string) {
 }
 
 func (s *DownloadSummary) observeDiagnostic(line string) {
+	if strings.Contains(line, "Did not get any data blocks") {
+		s.NoDataBlocks = true
+	}
 	switch {
 	case strings.Contains(line, "[ExtractAudio]") || strings.Contains(line, "[Merger]"):
 		s.Stage = "postprocess"
 	case strings.Contains(line, "[download]"):
 		s.Stage = "media"
-	case s.Stage == "" && strings.Contains(line, "[youtube]"):
+	case s.Stage == "" && (strings.Contains(line, "[youtube]") || strings.Contains(line, "[BiliBili]")):
 		s.Stage = "extract"
 	}
+}
+
+func recordBilibiliSummary(ctx context.Context, timeout time.Duration, operation string, started time.Time, summary DownloadSummary, err error) {
+	kind := diagnostics.ErrorKind(err)
+	if kind == "application" {
+		kind = "process"
+	}
+	budget := int64(-1)
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = max(0, deadline.Sub(started).Milliseconds())
+	}
+	diagnostics.Emit(diagnostics.Record{BudgetMS: budget, ClientLimitMS: timeout.Milliseconds(), ContextState: diagnostics.ErrorKind(ctx.Err()), AtNS: time.Now().UnixNano(), StartedNS: started.UnixNano(), Operation: operation,
+		Stage: summary.Stage, ErrorKind: kind, Failed: err != nil, ElapsedMS: time.Since(started).Milliseconds(),
+		QueueMS: summary.QueueWait.Milliseconds(), ExtractMS: summary.ExtractOffsetMS, MediaMS: summary.MediaOffsetMS,
+		PostprocessMS: summary.PostprocessOffsetMS, NoDataBlocks: summary.NoDataBlocks})
 }
 
 // YouTubeDownloadRetryReason classifies diagnostic output. Provider selection

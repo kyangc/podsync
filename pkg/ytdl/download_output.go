@@ -3,6 +3,7 @@ package ytdl
 import (
 	"bytes"
 	"strings"
+	"time"
 )
 
 const (
@@ -28,10 +29,11 @@ type downloadOutput struct {
 	retryReason string
 	rateLimited bool
 	rawBytes    int64
+	started     time.Time
 }
 
 func newDownloadOutput() *downloadOutput {
-	return &downloadOutput{line: make([]byte, 0, maxDownloadLineBytes)}
+	return &downloadOutput{line: make([]byte, 0, maxDownloadLineBytes), started: time.Now(), summary: DownloadSummary{ExtractOffsetMS: -1, MediaOffsetMS: -1, PostprocessOffsetMS: -1}}
 }
 
 func (o *downloadOutput) Write(p []byte) (int, error) {
@@ -95,6 +97,7 @@ func (o *downloadOutput) observeDiagnostic(p []byte) {
 	}
 	window := o.scanTail + string(p)
 	o.summary.observeDiagnostic(window)
+	o.markStage()
 	if strings.Contains(window, "HTTP Error 429") {
 		o.rateLimited = true
 	}
@@ -129,6 +132,7 @@ func (o *downloadOutput) finishLine(delimiter byte) {
 	if o.metadata {
 		if o.lineBytes <= maxDownloadLineBytes {
 			o.summary.observeMetadata(string(o.line))
+			o.markStage()
 		}
 	} else if !o.progress && delimiter != 0 {
 		o.diagnostic.write([]byte{delimiter})
@@ -242,4 +246,19 @@ func (b *boundedDiagnostic) text() string {
 		tail = ""
 	}
 	return head + outputOmission + tail
+}
+
+func (o *downloadOutput) markStage() {
+	var offset *int64
+	switch o.summary.Stage {
+	case "extract":
+		offset = &o.summary.ExtractOffsetMS
+	case "media":
+		offset = &o.summary.MediaOffsetMS
+	case "postprocess":
+		offset = &o.summary.PostprocessOffsetMS
+	}
+	if offset != nil && *offset < 0 {
+		*offset = time.Since(o.started).Milliseconds()
+	}
 }

@@ -15,10 +15,9 @@ import (
 	"time"
 
 	"github.com/mxpv/podsync/pkg/feed"
+	"github.com/mxpv/podsync/pkg/model"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-
-	"github.com/mxpv/podsync/pkg/model"
 )
 
 const (
@@ -176,6 +175,17 @@ func (dl *YoutubeDl) Update(ctx context.Context) error {
 }
 
 func (dl *YoutubeDl) PlaylistMetadata(ctx context.Context, url string) (metadata PlaylistMetadata, err error) {
+	queued := time.Now()
+	evidence := DownloadSummary{Stage: "queued", ExtractOffsetMS: -1, MediaOffsetMS: -1, PostprocessOffsetMS: -1}
+	defer func() {
+		if isBilibiliURL(url) {
+			if evidence.Stage == "queued" {
+				evidence.QueueWait = time.Since(queued)
+			}
+			recordBilibiliSummary(ctx, dl.timeout, "bilibili_playlist", queued, evidence, err)
+		}
+	}()
+
 	log.Info("getting playlist metadata for: ", url)
 	args := []string{
 		"--playlist-items", "0",
@@ -187,12 +197,16 @@ func (dl *YoutubeDl) PlaylistMetadata(ctx context.Context, url string) (metadata
 	if err := dl.updateLock.Lock(ctx); err != nil {
 		return PlaylistMetadata{}, errors.Wrap(err, "waiting for playlist metadata")
 	}
+	evidence.QueueWait = time.Since(queued)
+	evidence.Stage = "extract"
 	defer dl.updateLock.Unlock()
 	var stdout bytes.Buffer
 	diagnostics := newDownloadOutput()
 	err = dl.runSeparated(ctx, &stdout, diagnostics, args...)
 	output := stdout.String()
-	detail, _ := diagnostics.result()
+	detail, summary := diagnostics.result()
+	summary.QueueWait = evidence.QueueWait
+	evidence = summary
 	if err != nil {
 		log.WithError(err).Errorf("youtube-dl error: %s", url)
 
@@ -220,18 +234,27 @@ func (dl *YoutubeDl) PlaylistMetadata(ctx context.Context, url string) (metadata
 	if strings.TrimSpace(detail) != "" {
 		log.Warn(detail)
 	}
+	evidence.Stage = "complete"
 	return *playlistMetadata, nil
 }
 
 func (dl *YoutubeDl) Download(ctx context.Context, feedConfig *feed.Config, episode *model.Episode) (r io.ReadCloser, err error) {
 	queued := time.Now()
+	evidence := DownloadSummary{Stage: "queued", ExtractOffsetMS: -1, MediaOffsetMS: -1, PostprocessOffsetMS: -1}
+	defer func() {
+		if isBilibiliURL(episode.VideoURL) {
+			recordBilibiliSummary(ctx, dl.timeout, "bilibili_download", queued, evidence, err)
+		}
+	}()
 	err = dl.updateLock.Lock(ctx)
 	queueWait := time.Since(queued)
+	evidence.QueueWait = queueWait
 	if err != nil {
 		return nil, &downloadError{message: errors.Wrap(err, "waiting for downloader").Error(), cause: err,
 			summary: DownloadSummary{Stage: "queued", QueueWait: queueWait}}
 	}
 	defer dl.updateLock.Unlock()
+	evidence.Stage = "unknown"
 
 	tmpDir, err := os.MkdirTemp("", "podsync-")
 	if err != nil {
@@ -275,6 +298,7 @@ func (dl *YoutubeDl) Download(ctx context.Context, feedConfig *feed.Config, epis
 	summary.Elapsed = time.Since(started)
 	summary.QueueWait = queueWait
 	summary.ConfiguredPlayerClient = configuredPlayerClient(feedConfig.YouTubeDLArgs)
+	evidence = summary
 	if err != nil {
 		log.WithError(err).Errorf("youtube-dl error: %s", filePath)
 
@@ -293,11 +317,13 @@ func (dl *YoutubeDl) Download(ctx context.Context, feedConfig *feed.Config, epis
 	f, err := os.Open(filePath)
 	if err != nil {
 		summary.Stage = "open_output"
+		evidence = summary
 		cause := errors.Wrap(err, "failed to open downloaded file")
 		return nil, &downloadError{message: cause.Error(), summary: summary, cause: cause}
 	}
 
 	summary.Stage = "complete"
+	evidence = summary
 	return &tempFile{File: f, dir: tmpDir, summary: summary}, nil
 }
 

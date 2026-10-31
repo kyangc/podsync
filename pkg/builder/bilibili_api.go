@@ -2,6 +2,7 @@ package builder
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mxpv/podsync/pkg/diagnostics"
 	"github.com/pkg/errors"
 )
 
@@ -59,7 +61,9 @@ func (c *bilibiliAPIClient) withCookiesFile(path string) (*bilibiliAPIClient, er
 	}, nil
 }
 
-func (c *bilibiliAPIClient) get(path string, query url.Values, result any) error {
+func (c *bilibiliAPIClient) get(path string, query url.Values, result any) (err error) {
+	ctx, observation := diagnostics.StartHTTP(context.Background(), "bilibili_discovery", c.client.Timeout)
+	defer func() { observation.Finish(err) }()
 	endpoint, err := url.Parse(c.baseURL)
 	if err != nil {
 		return errors.Wrap(err, "invalid bilibili api base url")
@@ -67,7 +71,7 @@ func (c *bilibiliAPIClient) get(path string, query url.Values, result any) error
 	endpoint.Path = path
 	endpoint.RawQuery = query.Encode()
 
-	req, err := http.NewRequest(http.MethodGet, endpoint.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
 		return errors.Wrap(err, "failed to create bilibili api request")
 	}
@@ -77,6 +81,7 @@ func (c *bilibiliAPIClient) get(path string, query url.Values, result any) error
 	if err != nil {
 		return errors.Wrap(err, "failed to send bilibili api request")
 	}
+	observation.Response(resp)
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
@@ -90,6 +95,9 @@ func (c *bilibiliAPIClient) get(path string, query url.Values, result any) error
 		return errors.Wrap(err, "failed to decode bilibili api response")
 	}
 
+	if value, ok := result.(interface{ diagnosticCode() int }); ok {
+		observation.ProviderResult(value.diagnosticCode())
+	}
 	return nil
 }
 
@@ -195,6 +203,8 @@ type bilibiliAPIResponse struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
+
+func (r bilibiliAPIResponse) diagnosticCode() int { return r.Code }
 
 type bilibiliAPIError struct {
 	code    int

@@ -6,13 +6,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/jessevdk/go-flags"
+	"github.com/mxpv/podsync/pkg/db"
+	"github.com/mxpv/podsync/pkg/diagnostics"
 	"github.com/mxpv/podsync/pkg/feed"
+	"github.com/mxpv/podsync/pkg/fs"
 	"github.com/mxpv/podsync/pkg/model"
+	"github.com/mxpv/podsync/pkg/ytdl"
 	"github.com/mxpv/podsync/services/migrate"
 	"github.com/mxpv/podsync/services/update"
 	"github.com/mxpv/podsync/services/web"
@@ -20,10 +25,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/natefinch/lumberjack.v2"
-
-	"github.com/mxpv/podsync/pkg/db"
-	"github.com/mxpv/podsync/pkg/fs"
-	"github.com/mxpv/podsync/pkg/ytdl"
 )
 
 type Opts struct {
@@ -143,6 +144,17 @@ func main() {
 			log.WithError(err).Error("failed to close database")
 		}
 	}()
+	callDiagnostics, diagnosticErr := diagnostics.Open(filepath.Join(cfg.Database.Dir, "diagnostics"))
+	if diagnosticErr != nil {
+		log.Warn("bounded call diagnostics unavailable")
+	} else {
+		log.Info("bounded call diagnostics enabled")
+		defer func() {
+			shutdown, stop := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			defer stop()
+			callDiagnostics.Close(shutdown)
+		}()
+	}
 	if opts.BackfillRemoteMedia {
 		result, backfillErr := runRemoteMediaBackfill(ctx, cfg, database, opts.BackfillRemoteKeyFile, opts.BackfillRemoteRecover, opts.BackfillRemoteDryRun)
 		log.WithFields(log.Fields{

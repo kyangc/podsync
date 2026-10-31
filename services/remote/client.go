@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mxpv/podsync/pkg/diagnostics"
 	"github.com/mxpv/podsync/pkg/httpretry"
 	"github.com/mxpv/podsync/pkg/model"
 )
@@ -94,7 +95,10 @@ func (c *NASClient) UpsertEpisode(ctx context.Context, task *model.RemotePublish
 	})
 }
 
-func (c *NASClient) upsertEpisodeOnce(ctx context.Context, task *model.RemotePublishTask) (*EpisodeUpsertResult, error) {
+func (c *NASClient) upsertEpisodeOnce(ctx context.Context, task *model.RemotePublishTask) (_result *EpisodeUpsertResult, err error) {
+	ctx, observation := diagnostics.StartHTTP(ctx, "remote_episode", diagnostics.ClientTimeout(c.client))
+	defer func() { observation.Finish(err) }()
+
 	payload, err := episodeUpsertPayloadFromTask(task)
 	if err != nil {
 		return nil, err
@@ -115,6 +119,7 @@ func (c *NASClient) upsertEpisodeOnce(ctx context.Context, task *model.RemotePub
 	if err != nil {
 		return nil, err
 	}
+	observation.Response(resp)
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -156,7 +161,10 @@ func (c *NASClient) FetchTombstones(ctx context.Context, cursor int64, limit int
 	})
 }
 
-func (c *NASClient) fetchTombstonesOnce(ctx context.Context, cursor int64, limit int) (*model.RemoteTombstoneBatch, error) {
+func (c *NASClient) fetchTombstonesOnce(ctx context.Context, cursor int64, limit int) (_result *model.RemoteTombstoneBatch, err error) {
+	ctx, observation := diagnostics.StartHTTP(ctx, "remote_tombstones", diagnostics.ClientTimeout(c.client))
+	defer func() { observation.Finish(err) }()
+
 	if cursor < 0 {
 		return nil, errors.New("tombstone cursor must be non-negative")
 	}
@@ -171,6 +179,7 @@ func (c *NASClient) fetchTombstonesOnce(ctx context.Context, cursor int64, limit
 	if err != nil {
 		return nil, err
 	}
+	observation.Response(resp)
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -211,7 +220,10 @@ func (c *NASClient) PostEventBatch(ctx context.Context, batch *model.RemoteEvent
 	})
 }
 
-func (c *NASClient) postEventBatchOnce(ctx context.Context, batch *model.RemoteEventBatch) (*model.RemoteEventBatchResult, error) {
+func (c *NASClient) postEventBatchOnce(ctx context.Context, batch *model.RemoteEventBatch) (_result *model.RemoteEventBatchResult, err error) {
+	ctx, observation := diagnostics.StartHTTP(ctx, "remote_events", diagnostics.ClientTimeout(c.client))
+	defer func() { observation.Finish(err) }()
+
 	if batch == nil {
 		return nil, nonRetryable("remote event batch is required")
 	}
@@ -231,6 +243,7 @@ func (c *NASClient) postEventBatchOnce(ctx context.Context, batch *model.RemoteE
 	if err != nil {
 		return nil, err
 	}
+	observation.Response(resp)
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -273,7 +286,10 @@ func (c *NASClient) UpsertFeedMetadata(ctx context.Context, metadata *model.Remo
 	return err
 }
 
-func (c *NASClient) upsertFeedMetadataOnce(ctx context.Context, metadata *model.RemoteFeedMetadata) error {
+func (c *NASClient) upsertFeedMetadataOnce(ctx context.Context, metadata *model.RemoteFeedMetadata) (err error) {
+	ctx, observation := diagnostics.StartHTTP(ctx, "remote_metadata", diagnostics.ClientTimeout(c.client))
+	defer func() { observation.Finish(err) }()
+
 	payload, err := feedMetadataUpsertPayloadFromMetadata(metadata)
 	if err != nil {
 		return err
@@ -294,6 +310,7 @@ func (c *NASClient) upsertFeedMetadataOnce(ctx context.Context, metadata *model.
 	if err != nil {
 		return err
 	}
+	observation.Response(resp)
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {

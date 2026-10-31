@@ -11,11 +11,11 @@ import (
 	"strings"
 
 	"github.com/hashicorp/go-multierror"
-	"github.com/pelletier/go-toml"
-	"github.com/pkg/errors"
-
+	"github.com/mxpv/podsync/pkg/diagnostics"
 	"github.com/mxpv/podsync/pkg/feed"
 	"github.com/mxpv/podsync/pkg/httpretry"
+	"github.com/pelletier/go-toml"
+	"github.com/pkg/errors"
 )
 
 type remoteFeedSource string
@@ -62,13 +62,15 @@ func fetchRemoteConfig(ctx context.Context, cfg RemoteConfig, client remoteHTTPC
 	})
 }
 
-func fetchRemoteConfigOnce(ctx context.Context, cfg RemoteConfig, client remoteHTTPClient) ([]byte, error) {
+func fetchRemoteConfigOnce(ctx context.Context, cfg RemoteConfig, client remoteHTTPClient) (_body []byte, err error) {
 	endpoint, err := remoteConfigURL(cfg.BaseURL)
 	if err != nil {
 		return nil, err
 	}
 	fetchCtx, cancel := context.WithTimeout(ctx, defaultRemoteFetchTimeout)
 	defer cancel()
+	fetchCtx, observation := diagnostics.StartHTTP(fetchCtx, "remote_config", diagnostics.ClientTimeout(client))
+	defer func() { observation.Finish(err) }()
 
 	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -81,6 +83,7 @@ func fetchRemoteConfigOnce(ctx context.Context, cfg RemoteConfig, client remoteH
 	if err != nil {
 		return nil, err
 	}
+	observation.Response(resp)
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
