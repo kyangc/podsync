@@ -36,6 +36,12 @@ NAS producer 和媒体容器已停止；不要用旧 NAS 容器检查结果判�
 
 - 部署前保存原 Compose、容器身份、源配置与 Cookie 哈希，以及
   `runtime/state/media-recovery/podsync/` 下的配置、激活记录和恢复状态。
+- 在重建或移除旧 producer 前，必须按旧容器 ID 归档截至正常 drain 完成的近 24 小时
+  `docker logs --timestamps` stdout/stderr，记录查询起止时间、旧 ID/StartedAt、退出状态与
+  归档文件大小/SHA-256。目录 0700、文件 0600；命令退出成功后还须读回文件、核对时间范围
+  与正常退出尾部，确认日志可解析且没有截断。归档未验证成功就暂停重建/移除，保留旧容器。
+  若旧实例不足 24 小时或 Docker 保留范围本就不足，明确记录覆盖起点和缺口，不能声称完整。
+  Badger 副本、D1 事件和有界诊断不能替代该步骤；业务恢复优先时也必须保留日志证据边界。
 - 受控排空媒体消费者并停止该服务的恢复器；在已验证的媒体传输与挂载可用时，
   仅创建新容器，不提前启动业务进程。停止传输前应正常卸载不再使用的 NFS 挂载，
   恢复只读占位挂载，避免下次启动检查阻塞在失联挂载上。
@@ -74,9 +80,23 @@ inspect 由原 wrapper 每轮重新校验守卫，并新建 Unix 连接，仅 GE
 复发链、修复和验证见 [10 月 29 日记录](docs/incidents/2026-10-29-identity-usb-and-negative-cache.md)。
 
 10 月 30 日审查了 10 月 29 日 12:19 的未知媒体写探针超时。该窗口发生全局 OOM；
-随后已启用的内置盘 swap 保持有效。Podsync 控制器现位于
+随后已启用的内置盘 swap 保持有效。该轮 Podsync 控制器位于
 `runtime/control/media-recovery-podsync-probe-20261030/`，登记 `lease_stream = true`，
 复用固定 nonce 发布会话；实际 v2 门禁、双时钟十秒 TTL、两秒发布预算与 SSH 期限不变。
 探针失败的数值分段另存 `probe-failures.jsonl`，不受周期日志轮转影响。
 完整 guest 进度也不授权把 SSH 未知结果当作成功；保留原未知记录，必须审查后完整重新准入。
 原因边界、受控交接及验收见 [10 月 30 日记录](docs/incidents/2026-10-30-probe-timeout-and-memory-pressure.md)。
+
+10 月 31 日已部署有界调用诊断，当前应用源码为 `9efb508`，控制器及细阶段观察 helper
+源码为平台 `f591dea`，定点制品位于
+`runtime/control/media-recovery-podsync-diagnostics-20261031/`。
+Podsync 的 `inspect_prefix` 使用该目录的 `docker_platform.py inspect-stream-diagnostics`；
+全局 `docker-platform` 管理入口与其他服务的登记哈希保持不变。
+恢复器开启 `bounded_diagnostics = true`，自然调用记录位于
+`runtime/state/media-recovery/podsync/diagnostics/`；应用记录位于 Linux volume
+`podsync-db` 内 `/app/db/diagnostics/`。旧诊断和事故历史保留。
+现行实际镜像、Compose/恢复登记哈希在平台 `deploy/mac-platform/current-release.json`
+的 `stacks.podsync` 登记，不能从旧模板或全局 wrapper 源码推断已安装版本。
+原 v2 门禁、完整 ACK、双时钟十秒 TTL、两秒发布及 SSH/观察预算保持。
+该轮修复取证缺口；历史超时与 NAS TLS 失败的底层原因仍未定位，详见
+[诊断部署与自然验收](docs/incidents/2026-10-31-bounded-diagnostics.md)。
