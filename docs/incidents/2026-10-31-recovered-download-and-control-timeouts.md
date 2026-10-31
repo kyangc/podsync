@@ -119,3 +119,5 @@ NAS 进程读回无 Podsync、dockerd 或 containerd，未启动旧 VM 或 NAS �
 
 受限原始日志、D1 回执、验收脚本及读回结果位于
 `/Users/chengkangyang/DockerPlatform/runtime/private/podsync-transient-alerts-20261031/`。
+
+08:12 结案后新发生的 09:20 固定 ID 观察超时及其自动恢复，见[独立补充复核](2026-10-31-inspection-observer-timeout.md)。
