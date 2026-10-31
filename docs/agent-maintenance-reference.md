@@ -499,6 +499,8 @@ docker run -it --rm localhost/podsync:latest
 默认 Docker context 和 `/var/run/docker.sock` 不指向该环境，不能据此判断生产停机。
 旧 4T VM 仅作切换时冷备，不能直接启动；回退必须先排空并同步新状态。
 媒体仍在 4T，不能恢复 USB VirtioFS 直挂；完整运行约定见 [DEPLOYMENT.md](../DEPLOYMENT.md)。
+维护卸载/同盘重挂的自动恢复、持久 TERM 对账及未知写入边界见
+[10 月 31 日维护重连记录](incidents/2026-10-31-planned-usb-reconnect.md)。
 巡检保持总体结论、生产实例、同步、异常、Worker / Access 五项，结合更新新鲜度、
 D1 事件序号及计数、RSS/媒体大小和 Range 判断，不能只凭 `running` 或 HTTP 200。
 

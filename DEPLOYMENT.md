@@ -87,16 +87,26 @@ inspect 由原 wrapper 每轮重新校验守卫，并新建 Unix 连接，仅 GE
 完整 guest 进度也不授权把 SSH 未知结果当作成功；保留原未知记录，必须审查后完整重新准入。
 原因边界、受控交接及验收见 [10 月 30 日记录](docs/incidents/2026-10-30-probe-timeout-and-memory-pressure.md)。
 
-10 月 31 日已部署有界调用诊断，当前应用源码为 `9efb508`，控制器及细阶段观察 helper
-源码为平台 `f591dea`，定点制品位于
+10 月 31 日已部署有界调用诊断，应用源码为 `9efb508`，该轮控制器及细阶段观察 helper
+源码为平台 `f591dea`，当时定点制品位于
 `runtime/control/media-recovery-podsync-diagnostics-20261031/`。
 Podsync 的 `inspect_prefix` 使用该目录的 `docker_platform.py inspect-stream-diagnostics`；
 全局 `docker-platform` 管理入口与其他服务的登记哈希保持不变。
 恢复器开启 `bounded_diagnostics = true`，自然调用记录位于
 `runtime/state/media-recovery/podsync/diagnostics/`；应用记录位于 Linux volume
 `podsync-db` 内 `/app/db/diagnostics/`。旧诊断和事故历史保留。
-现行实际镜像、Compose/恢复登记哈希在平台 `deploy/mac-platform/current-release.json`
+实际镜像、Compose/恢复登记哈希在平台 `deploy/mac-platform/current-release.json`
 的 `stacks.podsync` 登记，不能从旧模板或全局 wrapper 源码推断已安装版本。
 原 v2 门禁、完整 ACK、双时钟十秒 TTL、两秒发布及 SSH/观察预算保持。
 该轮修复取证缺口；历史超时与 NAS TLS 失败的底层原因仍未定位，详见
 [诊断部署与自然验收](docs/incidents/2026-10-31-bounded-diagnostics.md)。
+
+10 月 31 日晚维护卸载后重连，已确认“卷缺席被归成三次未知观察后永久 blocked”及旧 NFS
+根句柄失效的恢复缺口。最终共享控制器源码为 `80e5ed8`，Podsync 专用制品目录为
+`runtime/control/media-recovery-podsync-reconnect-20261031-final/`，连同 `lease_diagnostics.py`
+逐一登记；观察 helper 保留原 `f591dea` 字节，全局 CLI 和 v2 gate 不变。
+只有已完成的 native ENOENT 加路径缺席确认才走缺盘等待；真正观察未知仍有限观察后阻塞。
+TERM 意图按原 ID/StartedAt 持久化，未知结果仅只读核对、不能重复信号；确认正常退出后才
+正常卸载 NFS、关闭旧传输并在原预算内完整准入。未确认清理、写入、排空或握手后副作用仍阻塞。
+该轮保留原任务、Cookie、历史和预算；隔离缺盘与 Podsync 专用暂停演练的覆盖边界、
+实际恢复和最终制品验收见 [维护重连记录](docs/incidents/2026-10-31-planned-usb-reconnect.md)。
