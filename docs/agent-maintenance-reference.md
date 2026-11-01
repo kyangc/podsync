@@ -501,6 +501,8 @@ docker run -it --rm localhost/podsync:latest
 媒体仍在 4T，不能恢复 USB VirtioFS 直挂；完整运行约定见 [DEPLOYMENT.md](../DEPLOYMENT.md)。
 维护卸载/同盘重挂的自动恢复、持久 TERM 对账及未知写入边界见
 [10 月 31 日维护重连记录](incidents/2026-10-31-planned-usb-reconnect.md)。
+11 月 1 日未知租约发布的审查交接、guest 阶段有界持久留证修复及真实交付核验见
+[租约审查恢复记录](incidents/2026-11-01-unknown-lease-publication.md)。
 巡检保持总体结论、生产实例、同步、异常、Worker / Access 五项，结合更新新鲜度、
 D1 事件序号及计数、RSS/媒体大小和 Range 判断，不能只凭 `running` 或 HTTP 200。
 

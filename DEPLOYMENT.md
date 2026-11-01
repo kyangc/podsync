@@ -110,3 +110,11 @@ TERM 意图按原 ID/StartedAt 持久化，未知结果仅只读核对、不能�
 正常卸载 NFS、关闭旧传输并在原预算内完整准入。未确认清理、写入、排空或握手后副作用仍阻塞。
 该轮保留原任务、Cookie、历史和预算；隔离缺盘与 Podsync 专用暂停演练的覆盖边界、
 实际恢复和最终制品验收见 [维护重连记录](docs/incidents/2026-10-31-planned-usb-reconnect.md)。
+
+11 月 1 日审查 10 月 31 日 23:13 的新租约发布 TimeoutExpired 后，正常排空、归档原 ID
+日志、卸载旧 NFS 并完整重新准入。当前 Podsync 专用控制器源码为平台 `7ce14e3`，制品目录
+`runtime/control/media-recovery-podsync-evidence-7ce14e3-20261101/`；观察 helper 仍为原
+`f591dea` 字节，应用、全局 wrapper、v2 gate 不变。修复了有界诊断过滤器遗漏 guest 阶段、
+资源与宿主 poll gap 的留证缺口；未知写入仍阻塞，原 ACK/TTL/期限与预算不变。
+原样本缺失阶段无法补造，底层停顿原因仍未知；证据与验收见
+[租约审查恢复记录](docs/incidents/2026-11-01-unknown-lease-publication.md)。
