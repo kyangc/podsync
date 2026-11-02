@@ -118,3 +118,9 @@ TERM 意图按原 ID/StartedAt 持久化，未知结果仅只读核对、不能�
 资源与宿主 poll gap 的留证缺口；未知写入仍阻塞，原 ACK/TTL/期限与预算不变。
 原样本缺失阶段无法补造，底层停顿原因仍未知；证据与验收见
 [租约审查恢复记录](docs/incidents/2026-11-01-unknown-lease-publication.md)。
+
+11 月 2 日审查宿主/guest 重启后原 writer 的 Exit255：原 ID 日志及停机库已保全，
+隔离副本的 Badger 原生恢复不截断，outbox/事件与 D1 核对后，替换 writer 并保留 media
+原 ID，由同一 `7ce14e3` 恢复器完整重新准入；应用仍为 `9efb508`。
+原历史、未知结果、预算及门禁期限保持。宿主重启原因仍未知，恢复过程与验收边界见
+[异常 writer 审查恢复](docs/incidents/2026-11-02-writer-exit-after-platform-reboot.md)。
