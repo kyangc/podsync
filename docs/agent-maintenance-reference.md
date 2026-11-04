@@ -504,6 +504,8 @@ docker run -it --rm localhost/podsync:latest
 [10 月 31 日维护重连记录](incidents/2026-10-31-planned-usb-reconnect.md)。
 11 月 1 日未知租约发布的审查交接、guest 阶段有界持久留证修复及真实交付核验见
 [租约审查恢复记录](incidents/2026-11-01-unknown-lease-publication.md)。
+11 月 4 日的独立未知发布、同窗内置盘 APFS 延迟、十六阶段/相邻上下文留证、正常重新准入
+与 event/tombstone 逐项对账见 [guest 租约 I/O 停顿记录](incidents/2026-11-04-guest-lease-io-stall.md)。
 巡检保持总体结论、生产实例、同步、异常、Worker / Access 五项，结合更新新鲜度、
 D1 事件序号及计数、RSS/媒体大小和 Range 判断，不能只凭 `running` 或 HTTP 200。
 

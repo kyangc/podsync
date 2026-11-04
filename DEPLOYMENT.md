@@ -124,3 +124,11 @@ TERM 意图按原 ID/StartedAt 持久化，未知结果仅只读核对、不能�
 原 ID，由同一 `7ce14e3` 恢复器完整重新准入；应用仍为 `9efb508`。
 原历史、未知结果、预算及门禁期限保持。宿主重启原因仍未知，恢复过程与验收边界见
 [异常 writer 审查恢复](docs/incidents/2026-11-02-writer-exit-after-platform-reboot.md)。
+
+11 月 4 日的新未知发布已定位到 guest 控制文件写入/rename/readback 路径，同窗内置盘 APFS
+有秒级事务等待，但具体阻塞 syscall 和触发者尚未确定。正常排空、旧 ID 日志归档和只读
+cursor/outbox 审查后，已由原恢复器重新准入。当前 Podsync 专用控制器为平台 `79bbbe2`，
+制品目录 `runtime/control/media-recovery-podsync-context-79bbbe2-20261104/`；观察 helper、
+全局 wrapper、原 v2 gate 与应用 `9efb508` 保持。新增十六个细分阶段和八次相邻成功上下文
+仅补足有界取证，原 ACK/TTL/期限、未知写入阻塞和预算不变。原因边界、远端警告对账及
+实际验收见 [guest 租约 I/O 停顿记录](docs/incidents/2026-11-04-guest-lease-io-stall.md)。
