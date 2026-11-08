@@ -132,3 +132,10 @@ cursor/outbox 审查后，已由原恢复器重新准入。当前 Podsync 专用
 全局 wrapper、原 v2 gate 与应用 `9efb508` 保持。新增十六个细分阶段和八次相邻成功上下文
 仅补足有界取证，原 ACK/TTL/期限、未知写入阻塞和预算不变。原因边界、远端警告对账及
 实际验收见 [guest 租约 I/O 停顿记录](docs/incidents/2026-11-04-guest-lease-io-stall.md)。
+
+11 月 8 日审查了宿主依赖变更后的保护性停机。Podsync 恢复器专用解释器入口已登记为
+现有 Python 3.15，原控制器 79bbbe2、helper、应用、gate 和预算保留；同版本 OpenSSL
+已通过包管理器重新登记。**目前消费者仍停止，等待人工处理新解释器的 macOS
+可移除卷授权弹窗，尚未完成重新准入与业务验收。** 不要把已准备的配置当作已恢复，
+亦不要在运行中的解释器依赖被移除后只改路径强行启动。
+当前边界与接续见 [宿主依赖恢复记录](docs/incidents/2026-11-08-host-dependency-recovery.md)。
