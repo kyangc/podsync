@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -88,7 +89,10 @@ func TestJournalCapacityRestartAgeAndPermissions(t *testing.T) {
 		p := filepath.Join(dir, file.Name())
 		info, _ := os.Stat(p)
 		require.LessOrEqual(t, info.Size(), int64(segmentBytes))
-		require.Equal(t, os.FileMode(0600), info.Mode().Perm())
+		// Windows reports writable files as 0666 rather than Unix permission bits.
+		if runtime.GOOS != "windows" {
+			require.Equal(t, os.FileMode(0600), info.Mode().Perm())
+		}
 		b, _ := os.ReadFile(p)
 		for _, c := range b {
 			if c == '\n' {
