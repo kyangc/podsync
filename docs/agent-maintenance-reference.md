@@ -475,7 +475,8 @@ docker run -it --rm localhost/podsync:latest
 
 ### 当前生产运行与巡检入口
 
-2026-10-24 已完成 NAS → Mac mini 生产切换；10 月 26 日平台运行状态迁至内置盘。
+2026-10-24 已完成 NAS → Mac mini 生产切换；11 月 12 日平台运行状态冷迁至
+`/Volumes/4T/PersonalCloud/runtime`，原 runtime 路径保留为唯一登记兼容链接。
 当前唯一 producer 是 Colima `platform` 环境中的 `podsync` 容器；NAS 的旧容器、Docker daemon 和
 `127.0.0.1:9091` 不再是生产巡检入口。不要因旧入口不可达而启动旧实例。
 
@@ -483,8 +484,8 @@ docker run -it --rm localhost/podsync:latest
 | --- | --- |
 | Docker | `/Users/chengkangyang/.local/bin/docker-platform docker`，显式选择受守卫的 `platform` 环境 |
 | Compose | `/Users/chengkangyang/DockerPlatform/runtime/stacks/podsync/compose.yaml` |
-| 媒体 | `/Volumes/4T/PublishedMedia/podsync`；通过媒体门禁与恢复器接入，nginx 只读挂载 `.remote-media` |
-| 数据库 / 下载临时目录 | `podsync-db` / `podsync-tmp` Linux volumes，底层数据盘在内置盘 |
+| 媒体 | `/Volumes/4T/PersonalCloud/PublishedMedia/podsync`；通过媒体门禁与恢复器接入，nginx 只读挂载 `.remote-media` |
+| 数据库 / 下载临时目录 | `podsync-db` / `podsync-tmp` Linux volumes，VM 与底层数据盘物理位于 PersonalCloud runtime |
 | 内部健康 | 容器内 `http://127.0.0.1:9090/health`；Mac loopback 发布端口为 `9091` |
 
 只读探针：
@@ -498,7 +499,8 @@ docker run -it --rm localhost/podsync:latest
 启动 commit 从 `running podsync` 日志核实，报告只显示前 7 位；镜像标签不能替代
 实际二进制版本。日志须覆盖近 24 小时，跨迁移时结合旧实例归档，缺少的时段明确标注。
 默认 Docker context 和 `/var/run/docker.sock` 不指向该环境，不能据此判断生产停机。
-旧 4T VM 仅作切换时冷备，不能直接启动；回退必须先排空并同步新状态。
+管理和 Compose 继续使用登记兼容路径，避免相对挂载解析到 guest 未共享的物理路径。
+历史 VM 位于 PersonalCloud Archives，仅作冷备，不能直接启动；回退必须先排空并同步新状态。
 媒体仍在 4T，不能恢复 USB VirtioFS 直挂；完整运行约定见 [DEPLOYMENT.md](../DEPLOYMENT.md)。
 维护卸载/同盘重挂的自动恢复、持久 TERM 对账及未知写入边界见
 [10 月 31 日维护重连记录](incidents/2026-10-31-planned-usb-reconnect.md)。
@@ -506,6 +508,10 @@ docker run -it --rm localhost/podsync:latest
 [租约审查恢复记录](incidents/2026-11-01-unknown-lease-publication.md)。
 11 月 4 日的独立未知发布、同窗内置盘 APFS 延迟、十六阶段/相邻上下文留证、正常重新准入
 与 event/tombstone 逐项对账见 [guest 租约 I/O 停顿记录](incidents/2026-11-04-guest-lease-io-stall.md)。
+11 月 13 日审查磁盘压力停机后的未知发布，修复 PersonalCloud 兼容链接下的 sandbox
+物理路径授权并重新准入；当前 Podsync 冻结制品位于
+`runtime/control/media-recovery-podsync-personalcloud-20261113/`，原控制器、应用和 gate 保留。
+证据边界、自然同步与媒体交付见 [PersonalCloud 重新准入记录](incidents/2026-11-13-personalcloud-media-readmission.md)。
 巡检保持总体结论、生产实例、同步、异常、Worker / Access 五项，结合更新新鲜度、
 D1 事件序号及计数、RSS/媒体大小和 Range 判断，不能只凭 `running` 或 HTTP 200。
 
