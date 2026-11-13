@@ -35,6 +35,11 @@ Monga / Podsync 媒体位于 `/Volumes/4T/PersonalCloud/PublishedMedia`，继续
 回退前须排空并对账较新的写入，不得并行启动旧 writer。
 详见[平台冷迁验收](../clash-configs/docs/change-2026-11-12-personalcloud-cold-migration.md)。
 
+计划重启宿主前，先由原媒体恢复器完成正常排空，确认两个消费者退出 0、租约撤销和
+挂载收尾，再停止宿主。重启后的 Exit255、缺失正常退出日志或未知写入必须先保全
+原 ID 日志和停机库、核对任务/outbox 与远端结果，再按原门禁重新准入；不能只清除
+`blocked`。实际恢复及播放验收见[11 月 13 日重启记录](docs/incidents/2026-11-13-reboot-playback-recovery.md)。
+
 ## 更新镜像与媒体恢复器登记
 
 媒体恢复器绑定具体容器 ID 和配置指纹。直接 `docker compose up` 重建 producer

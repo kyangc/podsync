@@ -512,6 +512,9 @@ docker run -it --rm localhost/podsync:latest
 物理路径授权并重新准入；当前 Podsync 冻结制品位于
 `runtime/control/media-recovery-podsync-personalcloud-20261113/`，原控制器、应用和 gate 保留。
 证据边界、自然同步与媒体交付见 [PersonalCloud 重新准入记录](incidents/2026-11-13-personalcloud-media-readmission.md)。
+11 月 13 日晚宿主关机/重启后，Docker socket 缺席和异常 writer 退出使原恢复器保持
+保护性阻塞。经原 ID 日志、隔离数据库恢复和 D1 对账后，以同镜像替换 writer，保留
+原 media ID，由原恢复器完成重新准入；见 [重启播放恢复](incidents/2026-11-13-reboot-playback-recovery.md)。
 巡检保持总体结论、生产实例、同步、异常、Worker / Access 五项，结合更新新鲜度、
 D1 事件序号及计数、RSS/媒体大小和 Range 判断，不能只凭 `running` 或 HTTP 200。
 
