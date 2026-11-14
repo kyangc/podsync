@@ -89,6 +89,7 @@ Go module 路径仍保留 `github.com/mxpv/podsync`，这是为了降低与 upst
 
 - Feed 身份以 Badger key 中的配置 ID 为准；写入时保存该 ID，读取时兼容旧记录中缺失或不一致的 ID，无需文件迁移。
 - 远端事件在记录时将脱敏后的事件、序号和 run 计数持久化到 Badger；确认上报成功后才移除待发送内容。
+- 最终事件上传警告可能由下一次自然 Flush 恢复；应对账原批次、警告后的持久保留与成功移除边界，不能只用连续序号或其他批次成功判断。见 [11 月 14 日复核](incidents/2026-11-14-recovered-remote-event-upload.md)。
 - `episode_upload_finished` 按 publisher 成功调用计数；hardlink 模式在节目上报失败后重试时，同 inode 重验也会再记一次。区分发布调用、独立下载和实际媒体交付，并按原样本核对补报；见 [10 月 31 日复核](incidents/2026-10-31-recovered-download-and-control-timeouts.md)。
 - 调用诊断在 `database.dir/diagnostics`，异常与每 operation 每小时的成功基线分开、有界保存，覆盖 HTTP body/Decode/Close 及 Bilibili 阶段。读取时核对时间、并发歧义和丢弃计数，不能把阶段当唯一根因；容量、保留期及宿主恢复器入口见 [诊断记录](incidents/2026-10-31-bounded-diagnostics.md)。
 - YouTube API discovery 尚无上述分阶段 HTTP 诊断；feed 成功也不能替代远端 metadata 上报验收。已恢复超时、metadata 最终警告及事件批次读回的区分见 [11 月 3 日复核](incidents/2026-11-03-recovered-discovery-and-remote-eof.md)。
