@@ -291,6 +291,8 @@ custom_binary = "/path/to/yt-dlp"
 
 GitHub release API 限流时更新检查会失败并保留现有程序；当前下载可用不能证明更新检查已恢复。可在原 producer 使用实际程序的只读版本查询核对配额和最新 stable，不绕过下载器串行锁替换程序；见 [11 月 19 日更新限流复核](incidents/2026-11-19-recovered-updater-rate-limit-and-metadata-eof.md)。
 
+YouTube bot 登录拒绝、已进入媒体后的进程 deadline 和媒体 403 应分别关联原输出、阶段及重试；自然交付成功不代表匿名提取限制已解除。无 YouTube Cookie、当前多 client 仍拒绝及原三份媒体交付的证据边界见 [11 月 20 日下载复核](incidents/2026-11-20-youtube-bot-rejections-and-media-timeout.md)。
+
 下载、playlist metadata 和自更新继续共用一个串行执行入口。等锁期间可响应调用方 context 取消；下载在拿到锁后才创建临时目录及 cookies 副本。配置的 `timeout` 仍从命令执行时开始计时，排队时限由调用方 context 决定。
 
 Linux/macOS 为命令创建独立进程组，取消时终止该组，并在每次命令返回后清理遗留进程。子进程继承输出管道时最多额外等待 2 秒，避免父进程退出后一直等 EOF。Windows 在取消时通过 `taskkill /T /F` 清理仍存活父进程的进程树，失败则回退到终止父进程；同样限制管道等待。Windows 父进程提前退出后的孤儿进程，以及主动脱离 Unix 进程组的子进程，无法保证被该机制清理。
