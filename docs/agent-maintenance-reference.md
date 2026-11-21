@@ -93,6 +93,7 @@ Go module 路径仍保留 `github.com/mxpv/podsync`，这是为了降低与 upst
 - 事件 EOF 也可能发生在轮次结束的空 events 最终摘要；先核对原轮与摘要，不能错配到下一轮。两次最终警告的原批次确认和空摘要恢复见 [11 月 17 日复核](incidents/2026-11-17-recovered-event-eof-and-download-alerts.md)。
 - 终态下载失败可在下一自然轮恢复，历史错误仍保留；事件批次确认和墓碑失败窗内真实变更须分别对账。跨部署日志、原序号确认及双侧交付见 [11 月 18 日复核](incidents/2026-11-18-recovered-download-event-and-tombstone-alerts.md)。
 - metadata EOF 应结合串行调用、本地原 feed 事务和远端字段核对；事件持久确认不能充当 metadata ACK。原调用内部重试的推断与首次响应未知边界见 [11 月 19 日复核](incidents/2026-11-19-recovered-updater-rate-limit-and-metadata-eof.md)。
+- 配置 EOF 若发生在 request_written 后，须匹配原串行调用、原窗口持久事件与接受缓存；原调用恢复不能消除首次响应未知。格式选择与媒体耗时的独立边界见 [11 月 21 日复核](incidents/2026-11-21-youtube-format-media-deadline-and-config-eof.md)。
 - 多次事件上传最终失败和墓碑轮询失败应分别核对原批次、cursor 与失败窗内真实变更；空 applied 次数不代表删除数。四次上传失败的持久保留、五次墓碑失败与三十八条真实变更对账见 [11 月 15 日复核](incidents/2026-11-15-recovered-sync-and-download-alerts.md)。
 - `episode_upload_finished` 按 publisher 成功调用计数；hardlink 模式在节目上报失败后重试时，同 inode 重验也会再记一次。区分发布调用、独立下载和实际媒体交付，并按原样本核对补报；见 [10 月 31 日复核](incidents/2026-10-31-recovered-download-and-control-timeouts.md)。
 - 调用诊断在 `database.dir/diagnostics`，异常与每 operation 每小时的成功基线分开、有界保存，覆盖 HTTP body/Decode/Close 及 Bilibili 阶段。读取时核对时间、并发歧义和丢弃计数，不能把阶段当唯一根因；容量、保留期及宿主恢复器入口见 [诊断记录](incidents/2026-10-31-bounded-diagnostics.md)。
