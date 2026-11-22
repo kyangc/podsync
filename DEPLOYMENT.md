@@ -152,3 +152,19 @@ cursor/outbox 审查后，已由原恢复器重新准入。当前 Podsync 专用
 仍无法唯一还原，不能据本次恢复声称该触发者已根治。
 不要在运行中的解释器依赖被移除后只改路径强行启动。
 当前边界与接续见 [宿主依赖恢复记录](docs/incidents/2026-11-08-host-dependency-recovery.md)。
+
+11 月 22 日审查了 11/21 08:17 的新媒体探针未知结果：原 write/fsync/link 已由阶段
+确认，唯一匹配残留支持 rename 已提交；原读取校验与 cleanup/SSH 成功仍未证明，
+不能清作未提交。
+第一阶段平台 `8dfe942` 启用 Podsync 专属 `probe_preflight`。
+guest 在媒体 I/O 前等待 nonce 指令；只有宿主七秒总预算仍有六秒余量才开写。
+完整未开写回执与正常 SSH 退出可沿原三次观察额度重验，任何未知退出仍 blocked。
+原 guest 五秒、发布两秒、双时钟十秒 TTL、原门禁和预算保持。
+延长观察又在原版 gate 的真实 syscall 中复现：VirtioFS 租约文件正常替换期间，
+第二次打开返回 ENOENT。平台 `4eee924` 将可替换租约移至既有 Linux ext4 的本地卷
+`podsync-media-lease`，宿主仍以完整 nonce ACK 授权，消费者两处挂载均只读。
+Docker 父目录权限保持，native publisher 使用既有非交互 sudo；业务媒体继续走 NFS。
+当前冻结目录为 `runtime/control/media-recovery-podsync-native-4eee924-20261122/`。
+两个消费者正常排空并归档旧 ID 日志/停机库后，仅为租约挂载重建和重新登记，
+再由原恢复流程正常准入；应用镜像与源码仍为 `6a66af4`，历史与预算保持。
+原未知边界、测试、部署及生产验收见 [探针、租约与下载复核](docs/incidents/2026-11-22-probe-write-budget-and-download-review.md)。

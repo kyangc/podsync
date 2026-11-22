@@ -294,6 +294,8 @@ GitHub release API 限流时更新检查会失败并保留现有程序；当前�
 
 YouTube bot 登录拒绝、已进入媒体后的进程 deadline 和媒体 403 应分别关联原输出、阶段及重试；自然交付成功不代表匿名提取限制已解除。无 YouTube Cookie、当前多 client 仍拒绝及原三份媒体交付的证据边界见 [11 月 20 日下载复核](incidents/2026-11-20-youtube-bot-rejections-and-media-timeout.md)。
 
+比较 yt-dlp 选择器时须重建其缓存的 `format_selector`，只改 `params['format']` 不足以切换选择器。当前会员限定提示、原 bot 拒绝与原格式不可用要分别取证，见 [11 月 22 日复核](incidents/2026-11-22-probe-write-budget-and-download-review.md)。
+
 下载、playlist metadata 和自更新继续共用一个串行执行入口。等锁期间可响应调用方 context 取消；下载在拿到锁后才创建临时目录及 cookies 副本。配置的 `timeout` 仍从命令执行时开始计时，排队时限由调用方 context 决定。
 
 Linux/macOS 为命令创建独立进程组，取消时终止该组，并在每次命令返回后清理遗留进程。子进程继承输出管道时最多额外等待 2 秒，避免父进程退出后一直等 EOF。Windows 在取消时通过 `taskkill /T /F` 清理仍存活父进程的进程树，失败则回退到终止父进程；同样限制管道等待。Windows 父进程提前退出后的孤儿进程，以及主动脱离 Unix 进程组的子进程，无法保证被该机制清理。
@@ -519,12 +521,20 @@ docker run -it --rm localhost/podsync:latest
 11 月 4 日的独立未知发布、同窗内置盘 APFS 延迟、十六阶段/相邻上下文留证、正常重新准入
 与 event/tombstone 逐项对账见 [guest 租约 I/O 停顿记录](incidents/2026-11-04-guest-lease-io-stall.md)。
 11 月 13 日审查磁盘压力停机后的未知发布，修复 PersonalCloud 兼容链接下的 sandbox
-物理路径授权并重新准入；当前 Podsync 冻结制品位于
+物理路径授权并重新准入；当时 Podsync 冻结制品位于
 `runtime/control/media-recovery-podsync-personalcloud-20261113/`，原控制器、应用和 gate 保留。
 证据边界、自然同步与媒体交付见 [PersonalCloud 重新准入记录](incidents/2026-11-13-personalcloud-media-readmission.md)。
 11 月 13 日晚宿主关机/重启后，Docker socket 缺席和异常 writer 退出使原恢复器保持
 保护性阻塞。经原 ID 日志、隔离数据库恢复和 D1 对账后，以同镜像替换 writer，保留
 原 media ID，由原恢复器完成重新准入；见 [重启播放恢复](incidents/2026-11-13-reboot-playback-recovery.md)。
+11 月 22 日审查了新 SSH 媒体探针的部分提交，Podsync 专属控制器启用写前预算及
+nonce 确认；正常未开写回执可有限重验，未知结果仍阻塞，原期限、预算与 gate 保持。
+延长观察通过原 gate syscall 复现 VirtioFS 换约时第二次打开 ENOENT；平台
+`4eee924` 把可替换租约放入 Linux 本地卷，原宿主完整 ACK 仍为授权来源。
+当前冻结目录为 `runtime/control/media-recovery-podsync-native-4eee924-20261122/`，
+两个消费者只读挂载 native lease 与宿主 ACK；原 gate、双时钟十秒 TTL、预算保持。
+当前制品、原残留、正常重新准入及七份原下载失败交付见
+[探针、租约与下载复核](incidents/2026-11-22-probe-write-budget-and-download-review.md)。
 巡检保持总体结论、生产实例、同步、异常、Worker / Access 五项，结合更新新鲜度、
 D1 事件序号及计数、RSS/媒体大小和 Range 判断，不能只凭 `running` 或 HTTP 200。
 
