@@ -1,170 +1,47 @@
-# 运行与部署约定 · 2026-10-25
+# 运行与部署约定 · 2026-11-27
 
-## 当前状态
+## 当前生产拓扑与路径
 
-生产 stack 目录为 `/Users/chengkangyang/DockerPlatform/runtime/stacks/podsync`。
-数据库和临时状态位于 PersonalCloud VM 的 Linux volumes；媒体为 `/Volumes/4T/PersonalCloud/PublishedMedia/podsync`。
-用户现用订阅域名为 `podsync.kyangc.net`，原 `router.kyangc.com:9092` 已关闭。
+- **生产运行环境**：Mac mini Colima `platform` VM 与 Dockge，平台根目录为 `/Users/chengkangyang/DockerPlatform/runtime`（物理目录 `/Volumes/4T/PersonalCloud/runtime`，仅通过该登记软链接使用）。
+- **Podsync Stack 目录**：`/Users/chengkangyang/DockerPlatform/runtime/stacks/podsync`
+- **应用状态与临时目录**：位于 Linux volumes（`podsync-db` 内 `/app/db/` 含 BadgerDB 与 `/app/db/diagnostics/`；`podsync-tmp`）。
+- **媒体存储与发布路径**：`/Volumes/4T/PersonalCloud/PublishedMedia/podsync`（4T 外置卷 UUID `3ED22C2E-B087-46D6-8A61-494A45741576`），继续通过原 NFS 门禁暴露到 guest `/mnt/platform-media/podsync`，不新增媒体 VirtioFS 直挂。
+- **可替换租约存储**：位于 Linux VM ext4 本地卷 `podsync-media-lease`（`/var/lib/docker/volumes/podsync-media-lease/_data/lease.json`），两个消费者在 `/run/platform-media-lease` 只读挂载；宿主不可变 ACK 目录 `/Users/chengkangyang/DockerPlatform/runtime/state/media-recovery/podsync/lease` 只读绑定到 `/run/platform-media-host-ack`。
+- **公网入口与域名**：用户订阅与控制面域名为 `https://podsync.kyangc.net`，媒体源站为 `https://media.podsync.kyangc.net`；旧 NAS 容器和 `router.kyangc.com:9092` 已停止。
+- **实际发布与冻结制品清单**：以平台 `deploy/mac-platform/current-release.json` 中 `stacks.podsync` 及恢复器 `config.json` 为准（当前已启用 `media-gate` v2、`lease_stream`、`probe_stream`、`inspect_prefix` 与 `drain_history_archive`）。
 
-NAS producer 和媒体容器已停止；不要用旧 NAS 容器检查结果判断现有生产。
-修改发现、下载、cookies 或媒体发布后，需要在对应 Linux 镜像与真实挂载中验证，
-保持源 cookies、Badger、媒体路径和硬链接语义，不能只在 Mac 跑 Go 程序后宣布生产已修复。
+## 生产运维硬性约定
 
-## 生产运维约定
+1. **Docker 命令入口**：在 Mac 宿主上统一通过 `/Users/chengkangyang/.local/bin/docker-platform docker ...` 管理容器；禁止切换 Docker context、创建第二台 VM 或重装第二套生产服务。
+2. **容器验收准则**：Mac 上的 Go/Node/Python 测试不能替代 Linux 容器验收。改动应用或控制面后，必须按当前源码构建对应 Linux `arm64` 镜像或冻结制品，在真实挂载中完成验收。
+3. **凭据与队列边界**：持久状态、业务日志与凭据仅存放在 PersonalCloud 已登记目录或 Linux volumes；不得进入镜像、Git 仓库或聊天输出。不得修改或污染源 `bilibili-cookies.txt`、历史失败记录或未知写入结果，不重放来历不明的任务。
+4. **宿主环境隔离**：宿主 TUN、VM 网络模式和系统时钟不是默认修改对象；不要在运行中的解释器依赖被移除后只改路径强行启动。媒体错误响应必须 `no-store`。
+5. **双消费者门禁约束**：`podsync`（writer）与 `podsync-media-1`（reader）的 Docker 健康检查均先执行实际 v2 `/platform-media-gate`（`podsync` 随后探测内部 `/health`，`podsync-media-1` 探测 `/healthz`）。应用内部健康或公网响应不能替代门禁、有效 Linux 租约与宿主 ACK 验证。
 
-- 生产服务使用 Mac mini 的 Colima `platform` 与 Dockge；平台目录为 `/Users/chengkangyang/DockerPlatform/runtime`。
-- 在 Mac 宿主上管理 Docker 时，命令统一通过 `/Users/chengkangyang/.local/bin/docker-platform docker ...`；不要默认使用其他 Docker context、创建第二台 VM 或重装一套生产服务。
-- 生产问题先检查实际 Compose、容器状态/日志、挂载数据及业务接口。Mac 上的 `node`、Python、Homebrew 或开发测试结果不能替代 Linux 容器验收。
-- 改动运行时代码后，按当前源码和锁文件构建对应镜像，更新原 Compose 并检查实际业务结果；不要仅修复宿主依赖后宣称生产已修复。
-- 持久状态、业务日志和凭据放在 PersonalCloud 的已登记目录或 Linux volumes；凭据不进入镜像、仓库或聊天输出。保留原身份、队列与未知结果，不重放来历不明的任务。
-- 允许在 Mac 编辑、构建和运行开发测试；不要把这误当成恢复 Mac 原生生产服务。宿主 TUN、VM 网络模式和时钟不是项目故障的默认修改对象。
+## 媒体恢复器、更新镜像与重启 SOP
 
-已在容器内时，直接使用该容器的 Linux Node/Python 与挂载状态执行应用检查；不要安装 macOS 工具、恢复宿主 LaunchAgent 或尝试在业务容器中启动第二套 Docker。
+媒体恢复器绑定具体容器 ID、配置指纹与 `config_sha256`；直接执行 `docker compose up` 重建容器会使登记失效并撤销租约。升级镜像、变更挂载或计划重启宿主前必须遵循以下流程：
 
-## PersonalCloud 存储约定（2026-11-12）
+1. **核对并发维护与留存前置快照**
+   - 确认无冲突维护操作（必要时协调共享 `runtime.lock`），确认源 `compose.yaml`、`config.toml`、`bilibili-cookies.txt`、`config.json`、`activation.json` 及历史探针残留哈希/mtime，并将原配置文件与 `state.json` 保存到受限 `runtime/private/...` 目录（目录 `0700`、文件 `0600`）。
+   - 检查容器实时日志，确认无正在进行的下载/转码任务。
+2. **受控排空与近 24 小时日志归档**
+   - 仅向已登记容器发送 `TERM` 排空，等待全部消费者退出 `0` 且 `OOMKilled=false`；遇到 `Exit255`、非零退出或缺失正常退出日志时，立即停止并先保全日志与停机库，核对 outbox 与 D1 后再审查交接，不得只清除 `blocked`。
+   - 重建或移除旧容器前，按原容器 ID 归档截至正常 drain 完成的近 24 小时 `docker logs --timestamps` stdout/stderr，读回校验时间范围、退出尾部、字节大小与 SHA-256（若容器寿命或保留范围不足 24 小时，明确记录覆盖起点与缺口）。
+3. **安全卸载 NFS 与停止恢复器**
+   - 在旧传输进程退出前正常卸载 `/mnt/platform-media/podsync` 上的 NFS 挂载，确认恢复只读 `platform-media-offline` tmpfs 占位，防止失联 `hard` NFS 挂死后续启动检查；同 UUID 盘短暂失联后若旧 NFS 根句柄已被撤销，同样必须走完整卸载并替换传输的流程。
+   - 通过 `launchctl bootout` 停止 `com.local.docker-media-podsync`，确认恢复器、`transport`、`unfsd`、SSH 隧道均已退出且 `owner.lock` 可非阻塞获取。
+4. **受控重建（不启动）与重新登记**
+   - 若需更新镜像或挂载，先用临时传输与挂载执行 `docker compose create --no-start <service>`，随即正常卸载并停掉临时传输；严禁提前启动业务进程或手工制造租约。
+   - 核实新容器 ID/配置指纹、`config.json` 制品哈希与 `activation.json` 摘要，在同时持有 `runtime.lock` 与 `owner.lock` 下追加 clean drain 记录与 `maintenance_handoffs` / `reviewed_blocks` 交接记录（保留全部历史、预算与未知结果），将 `phase` 设为 `offline` 后原子写回 `state.json`。
+5. **重新准入与完整验收**
+   - 更新并 `launchctl bootstrap` 启动 `com.local.docker-media-podsync`，由原恢复器完整验证卷身份、NFS 挂载、介质 I/O、双时钟 10 秒租约与完整 nonce ACK 后拉起消费者。
+   - 验收必须覆盖：恢复器 `phase=ready`、双容器 `running (healthy)` 与 `RestartCount=0`、实际 `/platform-media-gate` 返回 `0`、Linux 租约与宿主 ACK 一致、实际二进制/应用健康、D1 事件连续无新增错误、媒体 RSS `200` 与 `Range 206` 前缀校验及硬链接一致，以及源配置/Cookies 哈希不变。
 
-VM、镜像、本地 Linux volumes、业务状态、凭据和恢复账本的物理目录为
-`/Volumes/4T/PersonalCloud/runtime`。原 `/Users/chengkangyang/DockerPlatform/runtime`
-是唯一登记的兼容链接，保留现有容器内路径；管理和 Compose 继续通过
-`docker-platform` 使用兼容路径，避免相对挂载被解析到 guest 未共享的物理目录。
+## 控制面机制与历史演进摘要
 
-Monga / Podsync 媒体位于 `/Volumes/4T/PersonalCloud/PublishedMedia`，继续使用原 NFS
-门禁，不新增媒体 VirtioFS 直挂。启动器每次检查原 4T UUID、可写状态和链接身份，
-缺盘时不创建替代 VM。恢复预算、未知结果、账号和业务周期保留。
-历史 DockerData / CrawlerData 及切换冷副本位于 `PersonalCloud/Archives`；
-回退前须排空并对账较新的写入，不得并行启动旧 writer。
-详见[平台冷迁验收](../clash-configs/docs/change-2026-11-12-personalcloud-cold-migration.md)。
+- **2026-10-25–10-31**：从 NAS 迁入 Mac mini Colima `platform` VM；引入独立 v2 `media-gate`（双时钟 10 秒 TTL、2 秒发布预算、完整 nonce ACK）、Darwin 内核卷属性观察、`lease_stream` 常驻发布器、有限观察重试（`checking` / `waiting` 与永久 `blocked` 隔离）、有界调用诊断以及安全停机排空。
+- **2026-11-01–11-13**：补全有界诊断 guest 阶段与 poll gap 留证；完成个人云存储目录冷迁（`/Volumes/4T/PersonalCloud/runtime`）、启用内置盘 4 GiB swap、完成依赖恢复与宿主重启后播放验收。
+- **2026-11-22–11-27**：上线 `probe_preflight` 与 Linux ext4 原生租约存储消除 VirtioFS 并发替换 `ENOENT`；随后优化为常驻暖 `probe_stream`（防止高频冷 SSH `[preauth]` 触发误阻塞）、停机前主动卸载 NFS、`drain_history_archive` 与外置大历史归档瘦身 `state.json`。
 
-计划重启宿主前，先由原媒体恢复器完成正常排空，确认两个消费者退出 0、租约撤销和
-挂载收尾，再停止宿主。重启后的 Exit255、缺失正常退出日志或未知写入必须先保全
-原 ID 日志和停机库、核对任务/outbox 与远端结果，再按原门禁重新准入；不能只清除
-`blocked`。实际恢复及播放验收见[11 月 13 日重启记录](docs/incidents/2026-11-13-reboot-playback-recovery.md)。
-
-## 更新镜像与媒体恢复器登记
-
-媒体恢复器绑定具体容器 ID 和配置指纹。直接 `docker compose up` 重建 producer
-会使登记失效、撤销媒体租约；只改 Compose 镜像并不能完成部署，回滚镜像也一样。
-
-- 部署前保存原 Compose、容器身份、源配置与 Cookie 哈希，以及
-  `runtime/state/media-recovery/podsync/` 下的配置、激活记录和恢复状态。
-- 在重建或移除旧 producer 前，必须按旧容器 ID 归档截至正常 drain 完成的近 24 小时
-  `docker logs --timestamps` stdout/stderr，记录查询起止时间、旧 ID/StartedAt、退出状态与
-  归档文件大小/SHA-256。目录 0700、文件 0600；命令退出成功后还须读回文件、核对时间范围
-  与正常退出尾部，确认日志可解析且没有截断。归档未验证成功就暂停重建/移除，保留旧容器。
-  若旧实例不足 24 小时或 Docker 保留范围本就不足，明确记录覆盖起点和缺口，不能声称完整。
-  Badger 副本、D1 事件和有界诊断不能替代该步骤；业务恢复优先时也必须保留日志证据边界。
-- 受控排空媒体消费者并停止该服务的恢复器；在已验证的媒体传输与挂载可用时，
-  仅创建新容器，不提前启动业务进程。停止传输前应正常卸载不再使用的 NFS 挂载，
-  恢复只读占位挂载，避免下次启动检查阻塞在失联挂载上。
-- 核实新镜像、门禁入口、挂载、只读凭据和唯一写入者，再更新容器登记及对应配置哈希。
-  保留原重试记录和预算；已阻塞状态须先核实原因、保存证据，再完成登记交接。
-- 由原恢复器重新验证介质身份、读写与硬链接并签发租约，启动消费者。
-  不手工制造租约、不绕过门禁、不清空恢复状态。验收须包含恢复器 `ready`、
-  实际二进制 commit、内部健康、远端事件、RSS 和媒体 Range，并复核源配置哈希。
-
-只读 inspect 暂时不可用时，已准入会话可进入 `checking`，撤租后最多三次有限观察；
-成功后须重新核验原消费者会话与介质 I/O，才恢复 `ready`。共享平台维护锁使租约过期时显示
-`waiting`，解锁后也要重新验证。它们与需人工审查的 `blocked` 分开记录；
-现有业务可能仍可用，但不能只看 phase 或进程存活，验收必须读到 Linux 有效租约与实际门禁通过。
-复发条件、验证及历史证据见 [10 月 27 日记录](docs/incidents/2026-10-27-media-recovery-and-migration-dns.md)。
-
-已准入会话的租约发布若获 guest 成功确认但超过两秒预算，也先撤租，最多三次有限重验；
-重新核验原会话、制品、介质和 I/O 后才可恢复。SSH 超时等写入结果未知的情况仍阻塞，
-十秒 TTL 和连接预算不变。边界与验收见 [10 月 28 日记录](docs/incidents/2026-10-28-acknowledged-lease-publication.md)。
-
-10 月 28 日后续已采用 Podsync 独立 v2 门禁与固定 ID 的暖驻只读观察器。
-10 月 29 日 Podsync 身份观察改用 Darwin 内核卷属性，每轮读取 UUID、实际挂载点、只读标志并检查介质路径；不再逐轮调用 diskutil。
-inspect 由原 wrapper 每轮重新校验守卫，并新建 Unix 连接，仅 GET 已登记 ID。
-租约必须有宿主对完整 guest 回执的 nonce 确认；十秒到期点在 guest 初始时钟读取时固定，
-不得由迟到 writer 重新计算。实际门禁位于
-`runtime/control/media-recovery-podsync-v2-20261028-boot-budget/media-gate`，10 月 29 日控制器位于
-`runtime/control/media-recovery-podsync-native-20261029/`。不能与 v1 signer 混用，
-也不能替换 Monga 的共享旧门禁。计时、边界、回退和生产验收见
-[后续根因记录](docs/incidents/2026-10-28-recovery-control-plane-root-cause.md)。
-
-两个媒体消费者的 Docker 健康检查先执行实际 v2 门禁；producer 再检查 `/health`。
-应用健康以下载处理和 XML/OPML 完整发布后的持久化成功时间为准，discovery 元数据时间不代表成功。
-公网 Worker `/health` 和 nginx `/healthz` 各自只证明对应服务的活性，不能替代门禁、业务事件和媒体交付验收。
-外置盘短暂消失后，即使同 UUID 已重挂，旧 NFS 进程也可能持有 revoked 根目录描述符；
-须按正常排空、卸载、替换传输及重新登记流程恢复，保留未知结果与预算。
-媒体错误响应必须 `no-store`，防止源站恢复后仍向部分区域提供旧 404。
-复发链、修复和验证见 [10 月 29 日记录](docs/incidents/2026-10-29-identity-usb-and-negative-cache.md)。
-
-10 月 30 日审查了 10 月 29 日 12:19 的未知媒体写探针超时。该窗口发生全局 OOM；
-随后已启用的内置盘 swap 保持有效。该轮 Podsync 控制器位于
-`runtime/control/media-recovery-podsync-probe-20261030/`，登记 `lease_stream = true`，
-复用固定 nonce 发布会话；实际 v2 门禁、双时钟十秒 TTL、两秒发布预算与 SSH 期限不变。
-探针失败的数值分段另存 `probe-failures.jsonl`，不受周期日志轮转影响。
-完整 guest 进度也不授权把 SSH 未知结果当作成功；保留原未知记录，必须审查后完整重新准入。
-原因边界、受控交接及验收见 [10 月 30 日记录](docs/incidents/2026-10-30-probe-timeout-and-memory-pressure.md)。
-
-10 月 31 日已部署有界调用诊断，应用源码为 `9efb508`，该轮控制器及细阶段观察 helper
-源码为平台 `f591dea`，当时定点制品位于
-`runtime/control/media-recovery-podsync-diagnostics-20261031/`。
-Podsync 的 `inspect_prefix` 使用该目录的 `docker_platform.py inspect-stream-diagnostics`；
-全局 `docker-platform` 管理入口与其他服务的登记哈希保持不变。
-恢复器开启 `bounded_diagnostics = true`，自然调用记录位于
-`runtime/state/media-recovery/podsync/diagnostics/`；应用记录位于 Linux volume
-`podsync-db` 内 `/app/db/diagnostics/`。旧诊断和事故历史保留。
-实际镜像、Compose/恢复登记哈希在平台 `deploy/mac-platform/current-release.json`
-的 `stacks.podsync` 登记，不能从旧模板或全局 wrapper 源码推断已安装版本。
-原 v2 门禁、完整 ACK、双时钟十秒 TTL、两秒发布及 SSH/观察预算保持。
-该轮修复取证缺口；历史超时与 NAS TLS 失败的底层原因仍未定位，详见
-[诊断部署与自然验收](docs/incidents/2026-10-31-bounded-diagnostics.md)。
-
-10 月 31 日晚维护卸载后重连，已确认“卷缺席被归成三次未知观察后永久 blocked”及旧 NFS
-根句柄失效的恢复缺口。最终共享控制器源码为 `80e5ed8`，Podsync 专用制品目录为
-`runtime/control/media-recovery-podsync-reconnect-20261031-final/`，连同 `lease_diagnostics.py`
-逐一登记；观察 helper 保留原 `f591dea` 字节，全局 CLI 和 v2 gate 不变。
-只有已完成的 native ENOENT 加路径缺席确认才走缺盘等待；真正观察未知仍有限观察后阻塞。
-TERM 意图按原 ID/StartedAt 持久化，未知结果仅只读核对、不能重复信号；确认正常退出后才
-正常卸载 NFS、关闭旧传输并在原预算内完整准入。未确认清理、写入、排空或握手后副作用仍阻塞。
-该轮保留原任务、Cookie、历史和预算；隔离缺盘与 Podsync 专用暂停演练的覆盖边界、
-实际恢复和最终制品验收见 [维护重连记录](docs/incidents/2026-10-31-planned-usb-reconnect.md)。
-
-11 月 1 日审查 10 月 31 日 23:13 的新租约发布 TimeoutExpired 后，正常排空、归档原 ID
-日志、卸载旧 NFS 并完整重新准入。当前 Podsync 专用控制器源码为平台 `7ce14e3`，制品目录
-`runtime/control/media-recovery-podsync-evidence-7ce14e3-20261101/`；观察 helper 仍为原
-`f591dea` 字节，应用、全局 wrapper、v2 gate 不变。修复了有界诊断过滤器遗漏 guest 阶段、
-资源与宿主 poll gap 的留证缺口；未知写入仍阻塞，原 ACK/TTL/期限与预算不变。
-原样本缺失阶段无法补造，底层停顿原因仍未知；证据与验收见
-[租约审查恢复记录](docs/incidents/2026-11-01-unknown-lease-publication.md)。
-
-11 月 2 日审查宿主/guest 重启后原 writer 的 Exit255：原 ID 日志及停机库已保全，
-隔离副本的 Badger 原生恢复不截断，outbox/事件与 D1 核对后，替换 writer 并保留 media
-原 ID，由同一 `7ce14e3` 恢复器完整重新准入；应用仍为 `9efb508`。
-原历史、未知结果、预算及门禁期限保持。宿主重启原因仍未知，恢复过程与验收边界见
-[异常 writer 审查恢复](docs/incidents/2026-11-02-writer-exit-after-platform-reboot.md)。
-
-11 月 4 日的新未知发布已定位到 guest 控制文件写入/rename/readback 路径，同窗内置盘 APFS
-有秒级事务等待，但具体阻塞 syscall 和触发者尚未确定。正常排空、旧 ID 日志归档和只读
-cursor/outbox 审查后，已由原恢复器重新准入。当前 Podsync 专用控制器为平台 `79bbbe2`，
-制品目录 `runtime/control/media-recovery-podsync-context-79bbbe2-20261104/`；观察 helper、
-全局 wrapper、原 v2 gate 与应用 `9efb508` 保持。新增十六个细分阶段和八次相邻成功上下文
-仅补足有界取证，原 ACK/TTL/期限、未知写入阻塞和预算不变。原因边界、远端警告对账及
-实际验收见 [guest 租约 I/O 停顿记录](docs/incidents/2026-11-04-guest-lease-io-stall.md)。
-
-11 月 8 日审查了宿主依赖变更后的保护性停机。Podsync 恢复器专用解释器入口已登记为
-现有 Python 3.15，原控制器 79bbbe2、helper、应用、gate 和预算保留；同版本 OpenSSL
-已通过包管理器重新登记。用户完成 macOS 可移除卷授权后，09:10 已由原控制器
-重新准入；09:33 完成 20 分钟稳定观察、实际门禁/完整 ACK 与新媒体双侧交付验收，
-28 个 feed 和 8 个新节目的下载、发布、上报已自然完成。首个媒体探针的具体底层原因
-仍无法唯一还原，不能据本次恢复声称该触发者已根治。
-不要在运行中的解释器依赖被移除后只改路径强行启动。
-当前边界与接续见 [宿主依赖恢复记录](docs/incidents/2026-11-08-host-dependency-recovery.md)。
-
-11 月 22 日审查了 11/21 08:17 的新媒体探针未知结果：原 write/fsync/link 已由阶段
-确认，唯一匹配残留支持 rename 已提交；原读取校验与 cleanup/SSH 成功仍未证明，
-不能清作未提交。
-第一阶段平台 `8dfe942` 启用 Podsync 专属 `probe_preflight`。
-guest 在媒体 I/O 前等待 nonce 指令；只有宿主七秒总预算仍有六秒余量才开写。
-完整未开写回执与正常 SSH 退出可沿原三次观察额度重验，任何未知退出仍 blocked。
-原 guest 五秒、发布两秒、双时钟十秒 TTL、原门禁和预算保持。
-延长观察又在原版 gate 的真实 syscall 中复现：VirtioFS 租约文件正常替换期间，
-第二次打开返回 ENOENT。平台 `4eee924` 将可替换租约移至既有 Linux ext4 的本地卷
-`podsync-media-lease`，宿主仍以完整 nonce ACK 授权，消费者两处挂载均只读。
-Docker 父目录权限保持，native publisher 使用既有非交互 sudo；业务媒体继续走 NFS。
-当前冻结目录为 `runtime/control/media-recovery-podsync-native-4eee924-20261122/`。
-两个消费者正常排空并归档旧 ID 日志/停机库后，仅为租约挂载重建和重新登记，
-再由原恢复流程正常准入；应用镜像与源码仍为 `6a66af4`，历史与预算保持。
-原未知边界、测试、部署及生产验收见 [探针、租约与下载复核](docs/incidents/2026-11-22-probe-write-budget-and-download-review.md)。
+完整分日事故复盘、证据边界与恢复记录见 [事件与复核总索引](docs/incidents/README.md)（重点参考：[v2 门禁根因](docs/incidents/2026-10-28-recovery-control-plane-root-cause.md)、[有界诊断](docs/incidents/2026-10-31-bounded-diagnostics.md)、[宿主重启恢复](docs/incidents/2026-11-13-reboot-playback-recovery.md)、[探针预算与原生租约](docs/incidents/2026-11-22-probe-write-budget-and-download-review.md)）。
