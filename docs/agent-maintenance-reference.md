@@ -143,6 +143,8 @@ youtube_dl_args = ["--arg1", "val"]    # 额外传给 youtube-dl/yt-dlp 的参�
 [feeds.my_feed.custom_format]
 youtube_dl_format = "bestvideo+bestaudio"
 extension = "mkv"
+# enclosure MIME 类型按扩展名映射：m4a、m4v、mp4、mp3、mov、pdf、epub，
+# 以及 opus、ogg（统一发布为 audio/ogg）
 ```
 
 ### 清理
