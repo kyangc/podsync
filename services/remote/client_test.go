@@ -819,3 +819,17 @@ func newEventBatchResponseClientWithToken(t *testing.T, body string, status int,
 	require.NoError(t, err)
 	return client
 }
+
+func TestNewDefaultHTTPClientConfiguresIdleConnTimeoutWithoutMutatingDefault(t *testing.T) {
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	require.True(t, ok)
+	originalIdle := defaultTransport.IdleConnTimeout
+
+	client := NewDefaultHTTPClient(17 * time.Second)
+	require.Equal(t, 17*time.Second, client.Timeout)
+	tr, ok := client.Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.NotSame(t, defaultTransport, tr)
+	assert.Equal(t, defaultRemoteIdleConnTimeout, tr.IdleConnTimeout)
+	assert.Equal(t, originalIdle, defaultTransport.IdleConnTimeout)
+}

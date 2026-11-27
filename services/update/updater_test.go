@@ -451,6 +451,66 @@ func TestDownloadEpisodesRecordsOneFailureAfterYouTubeRetriesAreExhausted(t *tes
 	assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
 }
 
+func TestDownloadEpisodesRetriesBilibiliNoDataBlocksOnce(t *testing.T) {
+	biliFeed := &feed.Config{
+		ID:     "bili-feed",
+		URL:    "https://space.bilibili.com/123",
+		Format: model.FormatAudio,
+	}
+	noDataErr := &summaryTestError{
+		error:   errors.New("ERROR: Did not get any data blocks"),
+		summary: ytdl.DownloadSummary{Stage: "media", NoDataBlocks: true},
+	}
+
+	t.Run("recovers on second attempt", func(t *testing.T) {
+		downloader, events := runDownloadScenario(t, context.Background(), biliFeed, []downloadResult{
+			{err: noDataErr},
+			{body: "audio"},
+		})
+		require.Equal(t, 2, downloader.calls)
+		require.Len(t, events, 1)
+		assert.Equal(t, model.RemoteEventDownloadFinished, events[0].Type)
+	})
+
+	t.Run("stops after single retry when error persists", func(t *testing.T) {
+		downloader, events := runDownloadScenario(t, context.Background(), biliFeed, []downloadResult{
+			{err: noDataErr},
+			{err: noDataErr},
+		})
+		require.Equal(t, 2, downloader.calls)
+		require.Len(t, events, 1)
+		assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
+	})
+
+	t.Run("does not retry non no_data_blocks error", func(t *testing.T) {
+		downloader, events := runDownloadScenario(t, context.Background(), biliFeed, []downloadResult{
+			{err: &summaryTestError{error: errors.New("other error"), summary: ytdl.DownloadSummary{Stage: "extract"}}},
+		})
+		require.Equal(t, 1, downloader.calls)
+		require.Len(t, events, 1)
+		assert.Equal(t, model.RemoteEventDownloadFailed, events[0].Type)
+	})
+
+	t.Run("aborts backoff on canceled context", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		downloader := &sequenceDownloader{results: []downloadResult{{err: noDataErr}, {body: "audio"}}}
+		sink := &recordingEventSink{}
+		manager, err := NewUpdater(nil, nil, "", downloader, &hookDB{}, &hookFS{},
+			WithRemoteEventSink(sink),
+			func(m *Manager) { m.bilibiliRetryDelay = time.Minute },
+		)
+		require.NoError(t, err)
+		go func() {
+			time.Sleep(20 * time.Millisecond)
+			cancel()
+		}()
+		err = manager.downloadEpisodes(ctx, biliFeed, []*model.Episode{testEpisode()})
+		require.ErrorIs(t, err, context.Canceled)
+		require.Equal(t, 1, downloader.calls)
+		require.Empty(t, sink.events)
+	})
+}
+
 func TestDownloadEpisodesRecordsOneFailureAfterYouTubeReadTimeoutRetriesAreExhausted(t *testing.T) {
 	wantErr := errors.New("ERROR: \r[download] Got error: The read operation timed out. Giving up after 1 retries\n")
 	downloader, events := runDownloadScenario(t, context.Background(), testFeedConfig(), []downloadResult{
@@ -933,6 +993,7 @@ func runDownloadScenario(t *testing.T, ctx context.Context, feedConfig *feed.Con
 		WithRemoteEventSink(sink),
 		func(manager *Manager) {
 			manager.downloadRetryDelays = []time.Duration{0, 0}
+			manager.bilibiliRetryDelay = 0
 		},
 	)
 	require.NoError(t, err)

@@ -17,8 +17,26 @@ import (
 	"github.com/mxpv/podsync/pkg/model"
 )
 
-const defaultNASClientTimeout = 30 * time.Second
-const maxNASClientErrorBody = 4 * 1024
+const (
+	defaultNASClientTimeout      = 30 * time.Second
+	defaultRemoteIdleConnTimeout = 30 * time.Second
+	maxNASClientErrorBody        = 4 * 1024
+)
+
+// NewDefaultHTTPClient returns an HTTP client using a cloned default transport
+// with a bounded idle connection timeout to avoid stale edge connections.
+func NewDefaultHTTPClient(timeout time.Duration) *http.Client {
+	var transport http.RoundTripper = http.DefaultTransport
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		cloned := base.Clone()
+		cloned.IdleConnTimeout = defaultRemoteIdleConnTimeout
+		transport = cloned
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+	}
+}
 
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
@@ -84,7 +102,7 @@ func NewNASClient(baseURL string, token string, client HTTPClient) (*NASClient, 
 		return nil, errors.New("remote base url must use http or https")
 	}
 	if client == nil {
-		client = &http.Client{Timeout: defaultNASClientTimeout}
+		client = NewDefaultHTTPClient(defaultNASClientTimeout)
 	}
 	return &NASClient{baseURL: parsed, token: token, client: client}, nil
 }

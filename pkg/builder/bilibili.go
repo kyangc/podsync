@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -13,8 +14,14 @@ import (
 	"github.com/mxpv/podsync/pkg/model"
 )
 
+const defaultBilibiliUnavailableTTL = 24 * time.Hour
+
 type BilibiliBuilder struct {
-	client *bilibiliAPIClient
+	client         *bilibiliAPIClient
+	unavailableMu  sync.Mutex
+	unavailable    map[string]time.Time
+	unavailableTTL time.Duration
+	now            func() time.Time
 }
 
 func (b *BilibiliBuilder) Build(_ context.Context, cfg *feed.Config) (*model.Feed, error) {
@@ -136,9 +143,15 @@ func (b *BilibiliBuilder) populateEpisodes(client *bilibiliAPIClient, result *mo
 			return nil
 		}
 
+		if b.isUnavailableCached(archive.Bvid) {
+			log.WithField("episode_id", archive.Bvid).Debug("skipping cached unavailable Bilibili episode")
+			continue
+		}
+
 		episode, err := client.episode(archive.Bvid)
 		if err != nil {
 			if isBilibiliAPIErrorCode(err, -404) {
+				b.markUnavailable(archive.Bvid)
 				log.WithField("episode_id", archive.Bvid).Warn("skipping unavailable Bilibili episode")
 				continue
 			}
@@ -184,8 +197,56 @@ func splitBilibiliListID(id string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
+func (b *BilibiliBuilder) currentTime() time.Time {
+	if b.now != nil {
+		return b.now()
+	}
+	return time.Now()
+}
+
+func (b *BilibiliBuilder) isUnavailableCached(bvid string) bool {
+	if b.unavailableTTL <= 0 || bvid == "" {
+		return false
+	}
+	now := b.currentTime()
+	b.unavailableMu.Lock()
+	defer b.unavailableMu.Unlock()
+	expiry, ok := b.unavailable[bvid]
+	if !ok {
+		return false
+	}
+	if !now.Before(expiry) {
+		delete(b.unavailable, bvid)
+		return false
+	}
+	return true
+}
+
+func (b *BilibiliBuilder) markUnavailable(bvid string) {
+	if b.unavailableTTL <= 0 || bvid == "" {
+		return
+	}
+	now := b.currentTime()
+	b.unavailableMu.Lock()
+	defer b.unavailableMu.Unlock()
+	if b.unavailable == nil {
+		b.unavailable = make(map[string]time.Time)
+	}
+	if len(b.unavailable) >= 256 {
+		for k, exp := range b.unavailable {
+			if !now.Before(exp) {
+				delete(b.unavailable, k)
+			}
+		}
+	}
+	b.unavailable[bvid] = now.Add(b.unavailableTTL)
+}
+
 func NewBilibiliBuilder() (*BilibiliBuilder, error) {
 	return &BilibiliBuilder{
-		client: newBilibiliAPIClient(nil, ""),
+		client:         newBilibiliAPIClient(nil, ""),
+		unavailable:    make(map[string]time.Time),
+		unavailableTTL: defaultBilibiliUnavailableTTL,
+		now:            time.Now,
 	}, nil
 }

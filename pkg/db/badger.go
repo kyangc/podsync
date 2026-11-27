@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -28,6 +29,9 @@ const (
 
 	remoteTombstoneCursorPath  = "remote/tombstone/cursor"
 	remoteTombstoneEpisodePath = "remote/tombstone/episode/%s"
+
+	valueLogFileSize             = 64 << 20
+	maxValueLogGCRewritesPerPass = 16
 )
 
 // BadgerConfig represents BadgerDB configuration parameters
@@ -64,6 +68,9 @@ func NewBadger(config *Config) (*Badger, error) {
 			opts.ValueLogLoadingMode = options.FileIO
 		}
 	}
+	if opts.ValueLogLoadingMode == options.FileIO || !hasOversizedValueLog(dir, valueLogFileSize) {
+		opts.ValueLogFileSize = valueLogFileSize
+	}
 
 	db, err := badger.Open(opts)
 	if err != nil {
@@ -81,7 +88,47 @@ func NewBadger(config *Config) (*Badger, error) {
 		return nil, errors.Wrap(err, "failed to read database version")
 	}
 
-	return &Badger{db: db}, nil
+	return storage, nil
+}
+
+func hasOversizedValueLog(dir string, limit int64) bool {
+	matches, err := filepath.Glob(filepath.Join(dir, "*.vlog"))
+	if err != nil {
+		return true
+	}
+	for _, path := range matches {
+		info, statErr := os.Stat(path)
+		if statErr != nil || info.Size() > limit {
+			return true
+		}
+	}
+	return false
+}
+
+// RunValueLogGC reclaims eligible Badger value log files up to a bounded number of rewrites per pass.
+func (b *Badger) RunValueLogGC(ctx context.Context, discardRatio float64) int {
+	if b == nil || b.db == nil {
+		return 0
+	}
+	rewrites := 0
+	for i := 0; i < maxValueLogGCRewritesPerPass; i++ {
+		if ctx.Err() != nil {
+			break
+		}
+		err := b.db.RunValueLogGC(discardRatio)
+		if err == nil {
+			rewrites++
+			continue
+		}
+		if !errors.Is(err, badger.ErrNoRewrite) {
+			log.WithError(err).Warn("badger value log GC failed")
+		}
+		break
+	}
+	if rewrites > 0 {
+		log.WithField("rewrites", rewrites).Info("badger value log GC reclaimed files")
+	}
+	return rewrites
 }
 
 func (b *Badger) Close() error {

@@ -91,6 +91,59 @@ func TestBilibiliBuildUserFeedSkipsUnavailableEpisode(t *testing.T) {
 	require.Equal(t, "BVGOOD2", got.Episodes[1].ID)
 }
 
+func TestBilibiliUnavailableNegativeCacheSkipsRepeatRequestsUntilTTLExpires(t *testing.T) {
+	var unavailableHits int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/x/web-interface/card", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"card": map[string]any{"name": "Bili Creator"}}})
+	})
+	mux.HandleFunc("/x/series/recArchivesByKeywords", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, map[string]any{
+			"code": 0,
+			"data": map[string]any{"archives": []map[string]any{
+				{"bvid": "BVUNAVAILABLE", "pubdate": 1700000100},
+				{"bvid": "BVGOOD1", "pubdate": 1700000200},
+			}},
+		})
+	})
+	mux.HandleFunc("/x/web-interface/view", func(w http.ResponseWriter, r *http.Request) {
+		bvid := r.URL.Query().Get("bvid")
+		if bvid == "BVUNAVAILABLE" {
+			unavailableHits++
+			writeJSON(t, w, map[string]any{"code": -404, "message": "啥都木有"})
+			return
+		}
+		writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"bvid": bvid, "title": bvid, "duration": 600}})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	now := time.Unix(1700000000, 0)
+	builder := &BilibiliBuilder{
+		client:         newBilibiliAPIClient(server.Client(), server.URL),
+		unavailable:    make(map[string]time.Time),
+		unavailableTTL: time.Hour,
+		now:            func() time.Time { return now },
+	}
+	cfg := &feed.Config{URL: "https://space.bilibili.com/123", PageSize: 2}
+
+	_, err := builder.Build(context.Background(), cfg)
+	require.NoError(t, err)
+	require.Equal(t, 1, unavailableHits)
+
+	// Within TTL: no second HTTP request for BVUNAVAILABLE.
+	now = now.Add(30 * time.Minute)
+	_, err = builder.Build(context.Background(), cfg)
+	require.NoError(t, err)
+	require.Equal(t, 1, unavailableHits)
+
+	// After TTL expires: re-queries once.
+	now = now.Add(31 * time.Minute)
+	_, err = builder.Build(context.Background(), cfg)
+	require.NoError(t, err)
+	require.Equal(t, 2, unavailableHits)
+}
+
 func TestBilibiliBuildUserFeedKeepsOtherAPIErrorsFatal(t *testing.T) {
 	server := newBilibiliEpisodeErrorTestServer(t, -412, "请求被拦截")
 	builder := &BilibiliBuilder{

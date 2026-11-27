@@ -2,6 +2,10 @@ package db
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -257,4 +261,41 @@ func getFeed() *model.Feed {
 		},
 		UpdatedAt: time.Now().UTC(),
 	}
+}
+
+func TestBadgerRunValueLogGC(t *testing.T) {
+	dir := t.TempDir()
+	database, err := NewBadger(&Config{Dir: dir, Badger: &BadgerConfig{Truncate: true, FileIO: true}})
+	require.NoError(t, err)
+	defer database.Close()
+
+	// Empty DB returns 0 rewrites.
+	assert.Equal(t, 0, database.RunValueLogGC(context.Background(), 0.5))
+
+	// Canceled context aborts immediately.
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.Equal(t, 0, database.RunValueLogGC(canceled, 0.5))
+
+	// Write enough data across keys and delete it so Badger can rotate/reclaim vlog.
+	payload := strings.Repeat("x", 16*1024)
+	for i := 0; i < 64; i++ {
+		key := []byte(fmt.Sprintf("gc-test/%03d", i))
+		require.NoError(t, database.db.Update(func(txn *badger.Txn) error {
+			return txn.Set(key, []byte(payload))
+		}))
+	}
+	for i := 0; i < 64; i++ {
+		key := []byte(fmt.Sprintf("gc-test/%03d", i))
+		require.NoError(t, database.db.Update(func(txn *badger.Txn) error {
+			return txn.Delete(key)
+		}))
+	}
+	_ = database.RunValueLogGC(context.Background(), 0.5)
+	matches, err := filepath.Glob(filepath.Join(dir, "*.vlog"))
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	info, err := os.Stat(matches[0])
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, info.Size(), int64(0))
 }

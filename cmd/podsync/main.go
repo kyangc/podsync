@@ -19,6 +19,7 @@ import (
 	"github.com/mxpv/podsync/pkg/model"
 	"github.com/mxpv/podsync/pkg/ytdl"
 	"github.com/mxpv/podsync/services/migrate"
+	remotepublish "github.com/mxpv/podsync/services/remote"
 	"github.com/mxpv/podsync/services/update"
 	"github.com/mxpv/podsync/services/web"
 	"github.com/robfig/cron/v3"
@@ -133,7 +134,7 @@ func main() {
 		}
 	}
 
-	remoteClient := &http.Client{Timeout: defaultRemoteFetchTimeout + 5*time.Second}
+	remoteClient := remotepublish.NewDefaultHTTPClient(defaultRemoteFetchTimeout + 5*time.Second)
 
 	database, err := db.NewBadger(&cfg.Database)
 	if err != nil {
@@ -319,6 +320,9 @@ func main() {
 			return runRemoteEventLoop(ctx, remoteEvents, defaultRemoteEventInterval)
 		})
 	}
+	group.Go(func() error {
+		return runBadgerGCLoop(ctx, database, defaultBadgerGCInitialDelay, defaultBadgerGCInterval)
+	})
 
 	// Run updates listener
 	group.Go(func() error {
@@ -468,4 +472,36 @@ func newKeyProviders(tokens map[model.Provider]StringSlice) (map[model.Provider]
 	}
 
 	return keys, nil
+}
+
+const (
+	defaultBadgerGCInitialDelay = 2 * time.Minute
+	defaultBadgerGCInterval     = 6 * time.Hour
+)
+
+func runBadgerGCLoop(ctx context.Context, database *db.Badger, initialDelay, interval time.Duration) error {
+	if initialDelay > 0 {
+		timer := time.NewTimer(initialDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	database.RunValueLogGC(ctx, 0.5)
+	if interval <= 0 {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			database.RunValueLogGC(ctx, 0.5)
+		}
+	}
 }

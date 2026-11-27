@@ -68,6 +68,7 @@ type Manager struct {
 	hostname                   string
 	downloader                 Downloader
 	downloadRetryDelays        []time.Duration
+	bilibiliRetryDelay         time.Duration
 	db                         db.Storage
 	fs                         fs.Storage
 	feeds                      map[string]*feed.Config
@@ -91,6 +92,7 @@ func NewUpdater(
 		hostname:            hostname,
 		downloader:          downloader,
 		downloadRetryDelays: []time.Duration{5 * time.Second, 30 * time.Second},
+		bilibiliRetryDelay:  15 * time.Second,
 		db:                  db,
 		fs:                  fs,
 		feeds:               feeds,
@@ -611,6 +613,22 @@ func (u *Manager) downloadEpisodeWithRetry(ctx context.Context, feedConfig *feed
 		file, err := u.downloader.Download(ctx, feedConfig, episode)
 		summary := downloadSummary(file, err)
 		retryReason := retryableYouTubeDownloadError(feedConfig, err)
+		if err != nil && retryReason == "" && attempt == 1 {
+			if biliReason := retryableBilibiliDownloadError(feedConfig, summary, err); biliReason != "" {
+				fields := summary.LogFields()
+				fields["feed_id"] = feedConfig.ID
+				fields["episode_id"] = episode.ID
+				fields["next_attempt"] = attempt + 1
+				fields["max_attempts"] = 2
+				fields["retry_reason"] = biliReason
+				log.WithFields(fields).Warn("retrying transient Bilibili download")
+				if waitErr := waitForDownloadRetry(ctx, u.bilibiliRetryDelay); waitErr != nil {
+					logDownloadSummary(feedConfig, episode, summary, waitErr, attempt, time.Since(started))
+					return nil, waitErr
+				}
+				continue
+			}
+		}
 		if err == nil || attempt > len(u.downloadRetryDelays) || retryReason == "" {
 			logDownloadSummary(feedConfig, episode, summary, err, attempt, time.Since(started))
 			return file, err
@@ -698,6 +716,20 @@ func retryableYouTubeDownloadError(feedConfig *feed.Config, err error) string {
 		return provider.DownloadRetryReason()
 	}
 	return ytdl.YouTubeDownloadRetryReason(err.Error())
+}
+
+func retryableBilibiliDownloadError(feedConfig *feed.Config, summary ytdl.DownloadSummary, err error) string {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return ""
+	}
+	info, parseErr := builder.ParseURL(feedConfig.URL)
+	if parseErr != nil || info.Provider != model.ProviderBilibili {
+		return ""
+	}
+	if summary.NoDataBlocks {
+		return "no_data_blocks"
+	}
+	return ""
 }
 
 func (u *Manager) buildXML(ctx context.Context, feedConfig *feed.Config) error {
