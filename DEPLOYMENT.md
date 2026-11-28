@@ -1,4 +1,4 @@
-# 运行与部署约定 · 2026-11-27
+# 运行与部署约定 · 2026-11-28
 
 ## 当前生产拓扑与路径
 
@@ -25,12 +25,12 @@
 1. **核对并发维护与留存前置快照**
    - 确认无冲突维护操作，确认源 `compose.yaml`、`config.toml`、`bilibili-cookies.txt`、`config.json`、`activation.json` 及历史探针残留哈希/mtime，并将原配置文件与 `state.json` 保存到受限 `runtime/private/...` 目录（目录 `0700`、文件 `0600`）。对照上次快照确认全部 `.platform-probe-*` 残留及近次失败记录，将任何新增未知结果写入恢复审查记录。
    - 检查容器实时日志，确认无正在进行的下载/转码任务。
-   - 在首次发出 `TERM` 或操作挂载之前，获取并持有平台共享 `runtime.lock` 的排他锁。持有至旧恢复器退出、挂载和传输状态验证以及新登记交接完成。锁的获取会等待正在执行的恢复器周期结束，阻止旧恢复器在维护中重新挂载或尝试启动旧容器。
+   - 完成上述快照与日志检查后，在首次发出 `TERM` 或操作挂载之前，由同一个长驻维护进程或子 shell 以阻塞排他方式（`LOCK_EX`）获取并持续持有平台共享 `runtime.lock`，跨越第 1–4 步直至第 5 步登记交接写回 `state.json` 后再释放（不要靠单条短命令加锁）。拿锁后应立即进入第 2 步排空，避免空持锁超过 10 秒导致旧恢复器租约过期并在 `state.json` 写入 `runtime_lock_waits`；锁的获取会等待正在执行的恢复器周期结束，阻止旧恢复器在维护中重新挂载或尝试启动旧容器。
 2. **受控排空与近 24 小时日志归档**
    - 仅向已登记容器发送 `TERM` 排空，等待全部消费者退出 `0` 且 `OOMKilled=false`；遇到 `Exit255`、非零退出或缺失正常退出日志时，立即停止并先保全日志与停机库，核对 outbox 与 D1 后再审查交接，不得只清除 `blocked`。
    - 重建或移除旧容器前，按原容器 ID 归档截至正常 drain 完成的近 24 小时 `docker logs --timestamps` stdout/stderr，读回校验时间范围、退出尾部、字节大小与 SHA-256（若容器寿命或保留范围不足 24 小时，明确记录覆盖起点与缺口）。
 3. **依次卸载 NFS 和退出旧恢复器**
-   - 保持平台锁，由支持停机卸载的恢复器在 `launchctl bootout` 关闭 `com.local.docker-media-podsync` 时结束探针并正常卸载 `/mnt/platform-media/podsync` 的 NFS，再停止旧传输。使用 guest 挂载表确认只读 `platform-media-offline` tmpfs 占位。若卸载或传输退出未获确认，停止切换并保存证据。
+   - 保持平台锁，由支持停机卸载的恢复器在 `launchctl bootout` 关闭 `com.local.docker-media-podsync` 时结束探针并正常卸载 `/mnt/platform-media/podsync` 的 NFS，再停止旧传输。停机卸载失败时，新版恢复器会将 `state.json` 标记为 `blocked`（不再静默标记为 `stopped`），但旧冻结版本仍可能静默退出，因此无论是否报错都必须使用 guest 挂载表确认只读 `platform-media-offline` tmpfs 占位。若卸载或传输退出未获确认，停止切换并保存证据。
    - 确认旧恢复器、`transport`、`unfsd`、SSH 隧道均已退出且 `owner.lock` 可非阻塞获取。旧控制器的回退版本如需外部卸载，须在同一把锁内、旧传输仍存活时完成正常卸载，再停止恢复器和传输。
 4. **受控重建（不启动）与重新登记**
    - 若需更新镜像或挂载，先用临时传输与挂载执行 `docker compose create --no-start <service>`，随即正常卸载并停掉临时传输；严禁提前启动业务进程或手工制造租约。
