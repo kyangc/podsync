@@ -6,6 +6,7 @@
 
 | 日期 | 记录 | 摘要 |
 | --- | --- | --- |
+| 2026-11-28 | [发布排空、暖探针与下载告警复核](2026-11-28-media-probe-cutover-review.md) | 确认冷探针残留，复现重挂后暖探针使用旧会话标识，复核下载交付及隧道重连 |
 | 2026-11-22 | [探针写前预算、原生租约存储与下载复核](2026-11-22-probe-write-budget-and-download-review.md) | 启用 `probe_preflight` 与 Linux ext4 原生租约指针，复核七个下载告警样本与双侧交付 |
 | 2026-11-21 | [YouTube 格式、媒体期限与配置 EOF 分项复核](2026-11-21-youtube-format-media-deadline-and-config-eof.md) | 复核 YouTube 格式不可用、媒体下载超时与配置请求 EOF |
 | 2026-11-20 | [YouTube bot 拒绝、媒体期限与 403 分项复核](2026-11-20-youtube-bot-rejections-and-media-timeout.md) | 区分 YouTube bot 校验、403 与媒体期限错误边界 |

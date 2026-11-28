@@ -23,19 +23,20 @@
 媒体恢复器绑定具体容器 ID、配置指纹与 `config_sha256`；直接执行 `docker compose up` 重建容器会使登记失效并撤销租约。升级镜像、变更挂载或计划重启宿主前必须遵循以下流程：
 
 1. **核对并发维护与留存前置快照**
-   - 确认无冲突维护操作（必要时协调共享 `runtime.lock`），确认源 `compose.yaml`、`config.toml`、`bilibili-cookies.txt`、`config.json`、`activation.json` 及历史探针残留哈希/mtime，并将原配置文件与 `state.json` 保存到受限 `runtime/private/...` 目录（目录 `0700`、文件 `0600`）。
+   - 确认无冲突维护操作，确认源 `compose.yaml`、`config.toml`、`bilibili-cookies.txt`、`config.json`、`activation.json` 及历史探针残留哈希/mtime，并将原配置文件与 `state.json` 保存到受限 `runtime/private/...` 目录（目录 `0700`、文件 `0600`）。对照上次快照确认全部 `.platform-probe-*` 残留及近次失败记录，将任何新增未知结果写入恢复审查记录。
    - 检查容器实时日志，确认无正在进行的下载/转码任务。
+   - 在首次发出 `TERM` 或操作挂载之前，获取并持有平台共享 `runtime.lock` 的排他锁。持有至旧恢复器退出、挂载和传输状态验证以及新登记交接完成。锁的获取会等待正在执行的恢复器周期结束，阻止旧恢复器在维护中重新挂载或尝试启动旧容器。
 2. **受控排空与近 24 小时日志归档**
    - 仅向已登记容器发送 `TERM` 排空，等待全部消费者退出 `0` 且 `OOMKilled=false`；遇到 `Exit255`、非零退出或缺失正常退出日志时，立即停止并先保全日志与停机库，核对 outbox 与 D1 后再审查交接，不得只清除 `blocked`。
    - 重建或移除旧容器前，按原容器 ID 归档截至正常 drain 完成的近 24 小时 `docker logs --timestamps` stdout/stderr，读回校验时间范围、退出尾部、字节大小与 SHA-256（若容器寿命或保留范围不足 24 小时，明确记录覆盖起点与缺口）。
-3. **安全卸载 NFS 与停止恢复器**
-   - 在旧传输进程退出前正常卸载 `/mnt/platform-media/podsync` 上的 NFS 挂载，确认恢复只读 `platform-media-offline` tmpfs 占位，防止失联 `hard` NFS 挂死后续启动检查；同 UUID 盘短暂失联后若旧 NFS 根句柄已被撤销，同样必须走完整卸载并替换传输的流程。
-   - 通过 `launchctl bootout` 停止 `com.local.docker-media-podsync`，确认恢复器、`transport`、`unfsd`、SSH 隧道均已退出且 `owner.lock` 可非阻塞获取。
+3. **依次卸载 NFS 和退出旧恢复器**
+   - 保持平台锁，由支持停机卸载的恢复器在 `launchctl bootout` 关闭 `com.local.docker-media-podsync` 时结束探针并正常卸载 `/mnt/platform-media/podsync` 的 NFS，再停止旧传输。使用 guest 挂载表确认只读 `platform-media-offline` tmpfs 占位。若卸载或传输退出未获确认，停止切换并保存证据。
+   - 确认旧恢复器、`transport`、`unfsd`、SSH 隧道均已退出且 `owner.lock` 可非阻塞获取。旧控制器的回退版本如需外部卸载，须在同一把锁内、旧传输仍存活时完成正常卸载，再停止恢复器和传输。
 4. **受控重建（不启动）与重新登记**
    - 若需更新镜像或挂载，先用临时传输与挂载执行 `docker compose create --no-start <service>`，随即正常卸载并停掉临时传输；严禁提前启动业务进程或手工制造租约。
    - 核实新容器 ID/配置指纹、`config.json` 制品哈希与 `activation.json` 摘要，在同时持有 `runtime.lock` 与 `owner.lock` 下追加 clean drain 记录与 `maintenance_handoffs` / `reviewed_blocks` 交接记录（保留全部历史、预算与未知结果），将 `phase` 设为 `offline` 后原子写回 `state.json`。
 5. **重新准入与完整验收**
-   - 更新并 `launchctl bootstrap` 启动 `com.local.docker-media-podsync`，由原恢复器完整验证卷身份、NFS 挂载、介质 I/O、双时钟 10 秒租约与完整 nonce ACK 后拉起消费者。
+   - 登记交接完成后释放 `owner.lock` 和 `runtime.lock`，再用 `launchctl bootstrap` 启动 `com.local.docker-media-podsync`。由新登记的恢复器完整验证卷身份、NFS 挂载、介质 I/O、双时钟 10 秒租约与完整 nonce ACK 后拉起消费者。
    - 验收必须覆盖：恢复器 `phase=ready`、双容器 `running (healthy)` 与 `RestartCount=0`、实际 `/platform-media-gate` 返回 `0`、Linux 租约与宿主 ACK 一致、实际二进制/应用健康、D1 事件连续无新增错误、媒体 RSS `200` 与 `Range 206` 前缀校验及硬链接一致，以及源配置/Cookies 哈希不变。
 
 ## 控制面机制与历史演进摘要
